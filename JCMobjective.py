@@ -498,7 +498,7 @@ class SimulationAdministration:
             if self.PC.institution == 'HZB':
                 for w in self.wSpec.keys():
                     spec = self.wSpec[w]
-                    if spec['use']:# and (w != 'localhost'):!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                    if spec['use']:
                         self.resources.append(
                             Workstation(name = w,
                                         JCMROOT = self.PC.hmiBaseFolder,

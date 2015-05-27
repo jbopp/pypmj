@@ -5,7 +5,8 @@ from shutil import rmtree
 # =============================================================================
 class Simulation:
     """
-    Class which describes a distinct simulation and provides a method to run it.
+    Class which describes a distinct simulation and provides a method to run it
+    and to remove the working directory afterwards.
     """
     def __init__(self, number, keys, props2record, workingDir, 
                  projectFileName = 'project.jcmp', verb = True):
