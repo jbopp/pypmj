@@ -24,8 +24,8 @@ def freq2wvl(freq):
 class BrillouinPath:
     """
     Class describing a path along the interconnections of given k-points of the
-    Brillouin zone. The kpoints are given as a list of numpy-arrays of shape
-    (3,). The <interpolate> method can be used to return a list of <N>
+    Brillouin zone. The kpoints are given as a numpy-array of shape
+    (numKvals, 3). The <interpolate> method can be used to return a list of <N>
     k-points along the Brillouin path, including the initial k-points and with
     approximately equal Euclidian distance.
     """
@@ -33,9 +33,8 @@ class BrillouinPath:
     def __init__(self, kpoints):
         
         # Check if kpoints is a list of numpy-array with at most 3 values
-        assert isinstance(kpoints, list)
-        for k in kpoints: assert isinstance(k, np.ndarray)
-        for k in kpoints: assert len(k) <= 3
+        assert isinstance(kpoints, np.ndarray)
+        assert kpoints.shape[1] == 3
         
         self.kpoints = kpoints
         self.projections = {} # stores the calculated projections for each N
@@ -61,10 +60,9 @@ class BrillouinPath:
     
     def interpolate(self, N):  
         """
-        Returns a list of N k-points (i.e. numpy-arrays of shape (3,)) along
-        the path described by self.kpoints. The initial k-points are guaranteed
-        to be included and the N points have approximately the same Euclidian
-        distance.
+        Returns a numpy-array of shape (N, 3) along the path described by 
+        self.kpoints. The initial k-points are guaranteed to be included and 
+        the N points have approximately the same Euclidian distance.
         """
         cornerPoints = self.kpoints.shape[0]
         lengths = np.empty((cornerPoints-1))
@@ -130,23 +128,34 @@ class Bandstructure:
     
     """
     
-    def __init__(self, polarizations, nEigenvalues, brillouinPath, numKvals, 
-                 verb = True):
+    def __init__(self, polarizations=None, nEigenvalues=None, 
+                 brillouinPath=None, numKvals=None, verb = True):
         
         self.polarizations = polarizations
         self.nEigenvalues = nEigenvalues
         self.brillouinPath = brillouinPath
         self.numKvals = numKvals
         self.verb = verb
+        self.isDummy = False
+        self.bands = {}
         
         # Interpolate the Brillouin path
-        self.interpolateBrillouin()
-
+        if isinstance(self.brillouinPath, BrillouinPath):
+            self.interpolateBrillouin()
+        
+        # For dummy instances used to load break here
+        if polarizations == None: 
+            self.isDummy = True
+            return
+        
         # Initialize numpy-arrays to store the results for the frequencies
         # for each polarization
-        self.bands = {}
         for p in polarizations:
-            self.bands[p] = np.empty((numKvals, nEigenvalues))
+            self.bands[p] = np.zeros((numKvals, nEigenvalues))
+        
+        self.numKvalsReady = {}
+        for p in polarizations:
+            self.numKvalsReady[p] = 0
     
     
     def message(self, string):
@@ -158,56 +167,117 @@ class Bandstructure:
     
     
     def addResults(self, polarization, kIndex, frequencies):
-        self.bands[polarization][kIndex, :] = frequencies
+        
+        if self.numKvalsReady[polarization] == self.numKvals:
+            warn('Bandstructure.addResults: Already have all results' +\
+                 ' for polarization ' + polarization + '. Skipping.')
+            return
+        
+        if isinstance(kIndex, int) and \
+                        frequencies.shape == (self.nEigenvalues,):
+            self.bands[polarization][kIndex, :] = frequencies
+            self.numKvalsReady[polarization] += 1
+        
+        elif isinstance(kIndex, (list, np.ndarray)):
+            for i, ki in enumerate(kIndex):
+                self.bands[polarization][ki, :] = frequencies[i, :]
+            self.numKvalsReady[polarization] += len(kIndex)
+        
+        elif kIndex == 'all':
+            self.bands[polarization] = frequencies
+            self.numKvalsReady[polarization] = self.numKvals
+        else:
+            raise Exception('Did not understand the results to add.')
+        
+        if self.numKvalsReady[polarization] == self.numKvals:
+            self.message('Bandstructure.addResults: Got all results for ' +\
+                         'polarization ' + polarization)
+    
+    
+    def checkIfResultsComplete(self):
+        complete = True
+        for p in self.polarizations:
+            if not self.numKvalsReady[p] == self.numKvals:
+                complete = False
+        return complete
     
     
     def save(self, folder, filename = 'bandstructure'):
+        
+        if not self.checkIfResultsComplete():
+            warn('Bandstructure.save: Results are incomplete! Skipping...')
+            return
+            
+        if filename.endswith('.npz'):
+            filename = filename.replace('.npz', '')
         npzfilename = os.path.join(folder, filename)
         resultDict = {}
         resultDict.update(self.bands)
         resultDict['polarizations'] = self.polarizations
-        resultDict['brillouinPath'] = self.brillouinPath
+        resultDict['brillouinPath'] = self.brillouinPath.kpoints
         resultDict['numKvals'] = self.numKvals
         np.savez( npzfilename, savename = resultDict )
-        self.message( 'Save to ' + npzfilename )
+        self.message( 'Saved bandstructure to ' + npzfilename + '.npz' )
     
     
-    def load(self, folder, filename):
+    def load(self, folder, filename = 'bandstructure'):
         
-        npzfilename = os.path.join(folder, filename+'.npz')
-        self.message('Loading file ' + npzfilename)
+        if not filename.endswith('.npz'):
+            filename += '.npz'
+        npzfilename = os.path.join(folder, filename)
+        self.message('Loading file ' + npzfilename + ' ...')
         
         npzfile = np.load( npzfilename )
         loadedDict = npzfile['savename'][()]
         
-        recalc = False
-        if not loadedDict['numKvals'] == self.numKvals:
-            warn('Bandstructure.load: Found mismatch in numKvals')
+        if self.isDummy:
             self.numKvals = loadedDict['numKvals']
-            recalc = True
-        
-        if not loadedDict['polarizations'] == self.polarizations:
-            warn('Bandstructure.load: Found mismatch in polarizations')
             self.polarizations = loadedDict['polarizations']
+            self.brillouinPath = BrillouinPath(loadedDict['brillouinPath'])
+            self.interpolateBrillouin()
         
-        if not loadedDict['brillouinPath'] == self.brillouinPath:
-            warn('Bandstructure.load: Found mismatch in brillouinPath')
-            self.brillouinPath = loadedDict['brillouinPath']
-            recalc = True
+        else:
+            recalc = False
+            if not loadedDict['numKvals'] == self.numKvals:
+                warn('Bandstructure.load: Found mismatch in numKvals')
+                self.numKvals = loadedDict['numKvals']
+                recalc = True
+            
+            if not loadedDict['polarizations'] == self.polarizations:
+                warn('Bandstructure.load: Found mismatch in polarizations')
+                self.polarizations = loadedDict['polarizations']
+            
+            if not loadedDict['brillouinPath'] == self.brillouinPath.kpoints:
+                warn('Bandstructure.load: Found mismatch in brillouinPath')
+                self.brillouinPath = BrillouinPath(loadedDict['brillouinPath'])
+                recalc = True
+            
+            if recalc: self.interpolateBrillouin()
         
-        if recalc: self.interpolateBrillouin()
         for p in self.polarizations:
             self.bands[p] = loadedDict[p]
+        self.nEigenvalues = self.bands[self.polarizations[0]].shape[1]
         
+        self.isDummy = False
+        self.numKvalsReady = {}
+        for p in self.polarizations:
+            self.numKvalsReady[p] = self.numKvals
+            
         self.message('Loading was successful.')
     
     
     def plot(self, pathNames, polarizations = 'all', filename = False, 
              useAgg = False, colors = 'default', figsize_cm = (10.,10.),
-             plotDir = ''):
+             plotDir = '.'):
         
         if polarizations == 'all':
             polarizations = self.polarizations
+        elif isinstance(polarizations, str):
+            polarizations = [polarizations]
+        
+        for p in polarizations:
+            assert self.numKvalsReady[p] == self.numKvals, \
+                   'Bandstructure:plot: Results for plotting are incomplete.'
         
         if useAgg:
             import matplotlib
@@ -415,9 +485,30 @@ class BandstructureSolver:
             daemon.resource_info(self.resourceIDs)
 
 
-
+# =============================================================================
 def unitTest():
-    pass
+    
+    testFilename = 'unitTestBandstructure'
+    pathNames = [r'$\Gamma$', r'$M$', r'$K$', r'$\Gamma$']
+    
+    sampleBS = Bandstructure()
+    sampleBS.load('.', testFilename)
+    sampleBS.plot(pathNames)
+    
+    polarizations = sampleBS.polarizations
+    numKvals = sampleBS.numKvals
+    nEigenvalues = sampleBS.nEigenvalues
+    brillouinPath = sampleBS.brillouinPath
+    bands = sampleBS.bands
+    
+    newBS = Bandstructure( polarizations, nEigenvalues, brillouinPath, 
+                           numKvals )
+    for p in polarizations:
+        newBS.addResults(polarization=p, kIndex = 'all', 
+                         frequencies=bands[p])
+    newBS.plot(pathNames)
+    
+    
 
 if __name__ == '__main__':
     unitTest()
