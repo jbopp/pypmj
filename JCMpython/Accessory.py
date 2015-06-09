@@ -1,4 +1,5 @@
 from config import *
+from cStringIO import StringIO
 from datetime import timedelta
 import io
 import matplotlib.colors as mcolors
@@ -115,6 +116,35 @@ def query_yes_no(question, default="yes"):
         else:
             sys.stdout.write("Please respond with 'yes' or 'no' "
                              "(or 'y' or 'n').\n")
+
+
+class Indentation(object):
+    """
+    Context manager to print the output of a function call with indentation.
+    
+    Usage:
+        with Indentation(1):
+            do_something(my_object)
+    
+    based on: 
+    http://stackoverflow.com/questions/16571150/
+                        how-to-capture-stdout-output-from-a-python-function-call
+    """
+    
+    def __init__(self, indent = 0, spacesPerIndent = 4, prefix = ''):
+        self.spacer = spacesPerIndent * indent * ' ' + prefix
+    
+    def __enter__(self):
+        self._stdout = sys.stdout
+        sys.stdout = self._stringio = StringIO()
+        return self
+    
+    def __exit__(self, *args):
+        lines = self._stringio.getvalue().splitlines()
+        sys.stdout = self._stdout
+        for l in lines:
+            print self.spacer + l
+
 
 def getCmap():
         cmapData = np.loadtxt(thisPC.colorMap, delimiter = ', ')

@@ -1,7 +1,10 @@
 from config import *
-from Accessory import cm2inch
+from Accessory import cm2inch, Indentation
 from DaemonResources import Queue, Workstation
 from datetime import date
+import itertools
+from MaterialData import RefractiveIndexInfo
+from pprint import pformat
 from warnings import warn
 
 # =============================================================================
@@ -142,6 +145,8 @@ class Bandstructure:
         # Interpolate the Brillouin path
         if isinstance(self.brillouinPath, BrillouinPath):
             self.interpolateBrillouin()
+            self.xVals, self.cornerPointXvals = self.brillouinPath.\
+                                                projectedKpoints(self.numKvals)
         
         # For dummy instances used to load break here
         if polarizations == None: 
@@ -306,20 +311,16 @@ class Bandstructure:
         
         plt.figure(1, (cm2inch(figsize_cm[0]), cm2inch(figsize_cm[1])))
         
-        # Calculate the x-values of the Brillouin path and the initial k-points
-        xVals, cornerPointXvals = self.brillouinPath.projectedKpoints( 
-                                                                self.numKvals )
-        
         for i in range(self.nEigenvalues):
             if i == 0:
                 for p in polarizations:
-                    plt.plot( xVals, self.bands[p][:,i], color=colors[p], 
+                    plt.plot( self.xVals, self.bands[p][:,i], color=colors[p], 
                               label=p )
             else:
                 for p in polarizations:
-                    plt.plot( xVals, self.bands[p][:,i], color=colors[p] )
-        plt.xlim((cornerPointXvals[0], cornerPointXvals[-1]))
-        plt.xticks( cornerPointXvals, pathNames )
+                    plt.plot( self.xVals, self.bands[p][:,i], color=colors[p] )
+        plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
+        plt.xticks( self.cornerPointXvals, pathNames )
         plt.xlabel('$k$-vector')
         plt.ylabel('frequency $\omega a/2\pi c$')
         plt.legend(frameon=False, loc='best')
@@ -345,13 +346,21 @@ class BandstructureSolver:
     
     """
     
-    def __init__(self, keys, bandstructure2solve, firstKlowerBoundGuess = 0., 
-                 degeneracyTolerance = 1.e-4, extrapolationMode = 'spline',
-                 absorption = False, customFolder = '', wSpec = {}, qSpec = {}, 
-                 runOnLocalMachine = False, verb = True ):
+    MaxNtrials = 100 # maximum number of iterations per k and band
+    
+    
+    def __init__(self, keys, bandstructure2solve, materialPore, materialSlab,
+                 projectFileName = 'project.jcmp', firstKlowerBoundGuess = 0.,
+                 degeneracyTolerance = 1.e-4, targetAccuracy = 'fromKeys',
+                 extrapolationMode = 'spline', absorption = False, customFolder
+                 = '', wSpec = {}, qSpec = {}, runOnLocalMachine = False,
+                 resourceInfo = False, verb = True, countIterations = False ):
         
         self.keys = keys
         self.bs = bandstructure2solve
+        self.materialPore = materialPore
+        self.materialSlab = materialSlab
+        self.projectFileName = projectFileName
         self.firstKlowerBoundGuess = firstKlowerBoundGuess
         self.degeneracyTolerance = degeneracyTolerance
         self.extrapolationMode = extrapolationMode
@@ -360,13 +369,31 @@ class BandstructureSolver:
         self.wSpec = wSpec
         self.qSpec = qSpec
         self.runOnLocalMachine = runOnLocalMachine
+        self.resourceInfo = resourceInfo
         self.verb = verb
+        self.countIterations = countIterations
         self.dateToday = date.today().strftime("%y%m%d")
+        
+        if targetAccuracy == 'fromKeys':
+            self.targetAccuracy = self.keys['precision_eigenvalues']
+        else:
+            assert isinstance(targetAccuracy, float), \
+                            'Wrong type for targetAccuracy: Expecting float.'
+            self.targetAccuracy = targetAccuracy
+        
         self.setFolders()
     
     
-    def message(self, string):
-        if self.verb: print string
+    def message(self, string, indent = 0, spacesPerIndent = 4, prefix = ''):
+        if self.verb:
+            
+            if not isinstance(string, str):
+                string = pformat(string)
+            lines = string.split('\n')
+            
+            with Indentation(indent, spacesPerIndent, prefix):
+                for l in lines:
+                    print l
     
     
     def setFolders(self):
@@ -379,31 +406,66 @@ class BandstructureSolver:
         self.message('Using folder '+self.workingBaseDir+' for data storage.')
     
     
-    def updatePermittivities(self, keys, wvl):
+    def run(self):
+        #TODO: loop over polarizations
+        
+        self.currentPol = self.bs.polarizations[0]
+        self.currentK = 0
+        
+        self.registerResources()
+        self.prescanAtPoint(self.keys)
+        self.runIterations()
+        
+    
+    def addResults(self, frequencies, polarization = 'current'):
+        if polarization == 'current':
+            polarization = self.currentPol
+        self.bs.addResults(polarization, self.currentK, frequencies)
+        self.currentK += 1
+        
+    
+    def getCurrentBloch(self):
+        return self.bs.kpoints[ self.currentK ]
+    
+    
+    def getWorkingDir(self, polarization = 'current', kindex = False):
+        if polarization == 'current':
+            polarization = self.currentPol
+        if not kindex:
+            kindex = self.currentK
+        if kindex == 0:
+            dirName = 'prescan_'+polarization
+        else:
+            dirName = 'k{0:05d}_{1}'.format(kindex, polarization)
+        return os.path.join( self.workingBaseDir, dirName )
+    
+    
+    def updatePermittivities(self, keys, wvl, indent = 0):
         keys['permittivity_pore'] = self.materialPore.\
                                 getPermittivity(wvl, absorption=self.absorption)
         keys['permittivity_background'] = self.materialSlab.\
                                 getPermittivity(wvl, absorption=self.absorption)
         
-        self.message('\t ... updated permittivities: {0} : {1}, {2} : {3}'.\
+        self.message('updated permittivities: {0} : {1}, {2} : {3}'.\
                                     format(self.materialPore.name,
                                            keys['permittivity_pore'],
                                            self.materialSlab.name,
-                                           keys['permittivity_background']) )
+                                           keys['permittivity_background']),
+                     indent )
         return keys
     
     
-    def prescanAtPoint(self, keys, polarization, mode = 'Fundamental',
+    def prescanAtPoint(self, keys, mode = 'Fundamental',
                        fixedPermittivities = False):
     
-        print 'Performing prescan for', polarization
+        self.message('\nPerforming prescan for ' + self.currentPol + ' ...')
         
         # update the keys
-        keys['polarization'] = polarization
+        keys['polarization'] = self.currentPol
         keys['guess'] = self.firstKlowerBoundGuess
         keys['selection_criterion'] = mode
         keys['n_eigenvalues'] = self.bs.nEigenvalues
-        keys['bloch_vector'] = self.bs.kpoints[0]
+        keys['bloch_vector'] = self.getCurrentBloch()
         
         if self.firstKlowerBoundGuess == 0.:
             wvl = np.inf
@@ -416,22 +478,230 @@ class BandstructureSolver:
             keys['permittivity_background'] = \
                                 fixedPermittivities['permittivity_background']
         else:
-            keys = self.updatePermittivities(keys, wvl)
+            keys = self.updatePermittivities(keys, wvl, indent = 1)
 
         
         # solve
-        _ = jcm.solve('project.jcmp', keys = keys, 
-                            logfile=open(os.devnull, 'w'))
-        results, _ = daemon.wait()
-        frequencies = results[0]['eigenvalues']['eigenmode'].real
+        with Indentation(1, prefix = '[JCMdaemon] '):
+            _ = jcm.solve(self.projectFileName, 
+                          keys = keys, 
+                          working_dir = self.getWorkingDir())
+            results, _ = daemon.wait()
+        frequencies = results[0][0]['eigenvalues']['eigenmode'].real
         
         # save the calculated frequencies to the Bandstructure result
-        self.bs.addResults(polarization, 0, frequencies)
-        self.message('\t ... done.')
+        self.addResults(frequencies)
+        self.message('... done.\n')
     
     
-    def runComputation(self):
-        pass 
+    def runIterations(self):
+        
+        self.iterationMonitor = np.recarray( 
+                                    (self.bs.numKvals, self.bs.nEigenvalues ),
+                                    dtype=[('jobID', int), 
+                                           ('nIters', int), 
+                                           ('degeneracy', int),
+                                           ('freq', float), 
+                                           ('deviation', float)])
+        
+        # Set initial values
+        self.iterationMonitor['nIters'].fill(0)
+        self.iterationMonitor['deviation'].fill( 10.*self.targetAccuracy )
+        
+        # Get a guess for the next frequencies using extrapolation
+        freqs2iterate = self.getNextFrequencyGuess()
+        print freqs2iterate
+        
+        # Analyze the degeneracy of this guess
+        frequencyList, degeneracyList, degeneracies = \
+                                        self.analyzeDegeneracy( freqs2iterate )
+        print frequencyList, degeneracyList, degeneracies
+        
+        
+    
+    
+#     def singleIteration(self, keys, polarization, initialGuess,
+#                        targetAccuracy = 'fromKeys', MaxNtrials = 100, 
+#                        nEigenvalues = 1):
+#         
+#         # update the keys
+#         degeneracy = len(initialGuess)
+#         initialGuess = np.sort(initialGuess)
+#         keys['n_eigenvalues'] = nEigenvalues * degeneracy
+#         keys['polarization'] = polarization
+#         keys['guess'] = initialGuess[0]
+#         keys['selection_criterion'] = 'NearGuess'
+#         keys['bloch_vector'] = self.getCurrentBloch()
+#         
+#         deviation = 10*targetAccuracy
+#         returnFrequencyImmediately = False
+#         count = 0
+#         
+#         while deviation > self.targetAccuracy and count < MaxNtrials:
+#             
+#             if verb:
+#                 self.message('Starting iteration ' + str(count+1) + ' ...')
+#                 self.message('Guess: {0:4.4e}'.format(keys['guess']), 1)########################################################
+#             
+#             wvl = freq2wvl( keys['guess'] )
+#             keys = self.updatePermittivities(keys, wvl, indent = 1)
+#             self.message('permittivity_background:' + \
+#                              str(keys['permittivity_background']), 1)
+#             
+#             if self.materialSlab.convertWvl(wvl) > \
+#                             np.real(self.materialSlab.totalWvlRange[1]):
+#                 self.message('Upper limit of material data wavelengths' +\
+#                              ' range reached!', 1)
+#                 count = MaxNtrials
+#                 returnFrequencyImmediately = True
+#             
+#             # solve
+# #             if useDaemon:
+#             with Indentation(1, prefix = '[JCMdaemon] '):
+#                 jobID = jcm.solve(self.projectFileName, 
+#                                   keys = keys, 
+#                                   working_dir = self.getWorkingDir())
+# #                 results, _ = daemon.wait()
+# #                 results = results[0]
+# #             else:
+# #                 results = jcm.solve('project.jcmp', keys = keys, logfile=open(os.devnull, 'w'))
+#             
+#             frequencies = np.sort(results[0]['eigenvalues']['eigenmode'].real)
+#             if verb: print '\tfrequencies:', frequencies
+#             
+#             if np.all(frequencies == 0.):
+#                 if verb: print '\tSolver crashed.'
+#                 
+#             else:
+#                 if returnFrequencyImmediately: 
+#                     if verb:
+#                         print '... iteration finished.'
+#                         print '*** Stopping iteration. ***\n\n'
+#                     if self.countIterations:
+#                         return frequencies, count
+#                     else:
+#                         return frequencies
+#                 
+#                 # calculate the deviations
+#                 deviations = np.abs( frequencies/initialGuess-1. )
+#                 deviation = np.max(deviations)
+#                 
+#                 if verb:
+#                     print '\tSuccessful iteration:'
+#                     print '\tguess \t       closest result \tdeviation'
+#                 for i,f in enumerate(frequencies):
+#                     if verb: print '\t{0:4.4e}\t{1:4.4e}\t{2:4.4e}'.format(initialGuess[i], f, deviations[i])
+#     
+#                 keys['guess'] = frequencies[0]
+#                 initialGuess = frequencies
+#             
+#             count += 1
+#             if verb: print '... iteration finished.'
+#         
+#         if verb: print '*** Reached target accuracy. ***\n\n'
+#         if countIterations:
+#             return frequencies, count
+#         else:
+#             return frequencies
+    
+    
+    def list2FlatArray(self, l):
+        return np.array(list(itertools.chain(*l)))
+    
+    
+    def analyzeDegeneracy(self, frequencies):
+        
+        degeneracyList = []
+        indicesNotToCheck = []
+        for i,f in enumerate(frequencies):
+            if not i in indicesNotToCheck:
+                closeIndices = np.where( 
+                            np.isclose(f, frequencies, 
+                                       rtol = self.degeneracyTolerance) )[0].\
+                                       tolist()
+                closeIndices.remove(i)
+                
+                if closeIndices:
+                    indicesNotToCheck += closeIndices
+                    degeneracyList.append([i]+closeIndices)
+                else:
+                    degeneracyList.append([i])
+        degeneracies = [len(i) for i in degeneracyList]
+        
+        frequencyList = []
+        for d in degeneracyList:
+            frequencyList.append( [frequencies[i] for i in d] )
+        return frequencyList, degeneracyList, degeneracies
+    
+    
+    def extrapolateSpline(self, x, y, nextx, NpreviousValues = 3, k = 2):
+        from scipy.interpolate import UnivariateSpline
+        
+        assert x.shape == y.shape
+        if len(x) == 1:
+            return y[0]
+        elif len(x) < NpreviousValues:
+            NpreviousValues = len(x)
+        
+        if NpreviousValues <= k:
+            k = NpreviousValues-1
+        
+        xFit = x[-NpreviousValues:]
+        yFit = y[-NpreviousValues:]
+        
+        extrapolator = UnivariateSpline( xFit, yFit, k=k )
+        return  extrapolator( nextx )
+    
+    
+    def extrapolateLinear(self, x, y, nextx, NpreviousValues = 3):
+        
+        assert x.shape == y.shape
+        if len(x) == 1:
+            return y[0]
+        elif len(x) < NpreviousValues:
+            NpreviousValues = len(x)
+        
+        xFit = x[-NpreviousValues:]
+        cMatrix = np.vstack([xFit, np.ones(len(xFit))]).T
+        yFit = y[-NpreviousValues:]
+        
+        m, c = np.linalg.lstsq(cMatrix, yFit)[0] # obtaining the parameters
+        return  m*nextx + c
+    
+    
+    def extrapolateFrequencies(self, previousKs, freqs, nextK):
+        nFreqs = freqs.shape[1]
+        extrapolatedFreqs = np.empty((nFreqs,))
+        
+        for i in range(nFreqs):
+            if self.extrapolationMode == 'linear':
+                extrapolatedFreqs[i] = self.extrapolateLinear( previousKs, 
+                                                               freqs[:,i], 
+                                                               nextK )
+            elif self.extrapolationMode == 'spline':
+                extrapolatedFreqs[i] = self.extrapolateSpline( previousKs, 
+                                                               freqs[:,i], 
+                                                               nextK )
+            else:
+                raise Exception('extrapolationMode {0} not supported.'.format(
+                                                       self.extrapolationMode))
+        return extrapolatedFreqs
+    
+    
+    def getFreqs(self):
+        return self.bs.bands[self.currentPol]
+    
+    
+    def getNextFrequencyGuess(self):
+        if self.extrapolationMode in ['linear', 'spline']:
+            i = self.currentK
+            self.getFreqs()[:i, :]
+            freqs = self.extrapolateFrequencies( self.bs.xVals[:i], 
+                                                 self.getFreqs()[:i, :], 
+                                                 self.bs.xVals[i] )
+        else:
+            freqs = self.getFreqs()[i-1, :]
+        return freqs
     
     
     def registerResources(self):
@@ -486,14 +756,18 @@ class BandstructureSolver:
 
 
 # =============================================================================
-def unitTest():
+def unitTest(silent=True):
+    
+    # ====================================================
+    # Test of Bandstructure class
+    # ====================================================
     
     testFilename = 'unitTestBandstructure'
     pathNames = [r'$\Gamma$', r'$M$', r'$K$', r'$\Gamma$']
     
     sampleBS = Bandstructure()
     sampleBS.load('.', testFilename)
-    sampleBS.plot(pathNames)
+    if not silent: sampleBS.plot(pathNames)
     
     polarizations = sampleBS.polarizations
     numKvals = sampleBS.numKvals
@@ -506,9 +780,53 @@ def unitTest():
     for p in polarizations:
         newBS.addResults(polarization=p, kIndex = 'all', 
                          frequencies=bands[p])
-    newBS.plot(pathNames)
+    if not silent: newBS.plot(pathNames)
+    print 'End of Bandstructure-class tests.\n'
+
+
+    # ====================================================
+    # Test of BandstructureSolver.prescanAtPoint
+    # ====================================================
     
+    uol = 1e-9 #m
+    a = 1000. #nm
+    rBya = 0.48
+    r = rBya*a
     
+    solveBS = Bandstructure( polarizations, nEigenvalues, brillouinPath, 
+                           numKvals )
+    
+    keys = {'p': a,
+            'radius_pore':  r,
+            'circle_refinement': 3,
+            'uol': uol,
+            'fem_degree': 2,
+            'precision_eigenvalues': 1e-3,
+            'selection_criterion': 'NearGuess',
+            'n_eigenvalues': nEigenvalues,
+            'max_n_refinement_steps': 4,
+            'info_level': -1,
+            'storage_format': 'Binary',
+            'slc_pore': 200.,
+            'slc_background': 50.}
+    
+    materialPore = RefractiveIndexInfo(material = 'air')
+    materialSlab = RefractiveIndexInfo(material = 'silicon')
+    
+    workStationSpecification = {'dinux6': {'use':False, 'M':8, 'N':1}, 
+                                'dinux7': {'use':True, 'M':5, 'N':4},
+                                'localhost': {'use':False, 'M':1, 'N':1}}
+    queueSpecification = {'HTC030': {'use':False, 'M':1, 'N':8}, 
+                          'HTC040': {'use':True, 'M':5, 'N':4}}
+    
+    BSsolver = BandstructureSolver( keys = keys, 
+                                    bandstructure2solve = solveBS,
+                                    materialPore = materialPore,
+                                    materialSlab = materialSlab,
+                                    projectFileName = '../project.jcmp',
+                                    wSpec = workStationSpecification, 
+                                    qSpec = queueSpecification )
+    BSsolver.run()
 
 if __name__ == '__main__':
     unitTest()

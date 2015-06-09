@@ -11,7 +11,7 @@ class PC:
     """
     
     # Class constants
-    HZBPCs = ['nanosippe01']
+    HZBPCs = ['nanosippe01', 'nanosippe03']
     ZusePCs = ['num-pc37', 'htc024']
 
     
@@ -60,13 +60,13 @@ class PC:
         
         # HZB PC properties
         if self.institution == 'HZB':
-            self.workspace = os.path.join('/net', 'home', 'kme', 'workspace')
+            self.workspace = os.path.join(os.sep, 'hmi', 'kme', 'workspace')
             jcmFolderName = 'JCMsuite_{0}'.format('_'.join(hzbJCMversion))
-            self.jcmBaseFolder = os.path.join('/net', 'home', 'kme', 'programs', 
+            self.jcmBaseFolder = os.path.join(os.sep, 'hmi', 'kme', 'programs',
                                          jcmFolderName)
             self.jcmRoot = os.path.join(self.jcmBaseFolder, 'ThirdPartySupport',
                                         'Python')
-            self.hmiBaseFolder = os.path.join(os.sep, 'hmi', 'kme', 'programs', 
+            self.hmiBaseFolder = os.path.join(os.sep, 'hmi', 'kme', 'programs',
                                          jcmFolderName)
             self.storageDir = os.path.join(os.sep, 'net', 'group', 'kme-data',
                                            'simulations', thisBaseDir)
