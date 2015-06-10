@@ -50,7 +50,7 @@ class Queue:
                  JCMROOT = '/nfs/datanumerik/instal/bzfhamme/JCMsuite.2.17.9/', 
                  Login = 'bzfbarth', Multiplicity = 1, 
                  WorkingDir = '/nfs/datanumerik/bzfbarth/simulations/', 
-                 NThreads = 1, JCMKERNEL = jcmKernel):
+                 CPUsPerTask = 1, JCMKERNEL = jcmKernel):
         self.name = name
         self.PartitionName = PartitionName
         self.JobName = JobName
@@ -59,12 +59,12 @@ class Queue:
         self.Login = Login
         self.Multiplicity = Multiplicity
         self.WorkingDir = WorkingDir
-        self.NThreads = NThreads
+        self.CPUsPerTask = CPUsPerTask
         self.JCMKERNEL = JCMKERNEL
         
     def add(self):
         print 'Registering queue', self.name, 'using a multiplicity of',\
-              self.Multiplicity, 'and', self.NThreads, 'threads'
+              self.Multiplicity, 'and', self.CPUsPerTask, 'CPUs per task'
         self.resourceIDs = daemon.add_queue(
                                 Hostname = self.Hostname,
                                 JCMROOT = self.JCMROOT,
@@ -73,8 +73,8 @@ class Queue:
                                 JobName = self.JobName,
                                 PartitionName = self.PartitionName,
                                 WorkingDir = self.WorkingDir,
-                                NThreads = self.NThreads,
+                                CPUsPerTask = self.CPUsPerTask,
                                 JCMKERNEL = self.JCMKERNEL)
         if self.resourceIDs == 'Error':
-            raise Exception('Error occurred while adding workstations.')
+            raise Exception('Error occurred while adding queues.')
 

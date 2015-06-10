@@ -515,7 +515,7 @@ class SimulationAdministration:
                                   PartitionName = q,
                                   JobName = self.jobName,
                                   Multiplicity = spec['M'],
-                                  NThreads = spec['N']))
+                                  CPUsPerTask = spec['N']))
          
         # Add all resources
         self.resourceIDs = []

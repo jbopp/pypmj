@@ -4,8 +4,9 @@ from DaemonResources import Queue, Workstation
 from datetime import date
 import itertools
 from MaterialData import RefractiveIndexInfo
-from pprint import pformat
+from pprint import pformat, pprint
 from warnings import warn
+from jsonschema.exceptions import relevance
 
 # =============================================================================
 # Functions
@@ -354,7 +355,8 @@ class BandstructureSolver:
                  degeneracyTolerance = 1.e-4, targetAccuracy = 'fromKeys',
                  extrapolationMode = 'spline', absorption = False, customFolder
                  = '', wSpec = {}, qSpec = {}, runOnLocalMachine = False,
-                 resourceInfo = False, verb = True, countIterations = False ):
+                 resourceInfo = False, verb = True, infoLevel = 1,
+                 countIterations = False ):
         
         self.keys = keys
         self.bs = bandstructure2solve
@@ -371,6 +373,7 @@ class BandstructureSolver:
         self.runOnLocalMachine = runOnLocalMachine
         self.resourceInfo = resourceInfo
         self.verb = verb
+        self.infoLevel = infoLevel
         self.countIterations = countIterations
         self.dateToday = date.today().strftime("%y%m%d")
         
@@ -384,8 +387,9 @@ class BandstructureSolver:
         self.setFolders()
     
     
-    def message(self, string, indent = 0, spacesPerIndent = 4, prefix = ''):
-        if self.verb:
+    def message(self, string, indent = 0, spacesPerIndent = 4, prefix = '',
+                relevance = 1):
+        if self.verb and relevance <= self.infoLevel:
             
             if not isinstance(string, str):
                 string = pformat(string)
@@ -428,7 +432,8 @@ class BandstructureSolver:
         return self.bs.kpoints[ self.currentK ]
     
     
-    def getWorkingDir(self, polarization = 'current', kindex = False):
+    def getWorkingDir(self, band = 0, polarization = 'current', 
+                      kindex = False):
         if polarization == 'current':
             polarization = self.currentPol
         if not kindex:
@@ -436,7 +441,7 @@ class BandstructureSolver:
         if kindex == 0:
             dirName = 'prescan_'+polarization
         else:
-            dirName = 'k{0:05d}_{1}'.format(kindex, polarization)
+            dirName = 'k{0:05d}_b{1:02d}_{2}'.format(kindex, band, polarization)
         return os.path.join( self.workingBaseDir, dirName )
     
     
@@ -451,7 +456,8 @@ class BandstructureSolver:
                                            keys['permittivity_pore'],
                                            self.materialSlab.name,
                                            keys['permittivity_background']),
-                     indent )
+                     indent,
+                     relevance = 3 )
         return keys
     
     
@@ -498,80 +504,176 @@ class BandstructureSolver:
         
         self.iterationMonitor = np.recarray( 
                                     (self.bs.numKvals, self.bs.nEigenvalues ),
-                                    dtype=[('jobID', int), 
-                                           ('nIters', int), 
+                                    dtype=[('nIters', int), 
                                            ('degeneracy', int),
-                                           ('freq', float), 
                                            ('deviation', float)])
         
         # Set initial values
-        self.iterationMonitor['nIters'].fill(0)
-        self.iterationMonitor['deviation'].fill( 10.*self.targetAccuracy )
+#         self.iterationMonitor['nIters'].fill(0)
+#         self.iterationMonitor['deviation'].fill( 10.*self.targetAccuracy )
         
-        # Get a guess for the next frequencies using extrapolation
-        freqs2iterate = self.getNextFrequencyGuess()
-        print freqs2iterate
         
-        # Analyze the degeneracy of this guess
-        frequencyList, degeneracyList, degeneracies = \
-                                        self.analyzeDegeneracy( freqs2iterate )
-        print frequencyList, degeneracyList, degeneracies
+        while not self.bs.checkIfResultsComplete():
+            
+            # Get a guess for the next frequencies using extrapolation
+            freqs2iterate = self.getNextFrequencyGuess()
+            
+            # Analyze the degeneracy of this guess
+            frequencyList, degeneracyList, _ = \
+                                self.analyzeDegeneracy( freqs2iterate )
+            self.iterationMonitor[self.currentK]['degeneracy'] = \
+                                self.degeneracyList2assignment(degeneracyList)
+            self.iterateKpoint(frequencyList, degeneracyList)
         
+        print self.iterationMonitor
+        self.bs.plot([r'$\Gamma$', r'$M$', r'$K$', r'$\Gamma$'])
+        
+        
+    def iterateKpoint(self, frequencyList, degeneracyList):
+        
+        
+        currentJobs = [{'freq': f,
+                        'deviation': 10.*self.targetAccuracy,
+                        'status': 'Initialization',
+                        'count': 0} for f in frequencyList]
+        
+        
+        kPointDone = False
+        Njobs = len(frequencyList)
+        while not kPointDone:
+            
+            jobID2idx = {}
+            for iResult, f in enumerate(frequencyList):
+                if not currentJobs[iResult]['status'] == 'Converged':
+                    jobID, forceStop = self.singleIteration(
+                                                self.keys, 
+                                                currentJobs[iResult]['freq'],
+                                                degeneracyList[iResult])
+                    jobID2idx[jobID] = iResult
+                    currentJobs[iResult]['jobID'] = jobID
+                    currentJobs[iResult]['forceStop'] = forceStop
+                    currentJobs[iResult]['count'] += 1
+            
+            with Indentation(1, prefix = '[JCMdaemon] '):
+                jobs2waitFor = [j['jobID'] for j in currentJobs if not\
+                                j['status'] == 'Converged']
+                indices, thisResults, _ = daemon.wait(jobs2waitFor, 
+                                                      break_condition = 'any')
+                print '!!! Received', len(indices), 'results'
+                print '!!! indices:', indices
+            
+            for j, idx in enumerate(indices):
+                
+                resultIdx = jobID2idx[ jobs2waitFor[idx] ]
+                thisJob = currentJobs[ resultIdx ]
+#                 print '!!! Results:', thisResults
+                frequencies = np.sort(
+                            thisResults[j][0]['eigenvalues']['eigenmode'].real)
+                
+                if thisJob['forceStop']:
+                    thisJob['freq'] = frequencies
+                    thisJob['status'] = 'Converged'
+                    
+    #             if verb: print '\tfrequencies:', frequencies
+                   
+                elif np.all(frequencies == 0.):
+                    thisJob['status'] = 'Crashed'
+                    self.message('\tSolver crashed.', 1, relevance=1)
+                       
+                else:
+    #                 if returnFrequencyImmediately: 
+    #                     self.message('... iteration finished.', 1, relevance=2)
+    #                     self.message('*** Stopping iteration. ***\n\n', 1, 
+    #                                  relevance=2)
+    #                     if self.countIterations:
+    #                         return frequencies, count
+    #                     else:
+    #                         return frequencies
+                       
+                    # calculate the deviations
+                    deviations = np.abs( frequencies/thisJob['freq']-1. )
+                    thisJob['deviation'] = np.max(deviations)
+                       
+                    self.message('Successful iteration:', 1, relevance=2)
+    #                     print '\tguess \t       closest result \tdeviation'
+    #                 for i,f in enumerate(frequencies):
+    #                     if verb: print '\t{0:4.4e}\t{1:4.4e}\t{2:4.4e}'.format(initialGuess[i], f, deviations[i])
+           
+    #                 keys['guess'] = frequencies[0]
+                    thisJob['freq'] = frequencies
+                    
+                    if thisJob['deviation'] > self.targetAccuracy:
+                        thisJob['status'] = 'Running'
+                    else:
+                        thisJob['status'] = 'Converged'
+                   
+    #             count += 1
+    #             if verb: print '... iteration finished.'
+                
+            # Check Result of this loop
+            Nconverged = sum([currentJobs[iJob]['status'] == 'Converged' \
+                                                    for iJob in range(Njobs)])
+            print '!!! Nconverged: ', Nconverged
+            print '!!! End of this loop***\n'
+            if Nconverged == Njobs: kPointDone = True
+        
+        freqs = self.list2FlatArray([currentJobs[iJob]['freq']  \
+                                                    for iJob in range(Njobs)])
+        self.addResults(freqs)
         
     
     
-#     def singleIteration(self, keys, polarization, initialGuess,
-#                        targetAccuracy = 'fromKeys', MaxNtrials = 100, 
-#                        nEigenvalues = 1):
-#         
-#         # update the keys
-#         degeneracy = len(initialGuess)
-#         initialGuess = np.sort(initialGuess)
-#         keys['n_eigenvalues'] = nEigenvalues * degeneracy
-#         keys['polarization'] = polarization
-#         keys['guess'] = initialGuess[0]
-#         keys['selection_criterion'] = 'NearGuess'
-#         keys['bloch_vector'] = self.getCurrentBloch()
-#         
+    def singleIteration(self, keys, initialGuess, bandNums, nEigenvalues = 1):
+         
+        # update the keys
+        degeneracy = len(initialGuess)
+        initialGuess = np.sort(initialGuess)
+        keys['n_eigenvalues'] = nEigenvalues * degeneracy
+        keys['polarization'] = self.currentPol
+        keys['guess'] = np.average(initialGuess)
+        keys['selection_criterion'] = 'NearGuess'
+        keys['bloch_vector'] = self.getCurrentBloch()
+         
 #         deviation = 10*targetAccuracy
-#         returnFrequencyImmediately = False
+        forceStop = False
 #         count = 0
-#         
+         
 #         while deviation > self.targetAccuracy and count < MaxNtrials:
-#             
-#             if verb:
-#                 self.message('Starting iteration ' + str(count+1) + ' ...')
-#                 self.message('Guess: {0:4.4e}'.format(keys['guess']), 1)########################################################
-#             
-#             wvl = freq2wvl( keys['guess'] )
-#             keys = self.updatePermittivities(keys, wvl, indent = 1)
-#             self.message('permittivity_background:' + \
-#                              str(keys['permittivity_background']), 1)
-#             
-#             if self.materialSlab.convertWvl(wvl) > \
-#                             np.real(self.materialSlab.totalWvlRange[1]):
-#                 self.message('Upper limit of material data wavelengths' +\
-#                              ' range reached!', 1)
-#                 count = MaxNtrials
-#                 returnFrequencyImmediately = True
-#             
-#             # solve
-# #             if useDaemon:
-#             with Indentation(1, prefix = '[JCMdaemon] '):
-#                 jobID = jcm.solve(self.projectFileName, 
-#                                   keys = keys, 
-#                                   working_dir = self.getWorkingDir())
-# #                 results, _ = daemon.wait()
-# #                 results = results[0]
-# #             else:
-# #                 results = jcm.solve('project.jcmp', keys = keys, logfile=open(os.devnull, 'w'))
-#             
+             
+#         self.message('Starting iteration ' + str(count+1) + ' ...')
+#         self.message('Guess: {0:4.4e}'.format(keys['guess']), 1)########################################################
+         
+        wvl = freq2wvl( keys['guess'] )
+        keys = self.updatePermittivities(keys, wvl, indent = 1)
+        self.message('permittivity_background:' + \
+                         str(keys['permittivity_background']), 1,
+                         relevance = 3)
+         
+        if self.materialSlab.convertWvl(wvl) > \
+                        np.real(self.materialSlab.totalWvlRange[1]):
+            self.message('Upper limit of material data wavelengths' +\
+                         ' range reached!', 1, relevance = 2)
+            forceStop = True
+         
+        # solve
+#             if useDaemon:
+        with Indentation(1, prefix = '[JCMdaemon] '):
+            jobID = jcm.solve(self.projectFileName, 
+                              keys = keys, 
+                              working_dir=self.getWorkingDir(band=bandNums[0]))
+        return jobID, forceStop
+            
+#                 results, _ = daemon.wait()
+#                 results = results[0]
+#             else:
+#                 results = jcm.solve('project.jcmp', keys = keys, logfile=open(os.devnull, 'w'))
+             
 #             frequencies = np.sort(results[0]['eigenvalues']['eigenmode'].real)
 #             if verb: print '\tfrequencies:', frequencies
-#             
+#              
 #             if np.all(frequencies == 0.):
 #                 if verb: print '\tSolver crashed.'
-#                 
+#                  
 #             else:
 #                 if returnFrequencyImmediately: 
 #                     if verb:
@@ -581,23 +683,23 @@ class BandstructureSolver:
 #                         return frequencies, count
 #                     else:
 #                         return frequencies
-#                 
+#                  
 #                 # calculate the deviations
 #                 deviations = np.abs( frequencies/initialGuess-1. )
 #                 deviation = np.max(deviations)
-#                 
+#                  
 #                 if verb:
 #                     print '\tSuccessful iteration:'
 #                     print '\tguess \t       closest result \tdeviation'
 #                 for i,f in enumerate(frequencies):
 #                     if verb: print '\t{0:4.4e}\t{1:4.4e}\t{2:4.4e}'.format(initialGuess[i], f, deviations[i])
-#     
+#      
 #                 keys['guess'] = frequencies[0]
 #                 initialGuess = frequencies
-#             
+#              
 #             count += 1
 #             if verb: print '... iteration finished.'
-#         
+#          
 #         if verb: print '*** Reached target accuracy. ***\n\n'
 #         if countIterations:
 #             return frequencies, count
@@ -632,6 +734,14 @@ class BandstructureSolver:
         for d in degeneracyList:
             frequencyList.append( [frequencies[i] for i in d] )
         return frequencyList, degeneracyList, degeneracies
+    
+    
+    def degeneracyList2assignment(self, dList):
+        assignment = []
+        for d in dList:
+            length = len(d)
+            assignment += length*[length]
+        return np.array(assignment)
     
     
     def extrapolateSpline(self, x, y, nextx, NpreviousValues = 3, k = 2):
@@ -744,7 +854,7 @@ class BandstructureSolver:
                                   PartitionName = q,
                                   JobName = 'BandstructureCalculation',
                                   Multiplicity = spec['M'],
-                                  NThreads = spec['N']))
+                                  CPUsPerTask = spec['N']))
         
         # Add all resources
         self.resourceIDs = []
