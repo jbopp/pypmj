@@ -16,8 +16,8 @@ os.environ['JCMKERNEL'] = 'V{0}'.format(jcmKernel)
 databaseName = "result_database.db"
 tabName = 'data'
 dataNumerikInstalDir = 'bzfherrm'
-# hzbJCMversion = ['2', '17', '22', 'beta', 'CAD']
-hzbJCMversion = ['2', '17', '22b', 'beta', 'CAD']
+hzbJCMversion = ['2', '17', '22', 'beta', 'CAD']
+# hzbJCMversion = ['2', '17', '22b', 'beta', 'CAD']
 
 mail = True # send status e-mail if True
 mailAdress = 'carlo.barth@helmholtz-berlin.de'

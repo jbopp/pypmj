@@ -52,11 +52,20 @@ class PC:
 #         print 'Running on machine {0} at {1}'.format(self.name, 
 #                                                      self.institution)
     
+    def basename(self, path, depth = 1):
+        basenames = []
+        for _ in range(depth):
+            basenames.append( os.path.basename( path ) )
+            path = os.path.dirname( path )
+        return os.path.join( *list(reversed(basenames)) )
+    
+    
     def defineProperties(self):
-        # Use the basename of the current working directory as basename for
-        # the directory in the storage folder
+        # Use the (depth-2-) basename of the current working directory as 
+        # basename for the directory in the storage folder
         thisDir = os.getcwd()
-        thisBaseDir = os.path.basename(thisDir)
+#         thisBaseDir = os.path.basename(thisDir)
+        thisBaseDir = self.basename(thisDir, 2)
         
         # HZB PC properties
         if self.institution == 'HZB':

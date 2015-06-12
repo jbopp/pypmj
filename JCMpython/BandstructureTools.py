@@ -5,8 +5,9 @@ from datetime import date
 import itertools
 from MaterialData import RefractiveIndexInfo
 from pprint import pformat, pprint
+from shutil import rmtree
 from warnings import warn
-from jsonschema.exceptions import relevance
+
 
 # =============================================================================
 # Functions
@@ -43,7 +44,25 @@ class BrillouinPath:
         self.kpoints = kpoints
         self.projections = {} # stores the calculated projections for each N
 
-
+    
+    def __repr__(self):
+        ans = 'BrillouinPath{ '
+        sep = ' -> '
+        for i,k in enumerate(self.kpoints):
+            vec = '('
+            for j,comp in enumerate(k):
+                if j == 0:
+                    vec += str(comp)
+                vec += ', ' + str(comp) 
+            vec += ')'
+            if i == 0:
+                ans += vec
+            else:
+                ans += sep + vec
+        ans += ' }'
+        return ans
+    
+    
     def pointDistance(self, p1, p2):
         """
         Euclidean distance between 2 points.
@@ -141,6 +160,7 @@ class Bandstructure:
         self.numKvals = numKvals
         self.verb = verb
         self.isDummy = False
+        self.wasSaved = False
         self.bands = {}
         
         # Interpolate the Brillouin path
@@ -162,6 +182,24 @@ class Bandstructure:
         self.numKvalsReady = {}
         for p in polarizations:
             self.numKvalsReady[p] = 0
+    
+    
+    def __repr__(self):
+        sep = 4*' '
+        ans = 'Bandstructure{{\n'
+        ans += sep + 'Polarizations: {0}\n'
+        ans += sep + '#Eigenvalues: {1}\n'
+        ans += sep + 'Brillouin path: {2}\n'
+        ans += sep + '#k-values: {3}\n'
+        ans += sep + 'Results complete: {4}\n'
+        ans += sep + 'Saved to file: {5}}}\n'
+        ans = ans.format( self.polarizations,
+                          self.nEigenvalues,
+                          self.brillouinPath,
+                          self.numKvals,
+                          self.checkIfResultsComplete(),
+                          self.wasSaved )
+        return ans
     
     
     def message(self, string):
@@ -200,16 +238,19 @@ class Bandstructure:
                          'polarization ' + polarization)
     
     
-    def checkIfResultsComplete(self):
+    def checkIfResultsComplete(self, polarizations = 'all'):
+        if polarizations == 'all':
+            polarizations = self.polarizations
+        if not isinstance(polarizations, list):
+            polarizations = [polarizations]
         complete = True
-        for p in self.polarizations:
+        for p in polarizations:
             if not self.numKvalsReady[p] == self.numKvals:
                 complete = False
         return complete
     
     
     def save(self, folder, filename = 'bandstructure'):
-        
         if not self.checkIfResultsComplete():
             warn('Bandstructure.save: Results are incomplete! Skipping...')
             return
@@ -223,11 +264,11 @@ class Bandstructure:
         resultDict['brillouinPath'] = self.brillouinPath.kpoints
         resultDict['numKvals'] = self.numKvals
         np.savez( npzfilename, savename = resultDict )
+        self.wasSaved = os.path.abspath( npzfilename + '.npz' )
         self.message( 'Saved bandstructure to ' + npzfilename + '.npz' )
     
     
     def load(self, folder, filename = 'bandstructure'):
-        
         if not filename.endswith('.npz'):
             filename += '.npz'
         npzfilename = os.path.join(folder, filename)
@@ -354,9 +395,9 @@ class BandstructureSolver:
                  projectFileName = 'project.jcmp', firstKlowerBoundGuess = 0.,
                  degeneracyTolerance = 1.e-4, targetAccuracy = 'fromKeys',
                  extrapolationMode = 'spline', absorption = False, customFolder
-                 = '', wSpec = {}, qSpec = {}, runOnLocalMachine = False,
-                 resourceInfo = False, verb = True, infoLevel = 1,
-                 countIterations = False ):
+                 = '', cleanMode = False, wSpec = {}, qSpec = {},
+                 runOnLocalMachine = False, resourceInfo = False, verb = True,
+                 infoLevel = 3, suppressDaemonOutput = False):
         
         self.keys = keys
         self.bs = bandstructure2solve
@@ -368,13 +409,14 @@ class BandstructureSolver:
         self.extrapolationMode = extrapolationMode
         self.absorption = absorption
         self.customFolder = customFolder
+        self.cleanMode = cleanMode
         self.wSpec = wSpec
         self.qSpec = qSpec
         self.runOnLocalMachine = runOnLocalMachine
         self.resourceInfo = resourceInfo
         self.verb = verb
         self.infoLevel = infoLevel
-        self.countIterations = countIterations
+        self.suppressDaemonOutput = suppressDaemonOutput
         self.dateToday = date.today().strftime("%y%m%d")
         
         if targetAccuracy == 'fromKeys':
@@ -411,14 +453,28 @@ class BandstructureSolver:
     
     
     def run(self):
-        #TODO: loop over polarizations
-        
-        self.currentPol = self.bs.polarizations[0]
-        self.currentK = 0
-        
         self.registerResources()
-        self.prescanAtPoint(self.keys)
-        self.runIterations()
+        
+        # Initialize numpy structured array to store the number of iterations,
+        # the degeneracy of each band and the final deviation of the calculation
+        # for each polarization, k and band
+        self.iterationMonitor = \
+            np.recarray( (len( self.bs.polarizations), 
+                               self.bs.numKvals-1, 
+                               self.bs.nEigenvalues ),
+                         dtype=[('nIters', int), 
+                                ('degeneracy', int),
+                                ('deviation', float)])
+        # Set initial values
+        self.iterationMonitor['nIters'].fill(0)
+        
+        for self.pIdx, self.currentPol in enumerate(self.bs.polarizations):
+            self.currentK = 0
+            self.message('\n*** Solving polarization {0} ***\n'.\
+                                                        format(self.currentPol))
+            self.prescanAtPoint(self.keys)
+            self.runIterations()
+        self.message('*** Done ***\n')
         
     
     def addResults(self, frequencies, polarization = 'current'):
@@ -445,13 +501,21 @@ class BandstructureSolver:
         return os.path.join( self.workingBaseDir, dirName )
     
     
+    def removeWorkingDir(self, band = 0, polarization = 'current', 
+                         kindex = False):
+        if self.cleanMode:
+            wdir = self.getWorkingDir(band, polarization, kindex)
+            if os.path.exists(wdir):
+                rmtree(wdir, ignore_errors = True)
+    
+    
     def updatePermittivities(self, keys, wvl, indent = 0):
         keys['permittivity_pore'] = self.materialPore.\
                                 getPermittivity(wvl, absorption=self.absorption)
         keys['permittivity_background'] = self.materialSlab.\
                                 getPermittivity(wvl, absorption=self.absorption)
         
-        self.message('updated permittivities: {0} : {1}, {2} : {3}'.\
+        self.message('Updated permittivities: {0} : {1}, {2} : {3}'.\
                                     format(self.materialPore.name,
                                            keys['permittivity_pore'],
                                            self.materialSlab.name,
@@ -464,7 +528,8 @@ class BandstructureSolver:
     def prescanAtPoint(self, keys, mode = 'Fundamental',
                        fixedPermittivities = False):
     
-        self.message('\nPerforming prescan for ' + self.currentPol + ' ...')
+        self.message('Performing prescan at point {0} ...'.\
+                                        format(self.getCurrentBloch()))
         
         # update the keys
         keys['polarization'] = self.currentPol
@@ -485,35 +550,34 @@ class BandstructureSolver:
                                 fixedPermittivities['permittivity_background']
         else:
             keys = self.updatePermittivities(keys, wvl, indent = 1)
-
         
-        # solve
-        with Indentation(1, prefix = '[JCMdaemon] '):
+        # Solve
+        with Indentation(1, prefix = '[JCMdaemon] ', 
+                         suppress = self.suppressDaemonOutput):
             _ = jcm.solve(self.projectFileName, 
                           keys = keys, 
                           working_dir = self.getWorkingDir())
             results, _ = daemon.wait()
-        frequencies = results[0][0]['eigenvalues']['eigenmode'].real
+        freqs = results[0][0]['eigenvalues']['eigenmode'].real
         
         # save the calculated frequencies to the Bandstructure result
-        self.addResults(frequencies)
+        #self.removeWorkingDir()
+        self.addResults(freqs)
+        self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
+                     1, relevance = 2)
         self.message('... done.\n')
     
     
     def runIterations(self):
         
-        self.iterationMonitor = np.recarray( 
-                                    (self.bs.numKvals, self.bs.nEigenvalues ),
-                                    dtype=[('nIters', int), 
-                                           ('degeneracy', int),
-                                           ('deviation', float)])
-        
-        # Set initial values
-#         self.iterationMonitor['nIters'].fill(0)
-#         self.iterationMonitor['deviation'].fill( 10.*self.targetAccuracy )
-        
-        
-        while not self.bs.checkIfResultsComplete():
+        # Loop over all k-points. The value for self.currentK is updated in
+        # self.addResults, i.e. each time a result was successfully saved
+        while not self.bs.checkIfResultsComplete(polarizations=self.currentPol):
+            
+            self.message('Iterating k point {0} of {1} with k = {2} ...'.\
+                                            format(self.currentK,
+                                                   self.bs.numKvals-1,
+                                                   self.getCurrentBloch()))
             
             # Get a guess for the next frequencies using extrapolation
             freqs2iterate = self.getNextFrequencyGuess()
@@ -521,12 +585,16 @@ class BandstructureSolver:
             # Analyze the degeneracy of this guess
             frequencyList, degeneracyList, _ = \
                                 self.analyzeDegeneracy( freqs2iterate )
-            self.iterationMonitor[self.currentK]['degeneracy'] = \
-                                self.degeneracyList2assignment(degeneracyList)
+            self.iterationMonitor[self.pIdx, self.currentK-1]['degeneracy'] \
+                                = self.degeneracyList2assignment(degeneracyList)
+            
+            # Call of the iteration routine for this k-point
             self.iterateKpoint(frequencyList, degeneracyList)
-        
-        print self.iterationMonitor
-        self.bs.plot([r'$\Gamma$', r'$M$', r'$K$', r'$\Gamma$'])
+            sims = self.iterationMonitor[self.pIdx, self.currentK-2]['nIters']
+            self.message('Total number of simulations: {0}'.format(
+                                                                np.sum(sims) ),
+                         1, relevance = 2)
+            self.message('... done.\n')
         
         
     def iterateKpoint(self, frequencyList, degeneracyList):
@@ -540,11 +608,12 @@ class BandstructureSolver:
         
         kPointDone = False
         Njobs = len(frequencyList)
+        jobID2idx = {}
         while not kPointDone:
             
-            jobID2idx = {}
             for iResult, f in enumerate(frequencyList):
-                if not currentJobs[iResult]['status'] == 'Converged':
+                if not currentJobs[iResult]['status'] in \
+                                                    ['Converged', 'Pending']:
                     jobID, forceStop = self.singleIteration(
                                                 self.keys, 
                                                 currentJobs[iResult]['freq'],
@@ -554,78 +623,85 @@ class BandstructureSolver:
                     currentJobs[iResult]['forceStop'] = forceStop
                     currentJobs[iResult]['count'] += 1
             
-            with Indentation(1, prefix = '[JCMdaemon] '):
+            with Indentation(1, 
+                             prefix = '[JCMdaemon] ', 
+                             suppress = self.suppressDaemonOutput):
+                
                 jobs2waitFor = [j['jobID'] for j in currentJobs if not\
                                 j['status'] == 'Converged']
+                
                 indices, thisResults, _ = daemon.wait(jobs2waitFor, 
                                                       break_condition = 'any')
-                print '!!! Received', len(indices), 'results'
-                print '!!! indices:', indices
+
             
-            for j, idx in enumerate(indices):
+            # mark jobs which have not been returned by daemon.wait as 'Pending'
+            for idx in [ jIdx for jIdx in range(len(jobs2waitFor)) \
+                                                    if not jIdx in indices ]:
+                thisJobID = jobs2waitFor[idx]
+                resultIdx = jobID2idx[ thisJobID ]
+                currentJobs[ resultIdx ]['status'] = 'Pending'
                 
-                resultIdx = jobID2idx[ jobs2waitFor[idx] ]
+            # analyze results of the returned jobs
+            for idx in indices:
+                thisJobID = jobs2waitFor[idx]
+                resultIdx = jobID2idx[ thisJobID ]
                 thisJob = currentJobs[ resultIdx ]
-#                 print '!!! Results:', thisResults
+                del jobID2idx[thisJobID]
                 frequencies = np.sort(
-                            thisResults[j][0]['eigenvalues']['eigenmode'].real)
+                        thisResults[idx][0]['eigenvalues']['eigenmode'].real)
                 
                 if thisJob['forceStop']:
                     thisJob['freq'] = frequencies
                     thisJob['status'] = 'Converged'
-                    
-    #             if verb: print '\tfrequencies:', frequencies
                    
                 elif np.all(frequencies == 0.):
                     thisJob['status'] = 'Crashed'
                     self.message('\tSolver crashed.', 1, relevance=1)
                        
                 else:
-    #                 if returnFrequencyImmediately: 
-    #                     self.message('... iteration finished.', 1, relevance=2)
-    #                     self.message('*** Stopping iteration. ***\n\n', 1, 
-    #                                  relevance=2)
-    #                     if self.countIterations:
-    #                         return frequencies, count
-    #                     else:
-    #                         return frequencies
-                       
                     # calculate the deviations
                     deviations = np.abs( frequencies/thisJob['freq']-1. )
                     thisJob['deviation'] = np.max(deviations)
-                       
-                    self.message('Successful iteration:', 1, relevance=2)
-    #                     print '\tguess \t       closest result \tdeviation'
-    #                 for i,f in enumerate(frequencies):
-    #                     if verb: print '\t{0:4.4e}\t{1:4.4e}\t{2:4.4e}'.format(initialGuess[i], f, deviations[i])
-           
-    #                 keys['guess'] = frequencies[0]
                     thisJob['freq'] = frequencies
                     
+                    # assess the result
                     if thisJob['deviation'] > self.targetAccuracy:
                         thisJob['status'] = 'Running'
                     else:
                         thisJob['status'] = 'Converged'
-                   
-    #             count += 1
-    #             if verb: print '... iteration finished.'
                 
             # Check Result of this loop
             Nconverged = sum([currentJobs[iJob]['status'] == 'Converged' \
                                                     for iJob in range(Njobs)])
-            print '!!! Nconverged: ', Nconverged
-            print '!!! End of this loop***\n'
             if Nconverged == Njobs: kPointDone = True
         
         freqs = self.list2FlatArray([currentJobs[iJob]['freq']  \
                                                     for iJob in range(Njobs)])
-        self.addResults(freqs)
+        self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
+                     1, relevance = 2)
         
+        self.updateIterationMonitor(currentJobs, degeneracyList)
+        # clean up if cleanMode
+        for d in degeneracyList:
+            self.removeWorkingDir(band=d[0])
+        self.addResults(freqs)
+    
+    
+    def updateIterationMonitor(self, currentJobs, degeneracyList):
+        
+        k = self.currentK-1
+        p = self.pIdx
+        for i, job in enumerate(currentJobs):
+            band = degeneracyList[i][0]
+            self.iterationMonitor[p, k, band]['nIters'] = job['count']
+            
+            for d in degeneracyList[i]:
+                self.iterationMonitor[p, k, d]['deviation'] = job['deviation']
     
     
     def singleIteration(self, keys, initialGuess, bandNums, nEigenvalues = 1):
          
-        # update the keys
+        # Update the keys
         degeneracy = len(initialGuess)
         initialGuess = np.sort(initialGuess)
         keys['n_eigenvalues'] = nEigenvalues * degeneracy
@@ -633,78 +709,27 @@ class BandstructureSolver:
         keys['guess'] = np.average(initialGuess)
         keys['selection_criterion'] = 'NearGuess'
         keys['bloch_vector'] = self.getCurrentBloch()
-         
-#         deviation = 10*targetAccuracy
         forceStop = False
-#         count = 0
-         
-#         while deviation > self.targetAccuracy and count < MaxNtrials:
-             
-#         self.message('Starting iteration ' + str(count+1) + ' ...')
-#         self.message('Guess: {0:4.4e}'.format(keys['guess']), 1)########################################################
-         
+        
         wvl = freq2wvl( keys['guess'] )
         keys = self.updatePermittivities(keys, wvl, indent = 1)
-        self.message('permittivity_background:' + \
-                         str(keys['permittivity_background']), 1,
-                         relevance = 3)
-         
-        if self.materialSlab.convertWvl(wvl) > \
-                        np.real(self.materialSlab.totalWvlRange[1]):
+        
+        conWvl = self.materialSlab.convertWvl(wvl)
+        if conWvl > np.real(self.materialSlab.totalWvlRange[1]):
             self.message('Upper limit of material data wavelengths' +\
-                         ' range reached!', 1, relevance = 2)
+                         ' range reached!', 1, relevance = 3)
+            self.message('Actual wavelength is {0}, but data-limit is {1}'.\
+                         format(conWvl, 
+                                np.real(self.materialSlab.totalWvlRange[1])), 
+                         1, relevance = 3)
             forceStop = True
          
-        # solve
-#             if useDaemon:
-        with Indentation(1, prefix = '[JCMdaemon] '):
+        with Indentation(1, prefix = '[JCMdaemon] ', 
+                         suppress = self.suppressDaemonOutput):
             jobID = jcm.solve(self.projectFileName, 
                               keys = keys, 
                               working_dir=self.getWorkingDir(band=bandNums[0]))
         return jobID, forceStop
-            
-#                 results, _ = daemon.wait()
-#                 results = results[0]
-#             else:
-#                 results = jcm.solve('project.jcmp', keys = keys, logfile=open(os.devnull, 'w'))
-             
-#             frequencies = np.sort(results[0]['eigenvalues']['eigenmode'].real)
-#             if verb: print '\tfrequencies:', frequencies
-#              
-#             if np.all(frequencies == 0.):
-#                 if verb: print '\tSolver crashed.'
-#                  
-#             else:
-#                 if returnFrequencyImmediately: 
-#                     if verb:
-#                         print '... iteration finished.'
-#                         print '*** Stopping iteration. ***\n\n'
-#                     if self.countIterations:
-#                         return frequencies, count
-#                     else:
-#                         return frequencies
-#                  
-#                 # calculate the deviations
-#                 deviations = np.abs( frequencies/initialGuess-1. )
-#                 deviation = np.max(deviations)
-#                  
-#                 if verb:
-#                     print '\tSuccessful iteration:'
-#                     print '\tguess \t       closest result \tdeviation'
-#                 for i,f in enumerate(frequencies):
-#                     if verb: print '\t{0:4.4e}\t{1:4.4e}\t{2:4.4e}'.format(initialGuess[i], f, deviations[i])
-#      
-#                 keys['guess'] = frequencies[0]
-#                 initialGuess = frequencies
-#              
-#             count += 1
-#             if verb: print '... iteration finished.'
-#          
-#         if verb: print '*** Reached target accuracy. ***\n\n'
-#         if countIterations:
-#             return frequencies, count
-#         else:
-#             return frequencies
     
     
     def list2FlatArray(self, l):
@@ -892,8 +917,11 @@ def unitTest(silent=True):
                          frequencies=bands[p])
     if not silent: newBS.plot(pathNames)
     print 'End of Bandstructure-class tests.\n'
-
-
+    
+    print 'Sample print output:'
+    print sampleBS
+    return
+    
     # ====================================================
     # Test of BandstructureSolver.prescanAtPoint
     # ====================================================
@@ -923,8 +951,8 @@ def unitTest(silent=True):
     materialPore = RefractiveIndexInfo(material = 'air')
     materialSlab = RefractiveIndexInfo(material = 'silicon')
     
-    workStationSpecification = {'dinux6': {'use':False, 'M':8, 'N':1}, 
-                                'dinux7': {'use':True, 'M':5, 'N':4},
+    workStationSpecification = {'dinux6': {'use':True, 'M':2, 'N':8}, 
+                                'dinux7': {'use':True, 'M':3, 'N':8},
                                 'localhost': {'use':False, 'M':1, 'N':1}}
     queueSpecification = {'HTC030': {'use':False, 'M':1, 'N':8}, 
                           'HTC040': {'use':True, 'M':5, 'N':4}}
@@ -935,7 +963,10 @@ def unitTest(silent=True):
                                     materialSlab = materialSlab,
                                     projectFileName = '../project.jcmp',
                                     wSpec = workStationSpecification, 
-                                    qSpec = queueSpecification )
+                                    qSpec = queueSpecification,
+                                    cleanMode = True,
+                                    suppressDaemonOutput = True,
+                                    infoLevel = 2 )
     BSsolver.run()
 
 if __name__ == '__main__':

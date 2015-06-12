@@ -131,8 +131,10 @@ class Indentation(object):
                         how-to-capture-stdout-output-from-a-python-function-call
     """
     
-    def __init__(self, indent = 0, spacesPerIndent = 4, prefix = ''):
+    def __init__(self, indent = 0, spacesPerIndent = 4, prefix = '',
+                 suppress = False):
         self.spacer = spacesPerIndent * indent * ' ' + prefix
+        self.suppress = suppress
     
     def __enter__(self):
         self._stdout = sys.stdout
@@ -142,8 +144,9 @@ class Indentation(object):
     def __exit__(self, *args):
         lines = self._stringio.getvalue().splitlines()
         sys.stdout = self._stdout
-        for l in lines:
-            print self.spacer + l
+        if not self.suppress:
+            for l in lines:
+                print self.spacer + l
 
 
 def getCmap():
