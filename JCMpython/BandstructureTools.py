@@ -144,6 +144,41 @@ class BrillouinPath:
             
 
 
+class Bandgap:
+    """
+    
+    """
+    
+    def __init__(self, fmin, fmax):
+        if fmin > fmax:
+            self.fmax = fmin
+            self.fmin = fmax
+        self.fmin = fmin
+        self.fmax = fmax
+        self.gapMidgapRatio = self.getGapMidgapRatio()
+    
+    
+    def __repr__(self):
+        sep = 4*' '
+        ans = 'Bandgap{{\n'
+        ans += sep + 'fmin: {0}\n'
+        ans += sep + 'fmax: {1}\n'
+        ans += sep + 'Delta f: {2}\n'
+        ans += sep + 'Gap-midgap-ratio: {3}}}\n'
+        ans = ans.format( self.fmin,
+                          self.fmax,
+                          self.deltaF,
+                          self.gapMidgapRatio )
+        return ans
+    
+    
+    def getGapMidgapRatio(self):
+        if not hasattr(self, 'deltaF') and not hasattr(self, 'fmid'):
+            self.deltaF = self.fmax - self.fmin
+            self.fmid = self.fmin + self.deltaF/2.
+        return self.deltaF / self.fmid
+
+
 
 # =============================================================================
 class Bandstructure:
@@ -247,7 +282,36 @@ class Bandstructure:
         for p in polarizations:
             if not self.numKvalsReady[p] == self.numKvals:
                 complete = False
+        if polarizations == self.polarizations and complete:
+            self.bandgaps, self.Nbandgaps = self.findBandgaps()
         return complete
+    
+    
+    def findBandgaps(self, polarizations = 'all'):
+        if polarizations == 'all':
+            polarizations = self.polarizations
+        if not isinstance(polarizations, list):
+            polarizations = [polarizations]
+        
+        bandgaps = {}
+        Nbandgaps = {}
+        for p in polarizations:
+            gaps = []
+            for i in range(self.nEigenvalues-1):
+                minima = []
+                maxima = []
+                for j in range(0, i+1):
+                    maxima.append( np.max(self.bands[p][:, j]) )
+                for j in range(i+1, self.nEigenvalues):
+                    minima.append( np.min(self.bands[p][:, j]) )
+                
+                bandMin = np.min(minima)
+                bandMax = np.max(maxima)
+                if bandMin > bandMax:
+                    gaps.append( Bandgap( bandMax, bandMin) )
+            bandgaps[p] = gaps
+            Nbandgaps[p] = len(gaps)
+        return bandgaps, Nbandgaps
     
     
     def save(self, folder, filename = 'bandstructure'):
@@ -314,8 +378,8 @@ class Bandstructure:
     
     
     def plot(self, pathNames, polarizations = 'all', filename = False, 
-             useAgg = False, colors = 'default', figsize_cm = (10.,10.),
-             plotDir = '.'):
+             showBandgaps = True, useAgg = False, colors = 'default',
+             figsize_cm = (10.,10.), plotDir = '.', bandGapThreshold = 1e-3):
         
         if polarizations == 'all':
             polarizations = self.polarizations
@@ -326,60 +390,85 @@ class Bandstructure:
             assert self.numKvalsReady[p] == self.numKvals, \
                    'Bandstructure:plot: Results for plotting are incomplete.'
         
+        if showBandgaps:
+            if not hasattr(self, 'bandgaps'):
+                self.bandgaps, self.Nbandgaps = self.findBandgaps()
+        
+        import matplotlib
         if useAgg:
-            import matplotlib
             matplotlib.use('Agg')
+        else:
+            matplotlib.use('TkAgg')
         import matplotlib.pyplot as plt
         
         # Define rc-params for LaTeX-typesetting etc. if a filename is given
+        customRC = plt.rcParams
         if filename:
-            plt.rc('text', usetex=True)
-            plt.rc('font', **{'family':'serif', 
-                              'sans-serif':['Helvetica'],
-                              'serif':['Times']})
-            plt.rcParams['text.latex.preamble'] = \
-                    [r'\usepackage[detect-all]{siunitx}']
-            plt.rcParams['axes.titlesize'] = 9
-            plt.rcParams['axes.labelsize'] = 8
-            plt.rcParams['xtick.labelsize'] = 7
-            plt.rcParams['ytick.labelsize'] = 7
-            plt.rcParams['lines.linewidth'] = 1.
-            plt.rcParams['legend.fontsize'] = 7
-            plt.rc('ps', usedistiller='xpdf')
+            
+            customRC['text.usetex'] = True
+            customRC['font.family'] = 'serif'
+            customRC['font.sans-serif'] = ['Helvetica']
+            customRC['font.serif'] = ['Times']
+            customRC['text.latex.preamble'] = \
+                        [r'\usepackage[detect-all]{siunitx}']
+            customRC['axes.titlesize'] = 9
+            customRC['axes.labelsize'] = 8
+            customRC['xtick.labelsize'] = 7
+            customRC['ytick.labelsize'] = 7
+            customRC['lines.linewidth'] = 1.
+            customRC['legend.fontsize'] = 7
+            customRC['ps.usedistiller'] = 'xpdf'
         
         if colors == 'default':
             colors = {'TE': HZBcolors[6], 
                       'TM': HZBcolors[0] }
         
-        plt.figure(1, (cm2inch(figsize_cm[0]), cm2inch(figsize_cm[1])))
-        
-        for i in range(self.nEigenvalues):
-            if i == 0:
-                for p in polarizations:
-                    plt.plot( self.xVals, self.bands[p][:,i], color=colors[p], 
-                              label=p )
+        with matplotlib.rc_context(rc = customRC):
+            plt.figure(1, (cm2inch(figsize_cm[0]), cm2inch(figsize_cm[1])))
+            
+            for i in range(self.nEigenvalues):
+                if showBandgaps:
+                    hatches = ['//', '\\\\']
+                    for hi, p in enumerate(polarizations):
+                        for bg in self.bandgaps[p]:
+                            if bg.gapMidgapRatio > bandGapThreshold:
+                                plt.fill_between(
+                                             self.xVals, 
+                                             bg.fmin, 
+                                             bg.fmax,
+                                             color = colors[p],
+                                             edgecolor = colors[p],
+                                             facecolor = 'none',
+                                             alpha = 0.1,
+                                             hatch = hatches[divmod(hi, 2)[1]],
+                                             linestyle = 'dashed')
+                if i == 0:
+                    for p in polarizations:
+                        plt.plot( self.xVals, self.bands[p][:,i], 
+                                  color=colors[p], label=p )
+                else:
+                    for p in polarizations:
+                        plt.plot( self.xVals, self.bands[p][:,i], 
+                                  color=colors[p] )
+            plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
+            plt.xticks( self.cornerPointXvals, pathNames )
+            plt.xlabel('$k$-vector')
+            plt.ylabel('frequency $\omega a/2\pi c$')
+            plt.legend(frameon=False, loc='best')
+            plt.grid(axis='x')
+            
+            if filename:
+                if not filename.endswith('.pdf'):
+                    filename = filename + '.pdf'
+                if not os.path.exists(plotDir):
+                    os.makedirs(plotDir)
+                pdfName = os.path.join(plotDir, filename)
+                print 'Saving plot to', pdfName
+                plt.savefig(pdfName, format='pdf', dpi=300, bbox_inches='tight')
+                plt.clf()
             else:
-                for p in polarizations:
-                    plt.plot( self.xVals, self.bands[p][:,i], color=colors[p] )
-        plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
-        plt.xticks( self.cornerPointXvals, pathNames )
-        plt.xlabel('$k$-vector')
-        plt.ylabel('frequency $\omega a/2\pi c$')
-        plt.legend(frameon=False, loc='best')
-        plt.grid(axis='x')
-        
-        if filename:
-            if not filename.endswith('.pdf'):
-                filename = filename + '.pdf'
-            if not os.path.exists(plotDir):
-                os.makedirs(plotDir)
-            pdfName = os.path.join(plotDir, filename)
-            print 'Saving plot to', pdfName
-            plt.savefig(pdfName, format='pdf', dpi=300, bbox_inches='tight')
-            plt.clf()
-        else:
-            plt.show()
-        return
+                plt.show()
+            return
 
 
 # =============================================================================
@@ -460,7 +549,7 @@ class BandstructureSolver:
         # for each polarization, k and band
         self.iterationMonitor = \
             np.recarray( (len( self.bs.polarizations), 
-                               self.bs.numKvals-1, 
+                               self.bs.numKvals, 
                                self.bs.nEigenvalues ),
                          dtype=[('nIters', int), 
                                 ('degeneracy', int),
@@ -489,12 +578,12 @@ class BandstructureSolver:
     
     
     def getWorkingDir(self, band = 0, polarization = 'current', 
-                      kindex = False):
+                      kindex = False, prescan = False):
         if polarization == 'current':
             polarization = self.currentPol
         if not kindex:
             kindex = self.currentK
-        if kindex == 0:
+        if prescan:
             dirName = 'prescan_'+polarization
         else:
             dirName = 'k{0:05d}_b{1:02d}_{2}'.format(kindex, band, polarization)
@@ -502,9 +591,9 @@ class BandstructureSolver:
     
     
     def removeWorkingDir(self, band = 0, polarization = 'current', 
-                         kindex = False):
+                         kindex = False, prescan = False):
         if self.cleanMode:
-            wdir = self.getWorkingDir(band, polarization, kindex)
+            wdir = self.getWorkingDir(band, polarization, kindex, prescan)
             if os.path.exists(wdir):
                 rmtree(wdir, ignore_errors = True)
     
@@ -556,13 +645,13 @@ class BandstructureSolver:
                          suppress = self.suppressDaemonOutput):
             _ = jcm.solve(self.projectFileName, 
                           keys = keys, 
-                          working_dir = self.getWorkingDir())
+                          working_dir = self.getWorkingDir(prescan = True))
             results, _ = daemon.wait()
-        freqs = results[0][0]['eigenvalues']['eigenmode'].real
+        freqs = np.sort(results[0][0]['eigenvalues']['eigenmode'].real)
         
         # save the calculated frequencies to the Bandstructure result
-        #self.removeWorkingDir()
-        self.addResults(freqs)
+        #self.removeWorkingDir(prescan = True)
+        self.prescanFrequencies = freqs
         self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
                      1, relevance = 2)
         self.message('... done.\n')
@@ -576,7 +665,7 @@ class BandstructureSolver:
             
             self.message('Iterating k point {0} of {1} with k = {2} ...'.\
                                             format(self.currentK,
-                                                   self.bs.numKvals-1,
+                                                   self.bs.numKvals,
                                                    self.getCurrentBloch()))
             
             # Get a guess for the next frequencies using extrapolation
@@ -585,12 +674,12 @@ class BandstructureSolver:
             # Analyze the degeneracy of this guess
             frequencyList, degeneracyList, _ = \
                                 self.analyzeDegeneracy( freqs2iterate )
-            self.iterationMonitor[self.pIdx, self.currentK-1]['degeneracy'] \
+            self.iterationMonitor[self.pIdx, self.currentK]['degeneracy'] \
                                 = self.degeneracyList2assignment(degeneracyList)
             
             # Call of the iteration routine for this k-point
             self.iterateKpoint(frequencyList, degeneracyList)
-            sims = self.iterationMonitor[self.pIdx, self.currentK-2]['nIters']
+            sims = self.iterationMonitor[self.pIdx, self.currentK-1]['nIters']
             self.message('Total number of simulations: {0}'.format(
                                                                 np.sum(sims) ),
                          1, relevance = 2)
@@ -675,8 +764,8 @@ class BandstructureSolver:
                                                     for iJob in range(Njobs)])
             if Nconverged == Njobs: kPointDone = True
         
-        freqs = self.list2FlatArray([currentJobs[iJob]['freq']  \
-                                                    for iJob in range(Njobs)])
+        freqs = np.sort(self.list2FlatArray([currentJobs[iJob]['freq']  \
+                                                    for iJob in range(Njobs)]))
         self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
                      1, relevance = 2)
         
@@ -689,7 +778,7 @@ class BandstructureSolver:
     
     def updateIterationMonitor(self, currentJobs, degeneracyList):
         
-        k = self.currentK-1
+        k = self.currentK
         p = self.pIdx
         for i, job in enumerate(currentJobs):
             band = degeneracyList[i][0]
@@ -824,19 +913,30 @@ class BandstructureSolver:
     
     
     def getFreqs(self):
+        if hasattr(self, 'prescanFrequencies'):
+            ans = self.prescanFrequencies.copy()
+            del self.prescanFrequencies
+            return (ans, 'prescan')
         return self.bs.bands[self.currentPol]
     
     
     def getNextFrequencyGuess(self):
-        if self.extrapolationMode in ['linear', 'spline']:
-            i = self.currentK
-            self.getFreqs()[:i, :]
-            freqs = self.extrapolateFrequencies( self.bs.xVals[:i], 
-                                                 self.getFreqs()[:i, :], 
-                                                 self.bs.xVals[i] )
+        i = self.currentK
+        freqs = self.getFreqs()
+        if isinstance(freqs, tuple):
+            if freqs[1] == 'prescan':
+                freqs = freqs[0]
+        
+        if i == 0:
+            return freqs
         else:
-            freqs = self.getFreqs()[i-1, :]
-        return freqs
+            if self.extrapolationMode in ['linear', 'spline']:
+                freqs = self.extrapolateFrequencies( self.bs.xVals[:i], 
+                                                     freqs[:i, :], 
+                                                     self.bs.xVals[i] )
+            else:
+                freqs = freqs[i-1, :]
+            return freqs
     
     
     def registerResources(self):
@@ -891,7 +991,7 @@ class BandstructureSolver:
 
 
 # =============================================================================
-def unitTest(silent=True):
+def unitTest(silent=False):
     
     # ====================================================
     # Test of Bandstructure class
@@ -902,7 +1002,7 @@ def unitTest(silent=True):
     
     sampleBS = Bandstructure()
     sampleBS.load('.', testFilename)
-    if not silent: sampleBS.plot(pathNames)
+#     if not silent: sampleBS.plot(pathNames)
     
     polarizations = sampleBS.polarizations
     numKvals = sampleBS.numKvals
@@ -915,11 +1015,15 @@ def unitTest(silent=True):
     for p in polarizations:
         newBS.addResults(polarization=p, kIndex = 'all', 
                          frequencies=bands[p])
-    if not silent: newBS.plot(pathNames)
+    if not silent: newBS.plot(pathNames, polarizations='TM')
     print 'End of Bandstructure-class tests.\n'
     
     print 'Sample print output:'
     print sampleBS
+    
+    print sampleBS.Nbandgaps
+    print sampleBS.bandgaps
+    
     return
     
     # ====================================================
