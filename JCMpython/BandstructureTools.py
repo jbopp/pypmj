@@ -46,19 +46,39 @@ class BrillouinPath:
 
     
     def __repr__(self):
+        
+        if len(self.kpoints.shape) != 2 or self.kpoints.shape[1] != 3:
+            return 'BrillouinPath with kpoints of shape {1}'.format(
+                                                            self.kpoints.shape)
+        
         ans = 'BrillouinPath{ '
-        sep = ' -> '
-        for i,k in enumerate(self.kpoints):
-            vec = '('
-            for j,comp in enumerate(k):
-                if j == 0:
-                    vec += str(comp)
-                vec += ', ' + str(comp) 
-            vec += ')'
-            if i == 0:
-                ans += vec
+        fmt = ''
+        count = 0
+        N, M = self.kpoints.shape
+        for _ in range(N):
+            fmt += ' ('
+            for _ in range(M):
+                fmt += '{' + str(count) + '}'
+                if not divmod(count, M)[1] == M-1:
+                    fmt += ', '
+                count += 1
+            if count == N*M:
+                fmt += ')'
             else:
-                ans += sep + vec
+                fmt += ') ->'
+        ans += fmt.format(*self.kpoints.flatten().tolist())
+#         sep = ' -> '
+#         for i, k in enumerate(self.kpoints):
+#             vec = '('
+#             for j, comp in enumerate(k):
+#                 if j == 0:
+#                     vec += str(comp)
+#                 vec += ', ' + str(comp) 
+#             vec += ')'
+#             if i == 0:
+#                 ans += vec
+#             else:
+#                 ans += sep + vec
         ans += ' }'
         return ans
     
@@ -141,9 +161,9 @@ class BrillouinPath:
             _ = self.interpolate(N)
         xVals, cornerPointXvals = self.projections[N]
         return xVals, cornerPointXvals
-            
 
 
+# =============================================================================
 class Bandgap:
     """
     
@@ -287,6 +307,11 @@ class Bandstructure:
         return complete
     
     
+    def getLightcone(self):
+        kpointsXY = self.kpoints[:, :2]
+        return c0 * np.sqrt( np.sum( np.square(kpointsXY), axis=1 ) )
+    
+    
     def findBandgaps(self, polarizations = 'all'):
         if polarizations == 'all':
             polarizations = self.polarizations
@@ -378,8 +403,9 @@ class Bandstructure:
     
     
     def plot(self, pathNames, polarizations = 'all', filename = False, 
-             showBandgaps = True, useAgg = False, colors = 'default',
-             figsize_cm = (10.,10.), plotDir = '.', bandGapThreshold = 1e-3):
+             showBandgaps = True, showLightcone = False, useAgg = False, colors
+             = 'default', figsize_cm = (10.,10.), plotDir = '.',
+             bandGapThreshold = 1e-3, legendLOC = 'best'):
         
         if polarizations == 'all':
             polarizations = self.polarizations
@@ -432,7 +458,18 @@ class Bandstructure:
                     for hi, p in enumerate(polarizations):
                         for bg in self.bandgaps[p]:
                             if bg.gapMidgapRatio > bandGapThreshold:
-                                plt.fill_between(
+                                if len(self.bandgaps.keys()) <= 1 or \
+                                            len(polarizations) <= 1:
+                                    plt.fill_between(
+                                             self.xVals, 
+                                             bg.fmin, 
+                                             bg.fmax,
+                                             color = 'none',
+                                             facecolor = colors[p],
+                                             lw = 0,
+                                             alpha = 0.1)
+                                else:
+                                    plt.fill_between(
                                              self.xVals, 
                                              bg.fmin, 
                                              bg.fmax,
@@ -442,6 +479,7 @@ class Bandstructure:
                                              alpha = 0.1,
                                              hatch = hatches[divmod(hi, 2)[1]],
                                              linestyle = 'dashed')
+                                    
                 if i == 0:
                     for p in polarizations:
                         plt.plot( self.xVals, self.bands[p][:,i], 
@@ -450,17 +488,26 @@ class Bandstructure:
                     for p in polarizations:
                         plt.plot( self.xVals, self.bands[p][:,i], 
                                   color=colors[p] )
+            
+            if showLightcone:
+                lightcone = self.getLightcone()
+                ymax = plt.gca().get_ylim()[1]
+                plt.fill_between(self.xVals, lightcone, ymax, interpolate=True,
+                                 color=HZBcolors[9], zorder = 1000)
+                plt.plot(self.xVals, lightcone, color='k', label = 'light line',
+                         zorder = 1001)
+            
             plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
             plt.xticks( self.cornerPointXvals, pathNames )
             plt.xlabel('$k$-vector')
             plt.ylabel('angular frequency $\omega$ in \si{\per\second}')
+            plt.legend(frameon=False, loc=legendLOC)
             ax1 = plt.gca()
             ytics = ax1.get_yticks()
             ax2 = ax1.twinx()
-            ytics2 = ['{0:.2f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
+            ytics2 = ['{0:.0f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
             plt.yticks( ytics, ytics2 )
-            ax2.set_ylabel('wavelength in nm')
-            plt.legend(frameon=False, loc='best')
+            ax2.set_ylabel('wavelength in nm (rounded)')
             plt.grid(axis='x')
             
             if filename:
@@ -489,12 +536,12 @@ class BandstructureSolver:
     def __init__(self, keys, bandstructure2solve, materialPore, materialSlab,
                  materialSubspace = None, materialSuperspace = None,
                  projectFileName = 'project.jcmp', firstKlowerBoundGuess = 0.,
-                 prescanMode = 'Fundamental', degeneracyTolerance = 1.e-4,
-                 targetAccuracy = 'fromKeys', extrapolationMode = 'spline',
-                 absorption = False, customFolder = '', cleanMode = False, wSpec
-                 = {}, qSpec = {}, runOnLocalMachine = False, resourceInfo =
-                 False, verb = True, infoLevel = 3, suppressDaemonOutput =
-                 False):
+                 firstKfrequencyGuess = None, prescanMode = 'Fundamental',
+                 degeneracyTolerance = 1.e-4, targetAccuracy = 'fromKeys',
+                 extrapolationMode = 'spline', absorption = False, customFolder
+                 = '', cleanMode = False, wSpec = {}, qSpec = {},
+                 runOnLocalMachine = False, resourceInfo = False, verb = True,
+                 infoLevel = 3, suppressDaemonOutput = False):
         
         self.keys = keys
         self.bs = bandstructure2solve
@@ -504,6 +551,15 @@ class BandstructureSolver:
         self.materialSuperspace = materialSuperspace
         self.projectFileName = projectFileName
         self.firstKlowerBoundGuess = firstKlowerBoundGuess
+        if firstKfrequencyGuess is not None:
+            assert isinstance(firstKfrequencyGuess, (list, np.ndarray))
+            if isinstance(firstKfrequencyGuess, list):
+                firstKfrequencyGuess = np.array(firstKfrequencyGuess)
+            assert len(firstKfrequencyGuess) == self.bs.nEigenvalues
+            self.skipPrescan = True
+        else:
+            self.skipPrescan = False
+        self.firstKfrequencyGuess = firstKfrequencyGuess
         self.prescanMode = prescanMode
         if jcmKernel == 3:
             self.prescanMode = 'NearGuess'
@@ -574,9 +630,12 @@ class BandstructureSolver:
             self.currentK = 0
             self.message('\n*** Solving polarization {0} ***\n'.\
                                                         format(self.currentPol))
-            self.prescanAtPoint(self.keys, mode = self.prescanMode)
-            if prescanOnly:
-                return self.prescanFrequencies
+            if self.skipPrescan:
+                self.prescanFrequencies = self.firstKfrequencyGuess
+            else:
+                self.prescanAtPoint(self.keys, mode = self.prescanMode)
+                if prescanOnly:
+                    return self.prescanFrequencies
             self.runIterations()
         self.message('*** Done ***\n')
         
@@ -1037,7 +1096,7 @@ def unitTest(silent=False):
     for p in polarizations:
         newBS.addResults(polarization=p, kIndex = 'all', 
                          frequencies=bands[p])
-    if not silent: newBS.plot(pathNames)
+    if not silent: newBS.plot(pathNames, legendLOC='lower center')
     print 'End of Bandstructure-class tests.\n'
     
     print 'Sample print output:'
