@@ -11,7 +11,7 @@ except ImportError:
 
 # Module globals
 # =============================================================================
-jcmKernel = 2
+jcmKernel = 3
 os.environ['JCMKERNEL'] = 'V{0}'.format(jcmKernel)
 databaseName = "result_database.db"
 tabName = 'data'

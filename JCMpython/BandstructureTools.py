@@ -396,9 +396,9 @@ class Bandstructure:
         
         import matplotlib
         if useAgg:
-            matplotlib.use('Agg')
+            matplotlib.use('Agg', warn=False, force=True)
         else:
-            matplotlib.use('TkAgg')
+            matplotlib.use('TkAgg', warn=False, force=True)
         import matplotlib.pyplot as plt
         
         # Define rc-params for LaTeX-typesetting etc. if a filename is given
@@ -453,7 +453,13 @@ class Bandstructure:
             plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
             plt.xticks( self.cornerPointXvals, pathNames )
             plt.xlabel('$k$-vector')
-            plt.ylabel('frequency $\omega a/2\pi c$')
+            plt.ylabel('angular frequency $\omega$ in \si{\per\second}')
+            ax1 = plt.gca()
+            ytics = ax1.get_yticks()
+            ax2 = ax1.twinx()
+            ytics2 = ['{0:.2f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
+            plt.yticks( ytics, ytics2 )
+            ax2.set_ylabel('wavelength in nm')
             plt.legend(frameon=False, loc='best')
             plt.grid(axis='x')
             
@@ -481,19 +487,26 @@ class BandstructureSolver:
     
     
     def __init__(self, keys, bandstructure2solve, materialPore, materialSlab,
+                 materialSubspace = None, materialSuperspace = None,
                  projectFileName = 'project.jcmp', firstKlowerBoundGuess = 0.,
-                 degeneracyTolerance = 1.e-4, targetAccuracy = 'fromKeys',
-                 extrapolationMode = 'spline', absorption = False, customFolder
-                 = '', cleanMode = False, wSpec = {}, qSpec = {},
-                 runOnLocalMachine = False, resourceInfo = False, verb = True,
-                 infoLevel = 3, suppressDaemonOutput = False):
+                 prescanMode = 'Fundamental', degeneracyTolerance = 1.e-4,
+                 targetAccuracy = 'fromKeys', extrapolationMode = 'spline',
+                 absorption = False, customFolder = '', cleanMode = False, wSpec
+                 = {}, qSpec = {}, runOnLocalMachine = False, resourceInfo =
+                 False, verb = True, infoLevel = 3, suppressDaemonOutput =
+                 False):
         
         self.keys = keys
         self.bs = bandstructure2solve
         self.materialPore = materialPore
         self.materialSlab = materialSlab
+        self.materialSubspace = materialSubspace
+        self.materialSuperspace = materialSuperspace
         self.projectFileName = projectFileName
         self.firstKlowerBoundGuess = firstKlowerBoundGuess
+        self.prescanMode = prescanMode
+        if jcmKernel == 3:
+            self.prescanMode = 'NearGuess'
         self.degeneracyTolerance = degeneracyTolerance
         self.extrapolationMode = extrapolationMode
         self.absorption = absorption
@@ -541,7 +554,7 @@ class BandstructureSolver:
         self.message('Using folder '+self.workingBaseDir+' for data storage.')
     
     
-    def run(self):
+    def run(self, prescanOnly = False):
         self.registerResources()
         
         # Initialize numpy structured array to store the number of iterations,
@@ -561,7 +574,9 @@ class BandstructureSolver:
             self.currentK = 0
             self.message('\n*** Solving polarization {0} ***\n'.\
                                                         format(self.currentPol))
-            self.prescanAtPoint(self.keys)
+            self.prescanAtPoint(self.keys, mode = self.prescanMode)
+            if prescanOnly:
+                return self.prescanFrequencies
             self.runIterations()
         self.message('*** Done ***\n')
         
@@ -603,6 +618,12 @@ class BandstructureSolver:
                                 getPermittivity(wvl, absorption=self.absorption)
         keys['permittivity_background'] = self.materialSlab.\
                                 getPermittivity(wvl, absorption=self.absorption)
+        if isinstance(self.materialSubspace, RefractiveIndexInfo):
+            keys['permittivity_subspace'] = self.materialSubspace.\
+                                getPermittivity(wvl, absorption=self.absorption)
+        if isinstance(self.materialSuperspace, RefractiveIndexInfo):
+            keys['permittivity_superspace'] = self.materialSuperspace.\
+                                getPermittivity(wvl, absorption=self.absorption)
         
         self.message('Updated permittivities: {0} : {1}, {2} : {3}'.\
                                     format(self.materialPore.name,
@@ -633,6 +654,7 @@ class BandstructureSolver:
             wvl = freq2wvl( self.firstKlowerBoundGuess )
         
         if fixedPermittivities:
+            #TODO: get this to run for 3D
             keys['permittivity_pore'] = \
                                 fixedPermittivities['permittivity_pore']
             keys['permittivity_background'] = \
@@ -1015,7 +1037,7 @@ def unitTest(silent=False):
     for p in polarizations:
         newBS.addResults(polarization=p, kIndex = 'all', 
                          frequencies=bands[p])
-    if not silent: newBS.plot(pathNames, polarizations='TM')
+    if not silent: newBS.plot(pathNames)
     print 'End of Bandstructure-class tests.\n'
     
     print 'Sample print output:'
@@ -1027,7 +1049,7 @@ def unitTest(silent=False):
     return
     
     # ====================================================
-    # Test of BandstructureSolver.prescanAtPoint
+    # Test of BandstructureSolver
     # ====================================================
     
     uol = 1e-9 #m
