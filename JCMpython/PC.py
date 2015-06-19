@@ -94,9 +94,10 @@ class PC:
             hzbJCMnoBeta = [i for i in hzbJCMversion if i != 'beta']
             if dataNumerikInstalDir == 'bzfherrm':
                 hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
-                jcmFolderName = 'JCMsuite{0}_beta'.format(''.join(hzbJCMnoCAD))
-            else: 
-                jcmFolderName = 'JCMsuite.{0}'.format('.'.join(hzbJCMnoBeta))
+                jcmFolderName = 'JCMsuite{0}'.format(''.join(hzbJCMnoCAD))
+            else:
+                hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
+                jcmFolderName = 'JCMsuite.{0}'.format('.'.join(hzbJCMnoCAD))
             self.jcmBaseFolder = os.path.join(os.sep, 'nfs', 'datanumerik', 
                                               'instal', dataNumerikInstalDir, 
                                               jcmFolderName)

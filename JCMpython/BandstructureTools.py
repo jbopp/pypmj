@@ -727,7 +727,8 @@ class BandstructureSolver:
             _ = jcm.solve(self.projectFileName, 
                           keys = keys, 
                           working_dir = self.getWorkingDir(prescan = True))
-            results, _ = daemon.wait()
+            results, logs = daemon.wait()
+            print logs
         freqs = np.sort(results[0][0]['eigenvalues']['eigenmode'].real)
         
         # save the calculated frequencies to the Bandstructure result
@@ -800,8 +801,9 @@ class BandstructureSolver:
                 jobs2waitFor = [j['jobID'] for j in currentJobs if not\
                                 j['status'] == 'Converged']
                 
-                indices, thisResults, _ = daemon.wait(jobs2waitFor, 
+                indices, thisResults, logs = daemon.wait(jobs2waitFor, 
                                                       break_condition = 'any')
+                print logs
 
             
             # mark jobs which have not been returned by daemon.wait as 'Pending'
@@ -1060,7 +1062,7 @@ class BandstructureSolver:
                                   PartitionName = q,
                                   JobName = 'BandstructureCalculation',
                                   Multiplicity = spec['M'],
-                                  CPUsPerTask = spec['N']))
+                                  NThreads = spec['N']))
         
         # Add all resources
         self.resourceIDs = []
