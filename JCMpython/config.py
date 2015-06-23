@@ -16,7 +16,7 @@ os.environ['JCMKERNEL'] = 'V{0}'.format(jcmKernel)
 databaseName = "result_database.db"
 tabName = 'data'
 dataNumerikInstalDir = 'bzfhamme'
-hzbJCMversion = ['2', '17', '26', 'beta', 'CAD']
+hzbJCMversion = ['2', '17', '27', 'beta', 'CAD']
 # hzbJCMversion = ['2', '17', '22b', 'beta', 'CAD']
 
 mail = True # send status e-mail if True
