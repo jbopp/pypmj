@@ -4,6 +4,7 @@ from datetime import timedelta
 import io
 import matplotlib.colors as mcolors
 from numpy.linalg import norm
+from pyparsing import *#Word, alphas, nestedExpr, ZeroOrMore
 import sys
 import time
 
@@ -345,3 +346,66 @@ def uniformPathLengthLorentzSampling(xi, xf, Npoints, lorentzXc, lorentzYc,
 #     plt.show()
     
     return xVals
+
+
+# =============================================================================
+class ProjectFile:
+    
+    
+    def __init__(self, filepath, keys):
+        
+        self.filepath = filepath
+        self.keys = keys
+        self.runJcmt2jcm()
+        self.analyzePostProcesses()
+        
+
+    def runJcmt2jcm(self):
+        jcm.jcmt2jcm(self.filepath, self.keys)
+        jcmpFile = self.filepath.replace('.jcmpt', '.jcmp')
+        with open(jcmpFile, 'r') as f:
+            self.content = f.read()
+        os.unlink(jcmpFile)
+    
+    
+    def analyzePostProcesses(self):
+# #         pat = ZeroOrMore(Word( alphas ) + nestedExpr("{", "}"))
+#         print repr(self.content)
+#         field_name = field_val = Word(alphanums)
+#         colon = Suppress(Literal('='))
+#         
+#         expr = ZeroOrMore(Dict(
+#                     Group(field_name + \
+#                           nestedExpr( "{", "}", 
+#                                       content = ZeroOrMore(Dict(Group(field_name + colon + field_val)))))))
+#         parsed = expr.parseString( self.content )
+#         print parsed.asDict()
+        field_name = field_val = Word(alphanums)
+        colon = Suppress(Literal('='))
+        
+        # Define the simple recursive grammar
+        grammar = Forward()
+        nestedBrackets = Dict(Group( field_name + \
+                                     nestedExpr('{', '}', 
+                                                content=grammar) ))
+        lastChild = Dict(Group(field_name + colon + field_val))
+        grammar << (lastChild | nestedBrackets)
+        
+        print repr(self.content)
+        res = OneOrMore(grammar).parseString(self.content)
+        
+#         print type(Word( alphas ))
+#         print type(nestedExpr("{", "}"))
+#         print type(pat)
+#         print parsed
+
+
+
+
+
+
+
+
+
+
+
