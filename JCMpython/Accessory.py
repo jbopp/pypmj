@@ -4,7 +4,7 @@ from datetime import timedelta
 import io
 import matplotlib.colors as mcolors
 from numpy.linalg import norm
-from pyparsing import *#Word, alphas, nestedExpr, ZeroOrMore
+from pyparsing import *
 import sys
 import time
 
@@ -352,12 +352,19 @@ def uniformPathLengthLorentzSampling(xi, xf, Npoints, lorentzXc, lorentzYc,
 class ProjectFile:
     
     
-    def __init__(self, filepath, keys):
+    def __init__(self, filepath, keys = None):
         
         self.filepath = filepath
         self.keys = keys
-        self.runJcmt2jcm()
-        self.analyzePostProcesses()
+        self.parsed = False
+        if filepath.endswith('.jcmpt'):
+            self.runJcmt2jcm()
+        elif filepath.endswith('.jcmp'):
+            with open(filepath, 'r') as f:
+                self.content = f.read()
+        else:
+            raise Exception('ProjectFile: invalid file extension.')
+        self.analyzeProjectFile()
         
 
     def runJcmt2jcm(self):
@@ -368,40 +375,78 @@ class ProjectFile:
         os.unlink(jcmpFile)
     
     
-    def analyzePostProcesses(self):
-# #         pat = ZeroOrMore(Word( alphas ) + nestedExpr("{", "}"))
-#         print repr(self.content)
-#         field_name = field_val = Word(alphanums)
-#         colon = Suppress(Literal('='))
-#         
-#         expr = ZeroOrMore(Dict(
-#                     Group(field_name + \
-#                           nestedExpr( "{", "}", 
-#                                       content = ZeroOrMore(Dict(Group(field_name + colon + field_val)))))))
-#         parsed = expr.parseString( self.content )
-#         print parsed.asDict()
-        field_name = field_val = Word(alphanums)
-        colon = Suppress(Literal('='))
+    def analyzeProjectFile(self):
+        # Define the fragments of the grammar
+        # --
         
-        # Define the simple recursive grammar
-        grammar = Forward()
-        nestedBrackets = Dict(Group( field_name + \
-                                     nestedExpr('{', '}', 
-                                                content=grammar) ))
-        lastChild = Dict(Group(field_name + colon + field_val))
-        grammar << (lastChild | nestedBrackets)
+        # Float
+        point = Literal('.')
+        e = CaselessLiteral('E')
+        plusorminus = Literal('+') | Literal('-')
+        number = Word(nums) 
+        integer = Combine( Optional(plusorminus) + number )
+        floatNumber = Combine( integer +
+                               Optional( point + Optional(number) ) +
+                               Optional( e + integer ) )
         
-        print repr(self.content)
-        res = OneOrMore(grammar).parseString(self.content)
+        # Equal sign and comment
+        equal = Suppress(Literal('='))
+        comment = Optional(Literal('#'))
         
-#         print type(Word( alphas ))
-#         print type(nestedExpr("{", "}"))
-#         print type(pat)
-#         print parsed
+        # Key and value of an equation
+        field_name = Word(alphanums)
+        field_val = ( floatNumber | nestedExpr('[', ']') | \
+                      Word(alphanums ) | quotedString  )
+        
+        # Define the recursive grammar
+        grammar = Forward() # <- recursivity
+        nestedBrackets = Dict(Group( field_name + Optional(equal) + \
+                                     nestedExpr('{', '}', content=grammar) ))
+        lastChild = Dict(Group(comment + field_name + equal + field_val))
+        grammar << ( lastChild | nestedBrackets  )
+        
+        self.fields = []
+        for match in grammar.scanString(self.content):
+            self.fields.append(match[0])
+        if self.fields:
+            self.parsed = True
+    
+    
+    def getProjectMode(self):
+        if not self.parsed:
+            return None
+        try:
+            return self.fields[0].Project.Electromagnetics.TimeHarmonic.keys()[0]
+        except:
+            return None
+    
+    
+    def getPostProcesses(self):
+        if not self.parsed:
+            return None
+        pps = [ i for i in self.fields if i.keys()[0] == 'PostProcess' ]
+        return pps
 
 
+    def getPostProcessTypes(self):
+        pps = self.getPostProcesses()
+        types = [pp.PostProcess.keys()[0] for pp in pps]
+        return types
+ 
+    
+    def getCartesianPostProcessNormal( self, ppIndex ):
 
-
+        pp = self.getPostProcesses()[ppIndex].PostProcess
+        
+        try:
+            cartesian = pp.ExportFields.Cartesian.keys()
+        except:
+            raise Exception('PostProcess of desired index is not of ' + \
+                            'type ExportFields -> Cartesian.')
+        for c in cartesian:
+            if c.startswith('GridPoints'):
+                return c[-1].lower()
+        raise Exception('Unable to parse Cartesian PostProcess.')
 
 
 

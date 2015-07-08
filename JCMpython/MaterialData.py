@@ -588,8 +588,6 @@ if __name__ == '__main__':
     
     d = RefractiveIndexInfo('silicon')
     d.plotData()
-    print d.totalWvlRange
-    quit()
     
     # Wavelength parameters
     wavelength_start = 400.e-9 

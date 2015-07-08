@@ -1,11 +1,11 @@
 from config import *
-from Accessory import cm2inch, Indentation
+from Accessory import cm2inch, Indentation, ProjectFile
 from DaemonResources import Queue, Workstation
 from datetime import date
 import itertools
 from MaterialData import RefractiveIndexInfo
-from pprint import pformat, pprint
-from shutil import rmtree
+from pprint import pformat#, pprint
+from shutil import rmtree, copyfile
 from warnings import warn
 
 
@@ -674,6 +674,7 @@ class BandstructureSolver:
             # Set initial values
             self.iterationMonitor['nIters'].fill(0)
         
+        
         # 2D-case: 
         # polarizations can be solved separately using different settings
         # for "FieldComponents" in project.jcmp
@@ -698,13 +699,16 @@ class BandstructureSolver:
             self.pIdx = 0
             self.currentPol = 'all'
             self.currentK = 0
-            self.message('\n*** Solving for all polarization in one run ***\n')
+            self.message('\n*** Solving for all polarizations in one run ***\n')
             if self.skipPrescan:
                 self.prescanFrequencies = self.firstKfrequencyGuess
             else:
                 self.prescanAtPoint(self.keys, mode = self.prescanMode)
                 if prescanOnly:
                     return self.prescanFrequencies
+                
+            return #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            
             self.runIterations()
             
         self.message('*** Done ***\n')
@@ -714,10 +718,43 @@ class BandstructureSolver:
         if polarization == 'current':
             polarization = self.currentPol
         
+        #TODO: needs to be checked!
         # In 3D case where self.currentPol == 'all' the modes have to be 
         # classified in order to add the results for the right polarization.
         if polarization == 'all':
-            pass
+            assignedFreqs = { 'TE-like': [], 'TM-like': [] }
+            for freq, parities in frequencies:
+                normals = parities.keys()
+                
+                if len(normals) == 2:
+                    assert set(normals) == set(['y', 'z'])
+                    py = parities['y']
+                    pz = parities['z']
+                    if pz > 0. and py < 0.:
+                        pol = 'TE-like'
+                    elif pz < 0. and py > 0.:
+                        pol = 'TM-like'
+                    else:
+                        pol = None
+                
+                elif len(normals) == 1:
+                    normal = normals[0]
+                    sign = 1
+                    if normal == 'y': sign = -1
+                    if sign*parities[normal] > 0.:
+                        pol = 'TE-like'
+                    else:
+                        pol = 'TM-like'
+                
+                else:
+                    raise Exception('Too many Cartesian FieldExports.')
+                
+                assignedFreqs[pol].append(freq)
+            
+            for pol in assignedFreqs:
+                assignedFreqs[pol] = np.array(assignedFreqs[pol]).sort()
+                self.bs.addResults(pol, self.currentK, assignedFreqs[pol])
+                
         self.bs.addResults(polarization, self.currentK, frequencies)
         self.currentK += 1
         
@@ -769,12 +806,21 @@ class BandstructureSolver:
         return keys
     
     
-    def analyzePolarization(self, field):
-        sums = np.sum(np.sum(np.abs(field), axis=0), axis=0)
-        if sums[2] > sums[0] + sums[1]:
-            return 'TE-like'
-        else:
-            return 'TM-like'
+#     def analyzePolarization(self, field):
+#         sums = np.sum(np.sum(np.abs(field), axis=0), axis=0)
+#         if sums[2] > sums[0] + sums[1]:
+#             return 'TE-like'
+#         else:
+#             return 'TM-like'
+    def calcParity(self, field, normal):
+        p = np.real(np.conj(field)*field)
+        if normal == 'x':
+            ans = p[:,:,1] + p[:,:,2] - p[:,:,0]
+        elif normal == 'y':
+            ans = p[:,:,0] - p[:,:,1] + p[:,:,2]
+        elif normal == 'z':
+            ans = p[:,:,0] + p[:,:,1] - p[:,:,2]
+        return ans.sum() / p.sum()
     
     
     def getResultOrder(self, result):
@@ -787,6 +833,22 @@ class BandstructureSolver:
                 if key in r.keys():
                     order[assignment[key]] = i
         return order
+    
+    
+    def assignResults(self, results, projectFile):
+        
+        assert projectFile.getProjectMode() == 'ResonanceMode', \
+               'For bandstructure computations the project type must be ' + \
+               'Electromagnetics -> TimeHarmonic -> ResonanceMode.' 
+        pps = projectFile.getPostProcessTypes()
+        Nresults = len(results)
+        if Nresults == len(pps) + 1:
+            assignment = ['eigenvalues'] + pps
+        elif Nresults == len(pps) + 2:
+            assignment = ['computational_costs', 'eigenvalues'] + pps
+        else:
+            raise Exception('Can not assign results: too many fields.')
+        return assignment
     
     
     def prescanAtPoint(self, keys, mode = 'Fundamental',
@@ -822,32 +884,61 @@ class BandstructureSolver:
         # Solve
         with Indentation(1, prefix = '[JCMdaemon] ', 
                          suppress = self.suppressDaemonOutput):
-            _ = jcm.solve(self.projectFileName, 
-                          keys = keys, 
-                          working_dir = self.getWorkingDir(prescan = True))
-            results, logs = daemon.wait()
-#         pprint(logs)
-#         print
-#         pprint(results)
-#         print
+            wdir = self.getWorkingDir(prescan = True)
+            _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir)
+            results, _ = daemon.wait()
         
-        order = self.getResultOrder(results[0])
-        if 'eigenvalues' in order:
-            freqs = results[0][order['eigenvalues']]['eigenvalues']\
-                                                            ['eigenmode'].real
-        else:
-            raise Exception('Did not receive eigenvalues from JCMsolve!')
-        sortIdx = np.argsort(freqs)
-        freqs = freqs[sortIdx]
+        jcmpFile = os.path.join(wdir, self.projectFileName)
+        projectFile = ProjectFile( jcmpFile )
+        assignment = self.assignResults(results[0], projectFile)
+        
+        if self.dim == 2:
+            eigIdx = assignment.index('eigenvalues')
+            freqs = np.sort( results[0][eigIdx]['eigenvalues']\
+                                                            ['eigenmode'].real )
+        
         if self.dim == 3:
-            self.prescanCartesian = results[0][order['cartesian']]['field']
-            self.prescanCartesian = np.array(self.prescanCartesian)[sortIdx]
+            ppCount = 0
+            parities = [{}]*keys['n_eigenvalues']
+            for i, rtype in enumerate(assignment):
+                if False:#rtype == 'eigenvalues':!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                    freqs = results[0][i]['eigenvalues']\
+                                                    ['eigenmode'].real
+                elif rtype == 'ExportFields':
+                    normal = projectFile.\
+                                getCartesianPostProcessNormal( ppCount )
+                    for jobIndex in range(keys['n_eigenvalues']):
+                        parities[jobIndex][normal] = self.calcParity( 
+                                results[0][i]['field'][jobIndex], normal )
+                    ppCount += 1
+        
+        
+#         order = self.getResultOrder(results[0]) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#         if 'eigenvalues' in order:
+#             freqs = results[0][order['eigenvalues']]['eigenvalues']\
+#                                                             ['eigenmode'].real
+#         else:
+#             raise Exception('Did not receive eigenvalues from JCMsolve!')
+        
+#         sortIdx = np.argsort(freqs)
+#         freqs = freqs[sortIdx]
+#         if self.dim == 3:
+#             self.prescanCartesian = results[0][order['cartesian']]['field']
+#             self.prescanCartesian = np.array(self.prescanCartesian)[sortIdx]
         
         # save the calculated frequencies to the Bandstructure result
         #self.removeWorkingDir(prescan = True)
-        self.prescanFrequencies = freqs
-        self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
-                     1, relevance = 2)
+        if self.dim == 2:
+            self.prescanFrequencies = freqs
+            self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
+                         1, relevance = 2)
+            
+        elif self.dim == 3:
+            #TODO: not working this way! Fix for multiple bands!
+            results = [(freqs[iJob], parities[iJob]) \
+                                for iJob in range(keys['n_eigenvalues'])]
+            self.addResults( results )
+            
         self.message('... done.\n')
     
     
@@ -899,13 +990,14 @@ class BandstructureSolver:
             for iResult, f in enumerate(frequencyList):
                 if not currentJobs[iResult]['status'] in \
                                                     ['Converged', 'Pending']:
-                    jobID, forceStop = self.singleIteration(
+                    jobID, forceStop, jcmpFile = self.singleIteration(
                                                 self.keys, 
                                                 currentJobs[iResult]['freq'],
                                                 degeneracyList[iResult])
                     jobID2idx[jobID] = iResult
                     currentJobs[iResult]['jobID'] = jobID
                     currentJobs[iResult]['forceStop'] = forceStop
+                    currentJobs[iResult]['jcmpFile'] = jcmpFile
                     currentJobs[iResult]['count'] += 1
             
             with Indentation(1, 
@@ -933,10 +1025,35 @@ class BandstructureSolver:
                 resultIdx = jobID2idx[ thisJobID ]
                 thisJob = currentJobs[ resultIdx ]
                 del jobID2idx[thisJobID]
-                frequencies = np.sort(
-                        thisResults[idx][0]['eigenvalues']['eigenmode'].real)
+                
+                jcmpFile = thisJob['jcmpFile']
+                projectFile = ProjectFile( jcmpFile )
+                assignment = self.assignResults(thisResults[idx], projectFile)
+                
+                if self.dim == 2:
+                    eigIdx = assignment.index('eigenvalues')
+                    frequencies = np.sort(
+                            thisResults[idx][eigIdx]['eigenvalues']\
+                                                        ['eigenmode'].real)
                 if self.dim == 3:
-                    thisResults[idx][0]
+                    ppCount = 0
+                    parities = {}
+                    for i, rtype in enumerate(assignment):
+                        if rtype == 'eigenvalues':
+                            frequencies = thisResults[idx][i]['eigenvalues']\
+                                                            ['eigenmode'].real
+                        elif rtype == 'PostProcess':
+                            normal = ProjectFile.\
+                                        getCartesianPostProcessNormal( ppCount )
+                            parities[normal] = self.calcParity( 
+                                    thisResults[idx][i]['field'][0], normal )
+                            ppCount += 1
+                #TODO: <parities> should now hold the calculated parities for
+                # the performed Cartesian FieldExports as a dictionary
+                # {surface_normal_1 : calculated_parity_1, ... }
+                # These results have to be stored in the iterationMonitor and
+                # be used to classify the polarization and add the results this
+                # way to the BandStructure-instance.
                 
                 if thisJob['forceStop']:
                     thisJob['freq'] = frequencies
@@ -956,6 +1073,8 @@ class BandstructureSolver:
                     if thisJob['deviation'] > self.targetAccuracy:
                         thisJob['status'] = 'Running'
                     else:
+                        if self.dim == 3:
+                            thisJob['parities'] = parities
                         thisJob['status'] = 'Converged'
                 
             # Check Result of this loop
@@ -963,16 +1082,23 @@ class BandstructureSolver:
                                                     for iJob in range(Njobs)])
             if Nconverged == Njobs: kPointDone = True
         
-        freqs = np.sort(self.list2FlatArray([currentJobs[iJob]['freq']  \
+        if self.dim == 2:
+            freqs = np.sort(self.list2FlatArray([currentJobs[iJob]['freq']  \
                                                     for iJob in range(Njobs)]))
-        self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
-                     1, relevance = 2)
+            self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
+                         1, relevance = 2)
+            self.updateIterationMonitor(currentJobs, degeneracyList)
+            self.addResults( freqs )
         
-        if self.dim == 2: self.updateIterationMonitor(currentJobs, degeneracyList)
+        elif self.dim == 3:
+            #TODO: not working this way! Fix for multiple bands!
+            results = [(currentJobs[iJob]['freq'],
+                        currentJobs[iJob]['parities']) for iJob in range(Njobs)]
+            self.addResults( results )
+            
         # clean up if cleanMode
         for d in degeneracyList:
             self.removeWorkingDir(band=d[0])
-        self.addResults(freqs, fields = fields)
     
     
     def updateIterationMonitor(self, currentJobs, degeneracyList):
@@ -1014,10 +1140,12 @@ class BandstructureSolver:
          
         with Indentation(1, prefix = '[JCMdaemon] ', 
                          suppress = self.suppressDaemonOutput):
+            wdir = self.getWorkingDir(band=bandNums[0])
             jobID = jcm.solve(self.projectFileName, 
                               keys = keys, 
-                              working_dir=self.getWorkingDir(band=bandNums[0]))
-        return jobID, forceStop
+                              working_dir = wdir)
+        jcmpFile = os.path.join(wdir, self.projectFileName)
+        return jobID, forceStop, jcmpFile
     
     
     def list2FlatArray(self, l):
