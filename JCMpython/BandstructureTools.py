@@ -726,30 +726,32 @@ class BandstructureSolver:
             for freq, parities in frequencies:
                 normals = parities.keys()
                 
-                if len(normals) == 2:
-                    assert set(normals) == set(['y', 'z'])
-                    py = parities['y']
-                    pz = parities['z']
-                    if pz > 0. and py < 0.:
-                        pol = 'TE-like'
-                    elif pz < 0. and py > 0.:
-                        pol = 'TM-like'
-                    else:
-                        pol = None
-                
-                elif len(normals) == 1:
-                    normal = normals[0]
-                    sign = 1
-                    if normal == 'y': sign = -1
-                    if sign*parities[normal] > 0.:
-                        pol = 'TE-like'
-                    else:
-                        pol = 'TM-like'
-                
-                else:
-                    raise Exception('Too many Cartesian FieldExports.')
-                
-                assignedFreqs[pol].append(freq)
+#                 if len(normals) == 2:
+#                     assert set(normals) == set(['y', 'z'])
+#                     py = parities['y']
+#                     pz = parities['z']
+#                     if pz > 0. and py < 0.:
+#                         pol = 'TE-like'
+#                     elif pz < 0. and py > 0.:
+#                         pol = 'TM-like'
+#                     else:
+#                         pol = None
+#                  
+#                 elif len(normals) == 1:
+#                     normal = normals[0]
+#                     sign = 1
+#                     if normal == 'y': sign = -1
+#                     if sign*parities[normal] > 0.:
+#                         pol = 'TE-like'
+#                     else:
+#                         pol = 'TM-like'
+#                  
+#                 else:
+#                     raise Exception('Too many Cartesian FieldExports.')
+#                  
+#                 assignedFreqs[pol].append(freq)
+            
+            print assignedFreqs
             
             for pol in assignedFreqs:
                 assignedFreqs[pol] = np.array(assignedFreqs[pol]).sort()
@@ -899,19 +901,21 @@ class BandstructureSolver:
         
         if self.dim == 3:
             ppCount = 0
-            parities = [{}]*keys['n_eigenvalues']
+            parities = [{} for _ in range(keys['n_eigenvalues'])]
             for i, rtype in enumerate(assignment):
-                if False:#rtype == 'eigenvalues':!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                if rtype == 'eigenvalues':
                     freqs = results[0][i]['eigenvalues']\
                                                     ['eigenmode'].real
                 elif rtype == 'ExportFields':
                     normal = projectFile.\
-                                getCartesianPostProcessNormal( ppCount )
+                                getCartesianPostProcessNormal( ppCount )           
                     for jobIndex in range(keys['n_eigenvalues']):
                         parities[jobIndex][normal] = self.calcParity( 
                                 results[0][i]['field'][jobIndex], normal )
                     ppCount += 1
         
+        print 'freqs', freqs
+        print 'parities', parities
         
 #         order = self.getResultOrder(results[0]) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #         if 'eigenvalues' in order:
