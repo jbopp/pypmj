@@ -890,6 +890,9 @@ class BandstructureSolver:
             _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir)
             results, _ = daemon.wait()
         
+        print results[0][1]['ElectricFieldStrength'][0].shape
+        print results[0][-1]['field'][0].shape
+        
         jcmpFile = os.path.join(wdir, self.projectFileName)
         projectFile = ProjectFile( jcmpFile )
         assignment = self.assignResults(results[0], projectFile)
