@@ -11,7 +11,7 @@ class PC:
     """
     
     # Class constants
-    HZBPCs = ['nanosippe01', 'nanosippe03']
+    HZBPCs = ['nanosippe01', 'dinux7', 'nonano']
     ZusePCs = ['num-pc37', 'htc024']
 
     
@@ -52,33 +52,38 @@ class PC:
 #         print 'Running on machine {0} at {1}'.format(self.name, 
 #                                                      self.institution)
     
-    def basename(self, path, depth = 1):
-        basenames = []
-        for _ in range(depth):
-            basenames.append( os.path.basename( path ) )
-            path = os.path.dirname( path )
-        return os.path.join( *list(reversed(basenames)) )
-    
-    
     def defineProperties(self):
-        # Use the (depth-2-) basename of the current working directory as 
-        # basename for the directory in the storage folder
+        # Use the basename of the current working directory as basename for
+        # the directory in the storage folder
         thisDir = os.getcwd()
-#         thisBaseDir = os.path.basename(thisDir)
-        thisBaseDir = self.basename(thisDir, 2)
+        thisBaseDir = os.path.basename(thisDir)
         
         # HZB PC properties
         if self.institution == 'HZB':
-            self.workspace = os.path.join(os.sep, 'hmi', 'kme', 'workspace')
+            if self.name == 'nonano':
+                self.workspace = os.path.join(os.sep, 'D:', 'Profile', 'kvz', 
+                                              'Eigene Dateien', 'HZB_Work',
+                                              'EclipseWorkspace')
+            else:
+                self.workspace = os.path.join('/net', 'home', 'kvz', 'simulations')
             jcmFolderName = 'JCMsuite_{0}'.format('_'.join(hzbJCMversion))
-            self.jcmBaseFolder = os.path.join(os.sep, 'hmi', 'kme', 'programs',
-                                         jcmFolderName)
+            if self.name == 'nonano':
+                self.jcmBaseFolder = os.path.join(os.sep, 'C:', os.sep, 'Program Files', 
+                                                  'JCMwave', 'JCMsuite')
+            else:
+                self.jcmBaseFolder = os.path.join('/hmi', 'kme', 'programs', 
+                                             jcmFolderName)
             self.jcmRoot = os.path.join(self.jcmBaseFolder, 'ThirdPartySupport',
                                         'Python')
-            self.hmiBaseFolder = os.path.join(os.sep, 'hmi', 'kme', 'programs',
+            self.hmiBaseFolder = os.path.join(os.sep, 'hmi', 'kme', 'programs', 
                                          jcmFolderName)
-            self.storageDir = os.path.join(os.sep, 'net', 'group', 'kme-data',
-                                           'simulations', thisBaseDir)
+            if self.name == 'nonano':
+                self.storageDir = os.path.join(os.sep, 'D:', os.sep, 'Profile', 'kvz', 
+                                              'Eigene Dateien', 'HZB_Work',
+                                              'EclipseWorkspace', 'Results', thisBaseDir)
+            else:
+                self.storageDir = os.path.join(os.sep, 'net', 'group', 'kme-data',
+                                               'simulations_kvz', thisBaseDir)
             self.colorMap = os.path.join(self.workspace, 'ParulaColormap.dat')
             
         # ZIB PC properties
@@ -94,10 +99,9 @@ class PC:
             hzbJCMnoBeta = [i for i in hzbJCMversion if i != 'beta']
             if dataNumerikInstalDir == 'bzfherrm':
                 hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
-                jcmFolderName = 'JCMsuite{0}'.format(''.join(hzbJCMnoCAD))
-            else:
-                hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
-                jcmFolderName = 'JCMsuite.{0}'.format('.'.join(hzbJCMnoCAD))
+                jcmFolderName = 'JCMsuite{0}_beta'.format(''.join(hzbJCMnoCAD))
+            else: 
+                jcmFolderName = 'JCMsuite.{0}'.format('.'.join(hzbJCMnoBeta))
             self.jcmBaseFolder = os.path.join(os.sep, 'nfs', 'datanumerik', 
                                               'instal', dataNumerikInstalDir, 
                                               jcmFolderName)
@@ -109,9 +113,6 @@ class PC:
             self.colorMap = os.path.join(self.workspace, 'ParulaColormap.dat')
         
         self.plotDir = os.path.join(thisDir, 'plots')
-        self.refractiveIndexDatabase = os.path.join(self.workspace,
-                                                    'RefractiveIndex',
-                                                    'database')
     
     def bugfix(self):
         if not 'PYTHONPATH' in os.environ.keys():

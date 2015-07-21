@@ -46,7 +46,7 @@ class Queue:
     """
     
     """
-    def __init__(self, name, PartitionName, JobName, Hostname = 'localhost', 
+    def __init__(self, name, PartitionName, JobName, Hostname = 'htc024.zib.de', 
                  JCMROOT = '/nfs/datanumerik/instal/bzfhamme/JCMsuite.2.17.9/', 
                  Login = 'bzfbarth', Multiplicity = 1, 
                  WorkingDir = '/nfs/datanumerik/bzfbarth/simulations/', 
@@ -64,7 +64,7 @@ class Queue:
         
     def add(self):
         print 'Registering queue', self.name, 'using a multiplicity of',\
-              self.Multiplicity, 'and', self.NThreads, 'CPUs per task'
+              self.Multiplicity, 'and', self.NThreads, 'threads'
         self.resourceIDs = daemon.add_queue(
                                 Hostname = self.Hostname,
                                 JCMROOT = self.JCMROOT,
@@ -72,11 +72,9 @@ class Queue:
                                 Multiplicity = self.Multiplicity,
                                 JobName = self.JobName,
                                 PartitionName = self.PartitionName,
-                                #WorkingDir = self.WorkingDir,
+                                WorkingDir = self.WorkingDir,
                                 NThreads = self.NThreads,
                                 JCMKERNEL = self.JCMKERNEL)
         if self.resourceIDs == 'Error':
-            raise Exception('Error occurred while adding queues.')
-        else:
-            print '... registration was successful.'
+            raise Exception('Error occurred while adding workstations.')
 

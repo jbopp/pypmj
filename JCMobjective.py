@@ -1,3 +1,9 @@
+'''
+Created on 21.04.2015
+
+@author: kvz
+'''
+
 #!/usr/bin/env python
 # coding: utf8
 
@@ -43,7 +49,8 @@ class SimulationAdministration:
                  sureAboutDbase = False, viewGeometry = False, 
                  viewGeometryOnly = False, runOnLocalMachine = False,
                  writeLogsToFile = '', overrideDatabase = False, 
-                 JCMPattern = None, warningMode = True):
+                 JCMPattern = None, warningMode = True, propsNot2record = None):
+        
         self.PC = PC
         self.constants = constants
         self.parameters = parameters
@@ -74,6 +81,7 @@ class SimulationAdministration:
         self.overrideDatabase = overrideDatabase
         self.JCMPattern = JCMPattern
         self.warningMode = warningMode
+        self.propsNot2record = propsNot2record
         self.logs = {}
         self.dateToday = date.today().strftime("%y%m%d")
         self.gatheredResultsFileName = 'results.dat'
@@ -107,9 +115,8 @@ class SimulationAdministration:
         t0 = time.time()
         if not self.doneSimulations == self.Nsimulations:
             self.registerResources()
-        else:
-            if self.verb:
-                print 'All simulations already done. Using data from save files.'
+        elif self.verb:
+            print 'All simulations already done. Using data from save files.'
         self.launchSimulations(self.maxNumberParallelSims)
         if self.viewGeometryOnly: return
         self.gatherResults()
@@ -141,7 +148,6 @@ class SimulationAdministration:
         self.dbFileName = os.path.join(self.workingBaseDir, databaseName)
         if self.verb:
             print 'Using folder', self.workingBaseDir, 'for data storage.'
-     
      
     def connect2database(self):
          
@@ -224,6 +230,8 @@ class SimulationAdministration:
         # be recorded. As a default, all parameters and all geometry-info is
         # used.
         props2record = self.parameters.keys() + self.geometry.keys()
+        if isinstance(self.propsNot2record, list):
+            props2record = [ k for k in props2record if not k in self.propsNot2record ]
          
         # itertools.product is used to find all combinations of parameters
         # for which a distinct simulation needs to be done
@@ -266,7 +274,6 @@ class SimulationAdministration:
             # Get a list of all indices which are in the current database
             self.cursor.execute("select number from {0}".format(tabName))
             indexes = [i[0] for i in self.cursor.fetchall()]
-             
             # If the user is completely sure about the correctness of the
             # database, this mode can be used for very fast comparison. This
             # means, only the known indexes are read from the database and it 
@@ -498,7 +505,7 @@ class SimulationAdministration:
             if self.PC.institution == 'HZB':
                 for w in self.wSpec.keys():
                     spec = self.wSpec[w]
-                    if spec['use']:
+                    if spec['use']:# and (w != 'localhost'):!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                         self.resources.append(
                             Workstation(name = w,
                                         JCMROOT = self.PC.hmiBaseFolder,
@@ -672,16 +679,6 @@ class SimulationAdministration:
                                              names = True)
          
  
-    def analyzeResults(self):
+    def analyzeResults(self, Type = 4, filename = 'reflection_energyIncrease'):
         print 'Analyzing data...'
         pass
-             
- 
-
-
-
-
-# Call of the main function
-if __name__ == "__main__":
-    print 'This file is not meant to be run as a main file!', '*** Exiting ***'
-

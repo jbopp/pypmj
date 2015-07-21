@@ -1,18 +1,13 @@
 from config import *
-from cStringIO import StringIO
 from datetime import timedelta
 import io
 import matplotlib.colors as mcolors
 from numpy.linalg import norm
-from pyparsing import *
 import sys
 import time
 
 
 # =============================================================================
-
-def cm2inch(cm):
-        return cm/2.54
 
 def cosd(arr):
     return np.cos( np.deg2rad(arr) )
@@ -47,19 +42,16 @@ def pwInVol(V, epsR):
     """
     Energy of a plane wave in volume V of material with permittivity epsR
     """
-    return epsR*eps0*V/4.
+    return epsR*epsilon_0*V/4.
 
 
-def calcTransReflAbs(wvl, theta, nR, nT, Kr, Kt, Er, Et, EFieldEnergy,
-                     absorbingDomainIDs):
+def calcTransReflAbs(wvl, theta, nR, nT, Kr, Kt, Er, Et, EFieldEnergy):
     """
     Calculation of reflection, transmission and absorption for all specified
     sources (i.e. number of result fields).
     """
     
     assert len(Er) == len(Et), 'Missmatch in result length of Er and Et.'
-    if not isinstance(absorbingDomainIDs, (list, np.ndarray)):
-        absorbingDomainIDs = [absorbingDomainIDs]
     Nsources = len(Er)
     refl = np.zeros((Nsources))
     trans = np.zeros((Nsources))
@@ -67,18 +59,16 @@ def calcTransReflAbs(wvl, theta, nR, nT, Kr, Kt, Er, Et, EFieldEnergy,
     
     thetas_r = acosd( np.abs(Kr[:,2]) / norm(Kr[0,:]) )
     thetas_t = acosd( np.abs(Kt[:,2]) / norm(Kt[0,:]) )
-    cosFac_r = cosd(thetas_r) / cosd(theta)
-    cosFac_t = cosd(thetas_t) / cosd(theta)
     
     for i in range(Nsources):
+        cosFac_r = cosd(thetas_r) / cosd(theta)
+        cosFac_t = cosd(thetas_t) / cosd(theta)
         
         refl[i] = np.sum( np.sum( np.abs(Er[i])**2, axis=1 ) * cosFac_r ) * nR
         trans[i] = np.sum( np.sum( np.abs(Et[i])**2, axis=1 ) * cosFac_t ) * nT
         
-        omega = c0*2*np.pi/wvl
-        absorb[i] = 0.
-        for ID in absorbingDomainIDs:
-            absorb[i] += -2.*omega*np.imag(EFieldEnergy[i][ID])
+        omega = c*2*np.pi/wvl
+        absorb[i] = -2.*omega*np.imag(EFieldEnergy[i][1])
     return refl, trans, absorb
 
 
@@ -117,38 +107,6 @@ def query_yes_no(question, default="yes"):
         else:
             sys.stdout.write("Please respond with 'yes' or 'no' "
                              "(or 'y' or 'n').\n")
-
-
-class Indentation(object):
-    """
-    Context manager to print the output of a function call with indentation.
-    
-    Usage:
-        with Indentation(1):
-            do_something(my_object)
-    
-    based on: 
-    http://stackoverflow.com/questions/16571150/
-                        how-to-capture-stdout-output-from-a-python-function-call
-    """
-    
-    def __init__(self, indent = 0, spacesPerIndent = 4, prefix = '',
-                 suppress = False):
-        self.spacer = spacesPerIndent * indent * ' ' + prefix
-        self.suppress = suppress
-    
-    def __enter__(self):
-        self._stdout = sys.stdout
-        sys.stdout = self._stringio = StringIO()
-        return self
-    
-    def __exit__(self, *args):
-        lines = self._stringio.getvalue().splitlines()
-        sys.stdout = self._stdout
-        if not self.suppress:
-            for l in lines:
-                print self.spacer + l
-
 
 def getCmap():
         cmapData = np.loadtxt(thisPC.colorMap, delimiter = ', ')
@@ -223,7 +181,7 @@ def sendStatusEmail(pc, text):
         
 
 def runSimusetsInSaveMode(simusets, doAnalyze = False,
-                          Ntrials = 5, verb = True, sendLogs = True):
+                          Ntrials = 5, verb = True):
     
     Nsets = len(simusets)
     thisPC = simusets[0].PC
@@ -248,7 +206,6 @@ def runSimusetsInSaveMode(simusets, doAnalyze = False,
                 trials += 1
                 msg = 'Simulation-set {0} failed at trial {1} of {2}'.\
                       format(i+1, trials, Ntrials)
-                msg += '\n\n***Error Message:\n'+traceback.format_exc()+'\n***'
                 if verb: print msg
                 sendStatusEmail(thisPC.institution, msg)
                 continue
@@ -261,16 +218,6 @@ def runSimusetsInSaveMode(simusets, doAnalyze = False,
          
     tend = tForm(time.time() - ti0)
     msg = 'All simulations finished after {0}'.format(tend)
-    if sendLogs:
-        for i, sset in enumerate(simusets):
-            msg += '\n\n***Logs for simulation set {0}'.format(i+1)
-            for simNumber in sset.logs:
-                msg += '\n\n'
-                msg += 'Log for simulation number {0}\n'.format(
-                          simNumber) +  80 * '=' + '\n'
-                msg += sset.logs[simNumber]
-            msg += '\n***'
-            
     if verb: print msg
     sendStatusEmail(thisPC.institution, msg)
 
@@ -323,7 +270,6 @@ def uniformPathLengthLorentzSampling(xi, xf, Npoints, lorentzXc, lorentzYc,
         return  pathLength(xi, x) - stepLength
     
     
-    from scipy.optimize import newton
     from scipy.optimize import brentq
     
     for i in range(Npoints):
@@ -346,111 +292,3 @@ def uniformPathLengthLorentzSampling(xi, xf, Npoints, lorentzXc, lorentzYc,
 #     plt.show()
     
     return xVals
-
-
-# =============================================================================
-class ProjectFile:
-    
-    
-    def __init__(self, filepath, keys = None):
-        
-        self.filepath = filepath
-        self.keys = keys
-        self.parsed = False
-        if filepath.endswith('.jcmpt'):
-            self.runJcmt2jcm()
-        elif filepath.endswith('.jcmp'):
-            with open(filepath, 'r') as f:
-                self.content = f.read()
-        else:
-            raise Exception('ProjectFile: invalid file extension.')
-        self.analyzeProjectFile()
-        
-
-    def runJcmt2jcm(self):
-        jcm.jcmt2jcm(self.filepath, self.keys)
-        jcmpFile = self.filepath.replace('.jcmpt', '.jcmp')
-        with open(jcmpFile, 'r') as f:
-            self.content = f.read()
-        os.unlink(jcmpFile)
-    
-    
-    def analyzeProjectFile(self):
-        # Define the fragments of the grammar
-        # --
-        
-        # Float
-        point = Literal('.')
-        e = CaselessLiteral('E')
-        plusorminus = Literal('+') | Literal('-')
-        number = Word(nums) 
-        integer = Combine( Optional(plusorminus) + number )
-        floatNumber = Combine( integer +
-                               Optional( point + Optional(number) ) +
-                               Optional( e + integer ) )
-        
-        # Equal sign and comment
-        equal = Suppress(Literal('='))
-        comment = Optional(Literal('#'))
-        
-        # Key and value of an equation
-        field_name = Word(alphanums)
-        field_val = ( floatNumber | nestedExpr('[', ']') | \
-                      Word(alphanums ) | quotedString  )
-        
-        # Define the recursive grammar
-        grammar = Forward() # <- recursivity
-        nestedBrackets = Dict(Group( field_name + Optional(equal) + \
-                                     nestedExpr('{', '}', content=grammar) ))
-        lastChild = Dict(Group(comment + field_name + equal + field_val))
-        grammar << ( lastChild | nestedBrackets  )
-        
-        self.fields = []
-        for match in grammar.scanString(self.content):
-            self.fields.append(match[0])
-        if self.fields:
-            self.parsed = True
-    
-    
-    def getProjectMode(self):
-        if not self.parsed:
-            return None
-        try:
-            return self.fields[0].Project.Electromagnetics.TimeHarmonic.keys()[0]
-        except:
-            return None
-    
-    
-    def getPostProcesses(self):
-        if not self.parsed:
-            return None
-        pps = [ i for i in self.fields if i.keys()[0] == 'PostProcess' ]
-        return pps
-
-
-    def getPostProcessTypes(self):
-        pps = self.getPostProcesses()
-        types = [pp.PostProcess.keys()[0] for pp in pps]
-        return types
- 
-    
-    def getCartesianPostProcessNormal( self, ppIndex ):
-
-        pp = self.getPostProcesses()[ppIndex].PostProcess
-        
-        try:
-            cartesian = pp.ExportFields.Cartesian.keys()
-        except:
-            raise Exception('PostProcess of desired index is not of ' + \
-                            'type ExportFields -> Cartesian.')
-        for c in cartesian:
-            if c.startswith('GridPoints'):
-                return c[-1].lower()
-        raise Exception('Unable to parse Cartesian PostProcess.')
-
-
-
-
-
-
-
