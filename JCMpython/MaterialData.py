@@ -67,7 +67,7 @@ class MaterialData:
 
 
 # =============================================================================
-class RefractiveIndexInfo:
+class RefractiveIndexInfo(object):
     """
     Class RefractiveIndexInfo
     --------------------------
@@ -219,6 +219,7 @@ class RefractiveIndexInfo:
         # If a fixed refractive index is given as material
         if isinstance(material, (int, long, float, complex)):
             self.fixedN = True
+            self.totalWvlRange = ( -np.inf, np.inf )
             self.n = material
             self.name = 'CostumMaterial'
             return
@@ -265,6 +266,8 @@ class RefractiveIndexInfo:
 
     def convertWvl(self, wavelengths):
         """ converts to database specific wavelength unit """
+        if self.fixedN:
+            return wavelengths
         return wavelengths * self.databases[self.db]['wavelengthUnit'] * \
                 self.unitOfLength
 

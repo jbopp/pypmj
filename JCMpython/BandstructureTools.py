@@ -9,6 +9,20 @@ from shutil import rmtree, copyfile
 from warnings import warn
 
 
+# Globals
+solution3DstandardDType = [  ('omega_im', float),
+                             ('omega_re', float),
+                             ('isTE', bool),
+                             ('parity_0', float),
+                             ('parity_1', float),
+                             ('parity_2', float),
+                             ('parity_3', float),
+                             ('parity_4', float),
+                             ('parity_5', float),
+                             ('parity_6', float),
+                             ('spurious', bool)  ]
+
+
 # =============================================================================
 # Functions
 # =============================================================================
@@ -25,62 +39,71 @@ def freq2wvl(freq):
     return 2*np.pi*c0/freq
 
 
+
 # =============================================================================
-class BrillouinPath:
+class blochVector(np.ndarray):
+    """
+    Subclass of numpy.ndarray with additional attribute "name" and
+    extended representation. Except from the additional attribute
+    it behaves exactly like numpy.array with shape (3,).
+    
+    Example:
+        Gamma = blochVector( 0., 0., 0., 'Gamma')
+    """
+    
+    def __new__(cls, x, y, z, name=None):
+        theNDarray = np.asarray( np.array([x, y, z]) )
+        obj = theNDarray.view(cls)
+        obj.name = name
+        obj.theNDarray = theNDarray
+        return obj
+
+    def __array_finalize__(self, obj):
+        if obj is None: return
+        self.name = getattr(obj, 'name', None)
+        self.theNDarray = getattr(obj, 'theNDarray', None)
+    
+    def __str__(self):
+        return 'blochVector({0}, {1})'.format(self.name, 
+                                              self.theNDarray.__str__())
+    
+    def __repr__(self):
+        return self.__str__()
+
+
+
+# =============================================================================
+class BrillouinPath(object):
     """
     Class describing a path along the interconnections of given k-points of the
-    Brillouin zone. The kpoints are given as a numpy-array of shape
-    (numKvals, 3). The <interpolate> method can be used to return a list of <N>
-    k-points along the Brillouin path, including the initial k-points and with
-    approximately equal Euclidian distance.
+    Brillouin zone. The kpoints are given as a list of blochVector-instances.
+    The <interpolate> method can be used to return a list of <N> k-points along
+    the Brillouin path, including the initial k-points and with approximately
+    equal Euclidian distance.
     """
     
     def __init__(self, kpoints):
         
         # Check if kpoints is a list of numpy-array with at most 3 values
-        assert isinstance(kpoints, np.ndarray)
-        assert kpoints.shape[1] == 3
+        assert isinstance(kpoints, list)
+        for k in kpoints:
+            assert isinstance(k, blochVector)
         
         self.kpoints = kpoints
+        self.Nkpoints = len(kpoints)
         self.projections = {} # stores the calculated projections for each N
 
     
     def __repr__(self):
-        
-        if len(self.kpoints.shape) != 2 or self.kpoints.shape[1] != 3:
-            return 'BrillouinPath with kpoints of shape {1}'.format(
-                                                            self.kpoints.shape)
-        
-        ans = 'BrillouinPath{ '
-        fmt = ''
-        count = 0
-        N, M = self.kpoints.shape
-        for _ in range(N):
-            fmt += ' ('
-            for _ in range(M):
-                fmt += '{' + str(count) + '}'
-                if not divmod(count, M)[1] == M-1:
-                    fmt += ', '
-                count += 1
-            if count == N*M:
-                fmt += ')'
-            else:
-                fmt += ') ->'
-        ans += fmt.format(*self.kpoints.flatten().tolist())
-#         sep = ' -> '
-#         for i, k in enumerate(self.kpoints):
-#             vec = '('
-#             for j, comp in enumerate(k):
-#                 if j == 0:
-#                     vec += str(comp)
-#                 vec += ', ' + str(comp) 
-#             vec += ')'
-#             if i == 0:
-#                 ans += vec
-#             else:
-#                 ans += sep + vec
-        ans += ' }'
+        ans = 'BrillouinPath{'
+        for k in self.kpoints:
+            ans += '\n\t' + str(k)
+        ans += '\n}'
         return ans
+    
+    
+    def getNames(self):
+        return [ bv.name for bv in self.kpoints ]
     
     
     def pointDistance(self, p1, p2):
@@ -107,7 +130,10 @@ class BrillouinPath:
         self.kpoints. The initial k-points are guaranteed to be included and 
         the N points have approximately the same Euclidian distance.
         """
-        cornerPoints = self.kpoints.shape[0]
+        cornerPoints = self.Nkpoints
+        if self.Nkpoints == 1:
+            return [self.kpoints[0]]
+        
         lengths = np.empty((cornerPoints-1))
         for i in range(1, cornerPoints):
             lengths[i-1] = self.pointDistance(self.kpoints[i], 
@@ -127,8 +153,8 @@ class BrillouinPath:
             if i == len(pointsPerPath)-1:
                 xVals[lastPPP-1:] = np.linspace( lengths[i-1], lengths[i], ppp)
                 allPaths[lastPPP-1:,:] = \
-                    self.interpolate2points( self.kpoints[i,:], 
-                                             self.kpoints[i+1,:], 
+                    self.interpolate2points( self.kpoints[i], 
+                                             self.kpoints[i+1], 
                                              ppp, 
                                              endpoint=True )
             else:
@@ -137,8 +163,8 @@ class BrillouinPath:
                 xVals[lastPPP-1:lastPPP+ppp-1] = \
                     np.linspace( start, lengths[i], ppp, endpoint=False )
                 allPaths[lastPPP-1:lastPPP+ppp-1,:] = \
-                    self.interpolate2points( self.kpoints[i,:], 
-                                             self.kpoints[i+1,:], 
+                    self.interpolate2points( self.kpoints[i], 
+                                             self.kpoints[i+1], 
                                              ppp )
             lastPPP += ppp
         
@@ -159,12 +185,15 @@ class BrillouinPath:
         """
         if not N in self.projections:
             _ = self.interpolate(N)
+        if self.Nkpoints == 1:
+            return np.array([0.]), np.array([0.])
         xVals, cornerPointXvals = self.projections[N]
         return xVals, cornerPointXvals
 
 
+
 # =============================================================================
-class Bandgap:
+class Bandgap(object):
     """
     
     """
@@ -201,35 +230,201 @@ class Bandgap:
 
 
 # =============================================================================
-class Bandstructure:
+class HexSymmetryPlane(object):
+    """
+    Class that represents the symmetry planes of the hexagonal photonic crystal
+    slab without substrate with respect to the Gamma point. These are six
+    planes through the z-axis with indices 0...5, starting from the x-z-plane
+    plus the xy-plane with index 6.  
+    """
+    
+    def __init__(self, index):
+        self.index = index
+        if index < 6:
+            self.plane = np.array( [ -np.tan(np.pi/6.*index), 1., 0. ] )
+        else:
+            self.plane = np.array( [ 0., 0., 1. ] )
+        self.reflectionMatrix = self.getReflectionMatrix()
+    
+    
+    def getReflectionMatrix(self):
+        """
+        Return the reflection matrix with respect to the plane.
+        """
+        a, b, c = self.plane.tolist()
+        npVec = np.array([a,b,c])
+        ac, bc, cc = npVec.conj()
+        norm = np.square(np.abs(npVec)).sum()
+        return np.array([[ 1.-2.*a*ac/norm, -2.*a*bc/norm,    -2*a*cc/norm ],
+                         [-2.*b*ac/norm,     1.-2.*b*bc/norm, -2*b*cc/norm ],
+                         [-2.*c*ac/norm,    -2.*c*bc/norm,     1.-2*c*cc/norm]])
+
+
+
+# =============================================================================
+class SingleSolution3D(object):
     """
     
     """
     
-    pols3D = ['TE-like', 'TM-like']
+    def __init__(self, freq, fieldsOnSymmetryPlanes):
+        self.freq = freq
+        self.fieldsOnSymmetryPlanes = fieldsOnSymmetryPlanes
+        self.symmetryPlanes = [ HexSymmetryPlane(i) for i in \
+                                            range(len(fieldsOnSymmetryPlanes)) ]
+        
+        # Fill/calculate the data
+        self.data = np.zeros((1,), dtype = solution3DstandardDType)
+        self.data['omega_re'] = self.freq.real
+        self.data['omega_im'] = self.freq.imag
+        self.data['isTE'] = self.calcIsTE()
+        for i in range(7):
+            self.data['parity_{0}'.format(i)] = self.calcParity(i)
+        self.data['spurious'] = self.checkIfSpurious()
+        
+    
+    def calcParity(self, index):
+        field = self.fieldsOnSymmetryPlanes[index]
+        reflMat = self.symmetryPlanes[index].reflectionMatrix
+        
+        fieldc = np.conj(field)
+        norm = np.real( fieldc * field ).sum()
+        
+        shape = field.shape
+        if len(shape) == 3:
+            N, M = shape[:2]
+            field = field.reshape((N*M,3))
+            fieldc = fieldc.reshape((N*M,3))
+        
+        N = field.shape[0]
+        integrand = np.zeros( (N) )
+        
+        for i in range(N):
+            integrand[i] = np.real( np.dot( fieldc[i,:], np.dot(reflMat, 
+                                                                field[i,:]) ) )
+        return integrand.sum() / norm
+    
+    
+    def calcIsTE(self):
+        fieldz = self.fieldsOnSymmetryPlanes[-1]
+        xy = np.abs(fieldz[:,:,:2]).sum()
+        z = np.abs(fieldz[:,:,2]).sum()
+        if z > xy:
+            return False
+        else:
+            return True
+    
+    
+    def checkIfSpurious(self, rtol = 1.e-1):
+        return not np.isclose(np.abs(self.data['parity_6']), 1., rtol = rtol)
+
+
+
+# =============================================================================
+class MultipleSolutions3D(object):
+    """
+    
+    """
+    
+    def __init__(self, solutions = None):
+        if solutions == None:
+            self.solutions = []
+        else:
+            self.solutions = solutions
+        self.up2date = False
+        self.completeArray()
+    
+    def push(self, solution):
+        assert isinstance(solution, SingleSolution3D)
+        self.solutions.append(solution)
+        self.uptodate = False
+    
+    def count(self):
+        return len(self.solutions)
+    
+    def isEmpty(self):
+        return self.count() == 0
+    
+    def completeArray(self):
+        N = self.count()
+        if not self.up2date and N > 0:
+            self.array = np.empty( (N), dtype = solution3DstandardDType )
+            for i,s in enumerate(self.solutions):
+                self.array[i] = s.data
+            self.uptodate = True
+    
+    def getArray(self):
+        self.completeArray()
+        return self.array
+    
+    def sort(self):
+        def extractFreq(solution):
+            return solution.data['omega_re']
+        
+        self.completeArray()
+        if self.isEmpty():
+            return
+        self.solutions.sort(key=extractFreq)
+        self.uptodate = False
+    
+    def getSingleValue(self, solutionIndex, key):
+        return self.solutions[solutionIndex].data[key]
+    
+    def getFrequencies(self, returnComplex = False):
+        self.completeArray()
+        if self.isEmpty():
+            return np.array([])
+        if returnComplex:
+            return self.array['omega_re'] + 1j*self.array['omega_im']
+        else:
+            return self.array['omega_re']
+    
+    def getSpurious(self):
+        self.completeArray()
+        if self.isEmpty():
+            return np.array([])
+        return self.array['spurious']
+    
+    def getSpuriousIndices(self):
+        return np.where( self.getSpurious() == True )[0]
+    
+    def allValid(self):
+        return np.all( self.getSpurious() == False )
+
+
+
+# =============================================================================
+class Bandstructure(object):
+    """
+    
+    """
     
     def __init__(self, dimensionality = None, polarizations=None,
                  nEigenvalues=None, brillouinPath=None, numKvals=None, 
                  verb = True):
         
+        self.verb = verb
         self.dimensionality = dimensionality
         self.polarizations = polarizations
         self.nEigenvalues = nEigenvalues
         self.brillouinPath = brillouinPath
+        if brillouinPath is not None:
+            if brillouinPath.Nkpoints == 1:
+                if numKvals != 1:
+                    self.message('numKvals must be =1 if the brillouinPath' + \
+                                 ' has only one kpoint. Adjusting...')
+                    numKvals = 1
         self.numKvals = numKvals
-        self.verb = verb
+        
         self.isDummy = False
         self.wasSaved = False
         self.bands = {}
         
         if dimensionality is not None:
             assert dimensionality in [2,3], 'Only 2D or 3D is supported.'
-        if dimensionality == 3:
-            if not set(self.polarizations) == set(self.pols3D):
-                warn('For 3D-bandstructures of PhC-slabs the polarizations' +\
-                     ' are always [TE-like, TM-like]. It was changed' +\
-                     'automatically.')
-                self.polarizations = self.pols3D
+        if dimensionality == 3 and self.polarizations[0] != 'all':
+            self.message('In 3D polarizations must be "all".')
+            self.polarizations = ['all']
         
         # Interpolate the Brillouin path
         if isinstance(self.brillouinPath, BrillouinPath):
@@ -245,7 +440,13 @@ class Bandstructure:
         # Initialize numpy-arrays to store the results for the frequencies
         # for each polarization
         for p in polarizations:
-            self.bands[p] = np.zeros((numKvals, nEigenvalues))
+            if dimensionality == 2:
+                self.bands[p] = np.zeros((numKvals, nEigenvalues))
+            elif dimensionality == 3:
+                self.bands[p] = np.zeros((numKvals, nEigenvalues),
+                                         dtype = solution3DstandardDType)
+        
+#         if isinstance( frequencies[0], SingleSolution3D ):
         
         self.numKvalsReady = {}
         for p in polarizations:
@@ -287,6 +488,9 @@ class Bandstructure:
                  ' for polarization ' + polarization + '. Skipping.')
             return
         
+        if isinstance(frequencies, MultipleSolutions3D):
+            frequencies = frequencies.getArray()
+        
         if isinstance(kIndex, int) and \
                         frequencies.shape == (self.nEigenvalues,):
             self.bands[polarization][kIndex, :] = frequencies
@@ -309,7 +513,7 @@ class Bandstructure:
     
     
     def getBands(self, polarization):
-        if polarization in self.polarizations:
+        if polarization in self.polarizations or len(self.polarizations) == 1:
             return self.bands[polarization]
         elif polarization == 'all':
             allbands = self.bands[self.polarizations[0]]
@@ -333,7 +537,12 @@ class Bandstructure:
             if not self.numKvalsReady[p] == self.numKvals:
                 complete = False
         if polarizations == self.polarizations and complete:
-            self.bandgaps, self.Nbandgaps = self.findBandgaps()
+            try:
+                self.bandgaps, self.Nbandgaps = self.findBandgaps()
+            except:
+                warn('Bandgap-finding was not successful.')
+                self.bandgaps = {}
+                self.Nbandgaps = {}
         return complete
     
     
@@ -382,6 +591,7 @@ class Bandstructure:
         resultDict['dimensionality'] = self.dimensionality
         resultDict['polarizations'] = self.polarizations
         resultDict['brillouinPath'] = self.brillouinPath.kpoints
+        resultDict['brillouinPathNames'] = self.brillouinPath.getNames()
         resultDict['numKvals'] = self.numKvals
         np.savez( npzfilename, savename = resultDict )
         self.wasSaved = os.path.abspath( npzfilename + '.npz' )
@@ -404,7 +614,14 @@ class Bandstructure:
             except:
                 self.dimensionality = 2
             self.polarizations = loadedDict['polarizations']
-            self.brillouinPath = BrillouinPath(loadedDict['brillouinPath'])
+            
+            bp = loadedDict['brillouinPath']
+            bpnames = loadedDict['brillouinPathNames']
+            blochVectors = []
+            for i,b in enumerate(bp):
+                blochVectors.append( blochVector(b[0], b[1], b[2], bpnames[i]) )
+            self.brillouinPath = BrillouinPath(blochVectors)
+#             self.brillouinPath = BrillouinPath(loadedDict['brillouinPath'])
             self.interpolateBrillouin()
         
         else:
@@ -444,7 +661,7 @@ class Bandstructure:
         self.message('Loading was successful.')
     
     
-    def plot(self, pathNames, polarizations = 'all', filename = False, 
+    def plot(self, polarizations = 'all', filename = False, 
              showBandgaps = True, showLightcone = False, useAgg = False, colors
              = 'default', figsize_cm = (10.,10.), plotDir = '.',
              bandGapThreshold = 1e-3, legendLOC = 'best'):
@@ -544,7 +761,7 @@ class Bandstructure:
                          zorder = 1001)
             
             plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
-            plt.xticks( self.cornerPointXvals, pathNames )
+            plt.xticks( self.cornerPointXvals, self.brillouinPath.getNames() )
             plt.xlabel('$k$-vector')
             plt.ylabel('angular frequency $\omega$ in \si{\per\second}')
             plt.legend(frameon=False, loc=legendLOC)
@@ -571,7 +788,7 @@ class Bandstructure:
 
 
 # =============================================================================
-class BandstructureSolver:
+class BandstructureSolver(object):
     """
     
     """
@@ -655,107 +872,43 @@ class BandstructureSolver:
         if not os.path.exists(self.workingBaseDir):
             os.makedirs(self.workingBaseDir)
         self.message('Using folder '+self.workingBaseDir+' for data storage.')
-    
-    
+
+
     def run(self, prescanOnly = False):
         self.registerResources()
         
         # Initialize numpy structured array to store the number of iterations,
         # the degeneracy of each band and the final deviation of the calculation
         # for each polarization, k and band
-        if self.dim == 2:
-            self.iterationMonitor = \
-                np.recarray( (len( self.bs.polarizations), 
-                                   self.bs.numKvals, 
-                                   self.bs.nEigenvalues ),
-                             dtype=[('nIters', int), 
-                                    ('degeneracy', int),
-                                    ('deviation', float)])
-            # Set initial values
-            self.iterationMonitor['nIters'].fill(0)
+        self.iterationMonitor = \
+            np.recarray( (len( self.bs.polarizations), 
+                               self.bs.numKvals, 
+                               self.bs.nEigenvalues ),
+                         dtype=[('nIters', int), 
+                                ('degeneracy', int),
+                                ('deviation', float)])
+        # Set initial values
+        self.iterationMonitor['nIters'].fill(0)
         
-        
-        # 2D-case: 
-        # polarizations can be solved separately using different settings
-        # for "FieldComponents" in project.jcmp
-        if self.dim == 2:
-            for self.pIdx, self.currentPol in enumerate(self.bs.polarizations):
-                self.currentK = 0
-                self.message('\n*** Solving polarization {0} ***\n'.\
-                                                        format(self.currentPol))
-                if self.skipPrescan:
-                    self.prescanFrequencies = self.firstKfrequencyGuess
-                else:
-                    self.prescanAtPoint(self.keys, mode = self.prescanMode)
-                    if prescanOnly:
-                        return self.prescanFrequencies
-                self.runIterations()
-        
-        # 3D-case:
-        # polarizations have to be treated together by solving for modes
-        # independent of their polarization. In each step, the mode has to be
-        # classified by means of its E-field parity after iteration.
-        elif self.dim == 3:
-            self.pIdx = 0
-            self.currentPol = 'all'
+        for self.pIdx, self.currentPol in enumerate(self.bs.polarizations):
             self.currentK = 0
-            self.message('\n*** Solving for all polarizations in one run ***\n')
+            self.message('\n*** Solving polarization: {0} ***\n'.\
+                                                    format(self.currentPol))
             if self.skipPrescan:
                 self.prescanFrequencies = self.firstKfrequencyGuess
             else:
                 self.prescanAtPoint(self.keys, mode = self.prescanMode)
                 if prescanOnly:
                     return self.prescanFrequencies
-                
-            return #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            
             self.runIterations()
+
             
         self.message('*** Done ***\n')
         
     
-    def addResults(self, frequencies, polarization = 'current', fields = None):
+    def addResults(self, frequencies, polarization = 'current'):
         if polarization == 'current':
             polarization = self.currentPol
-        
-        #TODO: needs to be checked!
-        # In 3D case where self.currentPol == 'all' the modes have to be 
-        # classified in order to add the results for the right polarization.
-        if polarization == 'all':
-            assignedFreqs = { 'TE-like': [], 'TM-like': [] }
-            for freq, parities in frequencies:
-                normals = parities.keys()
-                
-#                 if len(normals) == 2:
-#                     assert set(normals) == set(['y', 'z'])
-#                     py = parities['y']
-#                     pz = parities['z']
-#                     if pz > 0. and py < 0.:
-#                         pol = 'TE-like'
-#                     elif pz < 0. and py > 0.:
-#                         pol = 'TM-like'
-#                     else:
-#                         pol = None
-#                  
-#                 elif len(normals) == 1:
-#                     normal = normals[0]
-#                     sign = 1
-#                     if normal == 'y': sign = -1
-#                     if sign*parities[normal] > 0.:
-#                         pol = 'TE-like'
-#                     else:
-#                         pol = 'TM-like'
-#                  
-#                 else:
-#                     raise Exception('Too many Cartesian FieldExports.')
-#                  
-#                 assignedFreqs[pol].append(freq)
-            
-            print assignedFreqs
-            
-            for pol in assignedFreqs:
-                assignedFreqs[pol] = np.array(assignedFreqs[pol]).sort()
-                self.bs.addResults(pol, self.currentK, assignedFreqs[pol])
                 
         self.bs.addResults(polarization, self.currentK, frequencies)
         self.currentK += 1
@@ -808,35 +961,6 @@ class BandstructureSolver:
         return keys
     
     
-#     def analyzePolarization(self, field):
-#         sums = np.sum(np.sum(np.abs(field), axis=0), axis=0)
-#         if sums[2] > sums[0] + sums[1]:
-#             return 'TE-like'
-#         else:
-#             return 'TM-like'
-    def calcParity(self, field, normal):
-        p = np.real(np.conj(field)*field)
-        if normal == 'x':
-            ans = p[:,:,1] + p[:,:,2] - p[:,:,0]
-        elif normal == 'y':
-            ans = p[:,:,0] - p[:,:,1] + p[:,:,2]
-        elif normal == 'z':
-            ans = p[:,:,0] + p[:,:,1] - p[:,:,2]
-        return ans.sum() / p.sum()
-    
-    
-    def getResultOrder(self, result):
-        assignment = {'computational_costs': 'computational_costs',
-                      'field': 'cartesian',
-                      'eigenvalues': 'eigenvalues'}
-        order = {}
-        for i,r in enumerate(result):
-            for key in assignment.keys():
-                if key in r.keys():
-                    order[assignment[key]] = i
-        return order
-    
-    
     def assignResults(self, results, projectFile):
         
         assert projectFile.getProjectMode() == 'ResonanceMode', \
@@ -863,10 +987,7 @@ class BandstructureSolver:
         keys['polarization'] = self.currentPol
         keys['guess'] = self.firstKlowerBoundGuess
         keys['selection_criterion'] = mode
-        if self.dim == 2:
-            keys['n_eigenvalues'] = self.bs.nEigenvalues
-        elif self.dim == 3:
-            keys['n_eigenvalues'] = 2*self.bs.nEigenvalues
+        keys['n_eigenvalues'] = self.bs.nEigenvalues
         keys['bloch_vector'] = self.getCurrentBloch()
         
         if self.firstKlowerBoundGuess == 0.:
@@ -890,9 +1011,6 @@ class BandstructureSolver:
             _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir)
             results, _ = daemon.wait()
         
-        print results[0][1]['ElectricFieldStrength'][0].shape
-        print results[0][-1]['field'][0].shape
-        
         jcmpFile = os.path.join(wdir, self.projectFileName)
         projectFile = ProjectFile( jcmpFile )
         assignment = self.assignResults(results[0], projectFile)
@@ -904,34 +1022,26 @@ class BandstructureSolver:
         
         if self.dim == 3:
             ppCount = 0
-            parities = [{} for _ in range(keys['n_eigenvalues'])]
+            fieldsOnSymmetryPlanes = [[] for _ in range(keys['n_eigenvalues'])]
             for i, rtype in enumerate(assignment):
                 if rtype == 'eigenvalues':
                     freqs = results[0][i]['eigenvalues']\
-                                                    ['eigenmode'].real
+                                                    ['eigenmode']
                 elif rtype == 'ExportFields':
-                    normal = projectFile.\
-                                getCartesianPostProcessNormal( ppCount )           
+                    gridtype = projectFile.getExportFieldsGridType(ppCount)
+                    if gridtype == 'Cartesian':
+                        fieldKey = 'field'
+                    elif gridtype == 'PointList':
+                        fieldKey = projectFile.getExportFieldsOutputQuantity(
+                                                                        ppCount)
+                    else:
+                        raise Exception('Unsupported grid type in PostProcess.')
+                    
                     for jobIndex in range(keys['n_eigenvalues']):
-                        parities[jobIndex][normal] = self.calcParity( 
-                                results[0][i]['field'][jobIndex], normal )
+                        thisField = results[0][i][fieldKey][jobIndex]
+                        fieldsOnSymmetryPlanes[jobIndex].append(
+                                                            thisField.copy())
                     ppCount += 1
-        
-        print 'freqs', freqs
-        print 'parities', parities
-        
-#         order = self.getResultOrder(results[0]) #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#         if 'eigenvalues' in order:
-#             freqs = results[0][order['eigenvalues']]['eigenvalues']\
-#                                                             ['eigenmode'].real
-#         else:
-#             raise Exception('Did not receive eigenvalues from JCMsolve!')
-        
-#         sortIdx = np.argsort(freqs)
-#         freqs = freqs[sortIdx]
-#         if self.dim == 3:
-#             self.prescanCartesian = results[0][order['cartesian']]['field']
-#             self.prescanCartesian = np.array(self.prescanCartesian)[sortIdx]
         
         # save the calculated frequencies to the Bandstructure result
         #self.removeWorkingDir(prescan = True)
@@ -941,10 +1051,30 @@ class BandstructureSolver:
                          1, relevance = 2)
             
         elif self.dim == 3:
-            #TODO: not working this way! Fix for multiple bands!
-            results = [(freqs[iJob], parities[iJob]) \
-                                for iJob in range(keys['n_eigenvalues'])]
-            self.addResults( results )
+            results = MultipleSolutions3D()
+            
+            for iJob in range(keys['n_eigenvalues']):
+                results.push( SingleSolution3D(freqs[iJob],
+                                                 fieldsOnSymmetryPlanes[iJob]) )
+            results.sort()
+#             self.prescanResults = results
+            freqs = results.getFrequencies()
+            self.prescanFrequencies = freqs
+            self.message( 'Successful for this k.\n\tFrequencies: {0}'.\
+                                            format(freqs), 1, relevance = 2)
+            allValid = results.allValid()
+            self.message( 'All modes valid: {0}'.format(allValid), 
+                          1, relevance = 2)
+            if not allValid:
+                spurious = results.getSpuriousIndices()
+                self.message( 'Spurious modes:'.format(allValid), 
+                          1, relevance = 2)
+                for si in spurious:
+                    self.message( 'Index: {0}, Parity-z: {1}'.format(
+                                    si, results.getSingleValue(si, 'parity_6')), 
+                                  3, relevance = 2)
+            
+            #TODO: What to do if spurious modes occur?
             
         self.message('... done.\n')
     
@@ -966,17 +1096,16 @@ class BandstructureSolver:
             # Analyze the degeneracy of this guess
             frequencyList, degeneracyList, _ = \
                                 self.analyzeDegeneracy( freqs2iterate )
-            if self.dim == 2:
-                self.iterationMonitor[self.pIdx, self.currentK]['degeneracy'] \
-                                    = self.degeneracyList2assignment(degeneracyList)
+
+            self.iterationMonitor[self.pIdx, self.currentK]['degeneracy'] \
+                                = self.degeneracyList2assignment(degeneracyList)
             
             # Call of the iteration routine for this k-point
             self.iterateKpoint(frequencyList, degeneracyList)
-            if self.dim == 2:
-                sims = self.iterationMonitor[self.pIdx, self.currentK-1]['nIters']
-                self.message('Total number of simulations: {0}'.format(
-                                                                np.sum(sims) ),
-                         1, relevance = 2)
+            sims = self.iterationMonitor[self.pIdx, self.currentK-1]['nIters']
+            self.message('Total number of simulations: {0}'.format(
+                                                            np.sum(sims) ),
+                     1, relevance = 2)
             self.message('... done.\n')
         
         
@@ -986,7 +1115,8 @@ class BandstructureSolver:
         currentJobs = [{'freq': f,
                         'deviation': 10.*self.targetAccuracy,
                         'status': 'Initialization',
-                        'count': 0} for f in frequencyList]
+                        'count': 0,
+                        'add3D': MultipleSolutions3D()} for f in frequencyList]
         
         
         kPointDone = False
@@ -998,14 +1128,15 @@ class BandstructureSolver:
                 if not currentJobs[iResult]['status'] in \
                                                     ['Converged', 'Pending']:
                     jobID, forceStop, jcmpFile = self.singleIteration(
-                                                self.keys, 
-                                                currentJobs[iResult]['freq'],
-                                                degeneracyList[iResult])
+                                                   self.keys, 
+                                                   currentJobs[iResult]['freq'],
+                                                   degeneracyList[iResult])
                     jobID2idx[jobID] = iResult
                     currentJobs[iResult]['jobID'] = jobID
                     currentJobs[iResult]['forceStop'] = forceStop
                     currentJobs[iResult]['jcmpFile'] = jcmpFile
                     currentJobs[iResult]['count'] += 1
+                    currentJobs[iResult]['add3D'] = MultipleSolutions3D()
             
             with Indentation(1, 
                              prefix = '[JCMdaemon] ', 
@@ -1014,10 +1145,8 @@ class BandstructureSolver:
                 jobs2waitFor = [j['jobID'] for j in currentJobs if not\
                                 j['status'] == 'Converged']
                 
-                indices, thisResults, logs = daemon.wait(jobs2waitFor, 
+                indices, thisResults, _ = daemon.wait(jobs2waitFor, 
                                                       break_condition = 'any')
-                print logs
-
             
             # mark jobs which have not been returned by daemon.wait as 'Pending'
             for idx in [ jIdx for jIdx in range(len(jobs2waitFor)) \
@@ -1044,23 +1173,50 @@ class BandstructureSolver:
                                                         ['eigenmode'].real)
                 if self.dim == 3:
                     ppCount = 0
-                    parities = {}
+                    Neigenvalues = len(thisJob['freq'])
+                    fieldsOnSymmetryPlanes = [[] for _ in range(Neigenvalues)]
                     for i, rtype in enumerate(assignment):
                         if rtype == 'eigenvalues':
-                            frequencies = thisResults[idx][i]['eigenvalues']\
-                                                            ['eigenmode'].real
-                        elif rtype == 'PostProcess':
-                            normal = ProjectFile.\
-                                        getCartesianPostProcessNormal( ppCount )
-                            parities[normal] = self.calcParity( 
-                                    thisResults[idx][i]['field'][0], normal )
+                            freqs = thisResults[idx][i]['eigenvalues']\
+                                                            ['eigenmode']
+                        elif rtype == 'ExportFields':
+                            gridtype = projectFile.\
+                                                getExportFieldsGridType(ppCount)
+                            if gridtype == 'Cartesian':
+                                fieldKey = 'field'
+                            elif gridtype == 'PointList':
+                                fieldKey = projectFile.\
+                                        getExportFieldsOutputQuantity(ppCount)
+                            else:
+                                raise Exception(
+                                        'Unsupported grid type in PostProcess.')
+                            
+                            for jobIndex in range(Neigenvalues):
+                                thisField = thisResults[idx][i]\
+                                                    [fieldKey][jobIndex]
+                                fieldsOnSymmetryPlanes[jobIndex].append(
+                                                              thisField.copy())
                             ppCount += 1
-                #TODO: <parities> should now hold the calculated parities for
-                # the performed Cartesian FieldExports as a dictionary
-                # {surface_normal_1 : calculated_parity_1, ... }
-                # These results have to be stored in the iterationMonitor and
-                # be used to classify the polarization and add the results this
-                # way to the BandStructure-instance.
+                    
+                    results = thisJob['add3D']
+            
+                    for iJob in range(Neigenvalues):
+                        results.push( SingleSolution3D(freqs[iJob],
+                                                fieldsOnSymmetryPlanes[iJob]) )
+                    results.sort()
+                    frequencies = results.getFrequencies()
+                    allValid = results.allValid()
+                    self.message( 'All modes valid: {0}'.format(allValid), 
+                                  1, relevance = 2)
+                    if not allValid:
+                        spurious = results.getSpuriousIndices()
+                        self.message( 'Spurious modes:'.format(allValid), 
+                                  1, relevance = 2)
+                        for si in spurious:
+                            self.message( 'Index: {0}, Parity-z: {1}'.format(
+                                            si, results.getSingleValue(si, 
+                                                                'parity_6')), 
+                                          3, relevance = 2)
                 
                 if thisJob['forceStop']:
                     thisJob['freq'] = frequencies
@@ -1080,8 +1236,6 @@ class BandstructureSolver:
                     if thisJob['deviation'] > self.targetAccuracy:
                         thisJob['status'] = 'Running'
                     else:
-                        if self.dim == 3:
-                            thisJob['parities'] = parities
                         thisJob['status'] = 'Converged'
                 
             # Check Result of this loop
@@ -1089,19 +1243,23 @@ class BandstructureSolver:
                                                     for iJob in range(Njobs)])
             if Nconverged == Njobs: kPointDone = True
         
-        if self.dim == 2:
-            freqs = np.sort(self.list2FlatArray([currentJobs[iJob]['freq']  \
+        
+        freqs = np.sort(self.list2FlatArray([currentJobs[iJob]['freq']  \
                                                     for iJob in range(Njobs)]))
-            self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
-                         1, relevance = 2)
-            self.updateIterationMonitor(currentJobs, degeneracyList)
+        self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
+                     1, relevance = 2)
+        self.updateIterationMonitor(currentJobs, degeneracyList)
+        
+        if self.dim == 2:
             self.addResults( freqs )
         
         elif self.dim == 3:
-            #TODO: not working this way! Fix for multiple bands!
-            results = [(currentJobs[iJob]['freq'],
-                        currentJobs[iJob]['parities']) for iJob in range(Njobs)]
-            self.addResults( results )
+            allResults = MultipleSolutions3D()
+            for iJob in range(Njobs):
+                for s in currentJobs[iJob]['add3D'].solutions:
+                    allResults.push(s)
+            allResults.sort()
+            self.addResults( allResults )
             
         # clean up if cleanMode
         for d in degeneracyList:
@@ -1228,6 +1386,7 @@ class BandstructureSolver:
     
     
     def extrapolateFrequencies(self, previousKs, freqs, nextK):
+        
         nFreqs = freqs.shape[1]
         extrapolatedFreqs = np.empty((nFreqs,))
         
@@ -1257,20 +1416,6 @@ class BandstructureSolver:
         return ans.sum() / p.sum()
     
     
-    def classify_mode(self, fieldy, fieldz):
-        py = self.calc_parity(fieldy, 'y')
-        pz = self.calc_parity(fieldz, 'z')
-        
-        if pz > 0. and py < 0.:
-            return 'TE-like'
-        elif pz < 0. and py > 0.:
-            return 'TM-like'
-        else:
-            warn('Found parities py={0:.2f} and pz={1:.2f} which cannot be classified.'.\
-                 format(py, pz))
-            return 'unclassified'
-    
-    
     def getFreqs(self):
         if hasattr(self, 'prescanFrequencies'):
             if hasattr(self, 'prescanCartesian'):
@@ -1279,7 +1424,10 @@ class BandstructureSolver:
                 ans = self.prescanFrequencies.copy()
                 del self.prescanFrequencies
                 return (ans, 'prescan')
-        return self.bs.getBands(self.currentPol)
+        if self.dim == 2:
+            return self.bs.getBands(self.currentPol)
+        elif self.dim == 3:
+            return self.bs.getBands(self.currentPol)['omega_re']
     
     
     def getNextFrequencyGuess(self):
@@ -1353,18 +1501,18 @@ class BandstructureSolver:
 
 
 # =============================================================================
-def unitTest(silent=True):
+def unitTest(silent=False):
     
     # ====================================================
     # Test of Bandstructure class
     # ====================================================
     
     testFilename = 'unitTestBandstructure'
-    pathNames = [r'$\Gamma$', r'$M$', r'$K$', r'$\Gamma$']
     
     sampleBS = Bandstructure()
     sampleBS.load('.', testFilename)
-#     if not silent: sampleBS.plot(pathNames)
+#     sampleBS.save('.', testFilename)
+#     if not silent: sampleBS.plot()
     
     polarizations = sampleBS.polarizations
     numKvals = sampleBS.numKvals
@@ -1372,12 +1520,12 @@ def unitTest(silent=True):
     brillouinPath = sampleBS.brillouinPath
     bands = sampleBS.bands
     
-    newBS = Bandstructure( polarizations, nEigenvalues, brillouinPath, 
+    newBS = Bandstructure( 2, polarizations, nEigenvalues, brillouinPath, 
                            numKvals )
     for p in polarizations:
         newBS.addResults(polarization=p, kIndex = 'all', 
                          frequencies=bands[p])
-    if not silent: newBS.plot(pathNames, legendLOC='lower center')
+    if not silent: newBS.plot(legendLOC='lower center')
     print 'End of Bandstructure-class tests.\n'
     
     print 'Sample print output:'

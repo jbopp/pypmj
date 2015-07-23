@@ -432,10 +432,26 @@ class ProjectFile:
         pps = self.getPostProcesses()
         types = [pp.PostProcess.keys()[0] for pp in pps]
         return types
- 
     
-    def getCartesianPostProcessNormal( self, ppIndex ):
-
+    
+    def getExportFieldsGridType(self, ppIndex):
+        pp = self.getPostProcesses()[ppIndex].PostProcess.ExportFields
+        if 'Cartesian' in pp.keys():
+            return 'Cartesian'
+        elif 'PointList' in pp.keys():
+            return 'PointList' 
+        elif 'Simplex' in pp.keys():
+            return 'Simplex'
+        else:
+            return 'Unknown'
+        
+    
+    def getExportFieldsOutputQuantity(self, ppIndex):
+        return self.getPostProcesses()[ppIndex].PostProcess.\
+                                            ExportFields.OutputQuantity
+    
+    
+    def getCartesianPostProcessNormal(self, ppIndex):
         pp = self.getPostProcesses()[ppIndex].PostProcess
         
         try:
