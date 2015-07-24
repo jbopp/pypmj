@@ -481,7 +481,7 @@ class Bandstructure(object):
         self.kpoints = self.brillouinPath.interpolate( self.numKvals )
     
     
-    def addResults(self, polarization, kIndex, frequencies):
+    def addResults(self, polarization, kIndex, frequencies, plotLive=False):
         
         if self.numKvalsReady[polarization] == self.numKvals:
             warn('Bandstructure.addResults: Already have all results' +\
@@ -510,6 +510,9 @@ class Bandstructure(object):
         if self.numKvalsReady[polarization] == self.numKvals:
             self.message('Bandstructure.addResults: Got all results for ' +\
                          'polarization ' + polarization)
+        
+        if plotLive:
+            self.plotLive(polarization = polarization)
     
     
     def getBands(self, polarization):
@@ -661,6 +664,56 @@ class Bandstructure(object):
         self.message('Loading was successful.')
     
     
+    def plotLive(self, polarization, saveSnapshot = True):
+        try:
+            if not hasattr(self, 'liveFigure'):
+                import matplotlib.pyplot as plt
+                plt.switch_backend('TkAgg')
+                plt.ion()
+                self.liveFigure = plt.figure()
+                self.liveLines = {}
+                for p in self.polarizations:
+                    self.liveLines[p] = [None]*self.nEigenvalues
+                for i in range(self.nEigenvalues):
+                    for p in self.polarizations:
+                        self.liveLines[p][i], = plt.plot( [], [], '-o',
+                                  color=HZBcolors[self.polarizations.index(p)] )
+                    plt.xlim((self.cornerPointXvals[0], 
+                              self.cornerPointXvals[-1]))
+                    plt.xticks( self.cornerPointXvals, 
+                                self.brillouinPath.getNames() )
+                    plt.xlabel('$k$-vector')
+                    plt.ylabel('angular frequency $\omega$ in $s^{-1}$')
+                    plt.title('Live Plot')
+                    self.liveAxis = plt.gca()
+                    self.liveFigure.canvas.draw()
+            
+            thisN = self.numKvalsReady[polarization]
+            x = self.xVals[:thisN]
+
+            for i in range(self.nEigenvalues):
+                self.liveLines[polarization][i].set_xdata(x)
+                if self.dimensionality == 2:
+                    self.liveLines[polarization][i].set_ydata(
+                                    self.bands[polarization][:thisN, i])
+                elif self.dimensionality == 3:
+                    self.liveLines[polarization][i].set_ydata(
+                                self.bands[polarization][:thisN, i]['omega_re'])
+                
+            self.liveAxis.relim()
+            self.liveAxis.autoscale_view()
+            self.liveFigure.canvas.draw()
+            if saveSnapshot:
+                if not os.path.isdir('snapshots'):
+                    os.mkdir('snapshots')
+                self.liveFigure.savefig( 
+                            os.path.join('snapshots',
+                                         'snapshot_{0:04d}'.format(thisN)) )
+        
+        except:
+            self.message('Sorry, the live plotting failed.')
+
+    
     def plot(self, polarizations = 'all', filename = False, 
              showBandgaps = True, showLightcone = False, useAgg = False, colors
              = 'default', figsize_cm = (10.,10.), plotDir = '.',
@@ -804,7 +857,7 @@ class BandstructureSolver(object):
                  extrapolationMode = 'spline', absorption = False, customFolder
                  = '', cleanMode = False, wSpec = {}, qSpec = {},
                  runOnLocalMachine = False, resourceInfo = False, verb = True,
-                 infoLevel = 3, suppressDaemonOutput = False):
+                 infoLevel = 3, suppressDaemonOutput = False, plotLive = False):
         
         self.keys = keys
         self.bs = bandstructure2solve
@@ -839,6 +892,7 @@ class BandstructureSolver(object):
         self.verb = verb
         self.infoLevel = infoLevel
         self.suppressDaemonOutput = suppressDaemonOutput
+        self.plotLive = plotLive
         self.dateToday = date.today().strftime("%y%m%d")
         
         if targetAccuracy == 'fromKeys':
@@ -897,7 +951,17 @@ class BandstructureSolver(object):
             if self.skipPrescan:
                 self.prescanFrequencies = self.firstKfrequencyGuess
             else:
-                self.prescanAtPoint(self.keys, mode = self.prescanMode)
+                success = self.prescanAtPoint(self.keys, mode=self.prescanMode)
+                MaxTrials = 10
+                trials = 1
+                while not success or trials > MaxTrials:
+                    #TODO: find a better way to avoid suprious modes here
+                    self.firstKlowerBoundGuess *= 1.1
+                    success = self.prescanAtPoint(self.keys, 
+                                                  mode=self.prescanMode)
+                    trials += 1
+                if not success:
+                    raise Exception('Unable to find a matching prescan.')
                 if prescanOnly:
                     return self.prescanFrequencies
             self.runIterations()
@@ -910,7 +974,8 @@ class BandstructureSolver(object):
         if polarization == 'current':
             polarization = self.currentPol
                 
-        self.bs.addResults(polarization, self.currentK, frequencies)
+        self.bs.addResults(polarization, self.currentK, frequencies,
+                           plotLive = self.plotLive)
         self.currentK += 1
         
     
@@ -1011,9 +1076,21 @@ class BandstructureSolver(object):
             _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir)
             results, _ = daemon.wait()
         
-        jcmpFile = os.path.join(wdir, self.projectFileName)
-        projectFile = ProjectFile( jcmpFile )
-        assignment = self.assignResults(results[0], projectFile)
+        if not hasattr(self, 'assignment'):
+            jcmpFile = os.path.join(wdir, self.projectFileName)
+            projectFile = ProjectFile( jcmpFile )
+            self.assignment = self.assignResults(results[0], projectFile)
+            self.gridtypes = []
+            self.fieldKeys = []
+            ppCount = 0
+            for rtype in self.assignment:
+                if rtype == 'ExportFields':
+                    self.gridtypes.append( projectFile.\
+                                        getExportFieldsGridType(ppCount) )
+                    self.fieldKeys.append( projectFile.\
+                                        getExportFieldsOutputQuantity(ppCount) )
+                    ppCount += 1
+        assignment = self.assignment
         
         if self.dim == 2:
             eigIdx = assignment.index('eigenvalues')
@@ -1028,12 +1105,11 @@ class BandstructureSolver(object):
                     freqs = results[0][i]['eigenvalues']\
                                                     ['eigenmode']
                 elif rtype == 'ExportFields':
-                    gridtype = projectFile.getExportFieldsGridType(ppCount)
+                    gridtype = self.gridtypes[ppCount]
                     if gridtype == 'Cartesian':
                         fieldKey = 'field'
                     elif gridtype == 'PointList':
-                        fieldKey = projectFile.getExportFieldsOutputQuantity(
-                                                                        ppCount)
+                        fieldKey = self.fieldKeys[ppCount]
                     else:
                         raise Exception('Unsupported grid type in PostProcess.')
                     
@@ -1060,7 +1136,7 @@ class BandstructureSolver(object):
 #             self.prescanResults = results
             freqs = results.getFrequencies()
             self.prescanFrequencies = freqs
-            self.message( 'Successful for this k.\n\tFrequencies: {0}'.\
+            self.message( 'Ready for this k.\n\tFrequencies: {0}'.\
                                             format(freqs), 1, relevance = 2)
             allValid = results.allValid()
             self.message( 'All modes valid: {0}'.format(allValid), 
@@ -1073,7 +1149,7 @@ class BandstructureSolver(object):
                     self.message( 'Index: {0}, Parity-z: {1}'.format(
                                     si, results.getSingleValue(si, 'parity_6')), 
                                   3, relevance = 2)
-            
+            return allValid
             #TODO: What to do if spurious modes occur?
             
         self.message('... done.\n')
@@ -1162,9 +1238,19 @@ class BandstructureSolver(object):
                 thisJob = currentJobs[ resultIdx ]
                 del jobID2idx[thisJobID]
                 
-                jcmpFile = thisJob['jcmpFile']
-                projectFile = ProjectFile( jcmpFile )
-                assignment = self.assignResults(thisResults[idx], projectFile)
+                if not hasattr(self, 'assignment'):
+                    jcmpFile = thisJob['jcmpFile']
+                    projectFile = ProjectFile( jcmpFile )
+                    self.assignment = self.assignResults(thisResults[idx], 
+                                                         projectFile)
+                    self.gridtypes = []
+                    ppCount = 0
+                    for rtype in self.assignment:
+                        if rtype == 'ExportFields':
+                            self.gridtypes.append( projectFile.\
+                                            getExportFieldsGridType(ppCount) )
+                            ppCount += 1
+                assignment = self.assignment
                 
                 if self.dim == 2:
                     eigIdx = assignment.index('eigenvalues')
@@ -1180,13 +1266,11 @@ class BandstructureSolver(object):
                             freqs = thisResults[idx][i]['eigenvalues']\
                                                             ['eigenmode']
                         elif rtype == 'ExportFields':
-                            gridtype = projectFile.\
-                                                getExportFieldsGridType(ppCount)
+                            gridtype = self.gridtypes[ppCount]
                             if gridtype == 'Cartesian':
                                 fieldKey = 'field'
                             elif gridtype == 'PointList':
-                                fieldKey = projectFile.\
-                                        getExportFieldsOutputQuantity(ppCount)
+                                fieldKey = self.fieldKeys[ppCount]
                             else:
                                 raise Exception(
                                         'Unsupported grid type in PostProcess.')
@@ -1580,7 +1664,8 @@ def unitTest(silent=False):
                                     qSpec = queueSpecification,
                                     cleanMode = True,
                                     suppressDaemonOutput = True,
-                                    infoLevel = 2 )
+                                    infoLevel = 2,
+                                    plotLive = True )
     BSsolver.run()
 
 if __name__ == '__main__':
