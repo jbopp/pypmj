@@ -57,6 +57,9 @@ class PC:
         # the directory in the storage folder
         thisDir = os.getcwd()
         thisBaseDir = os.path.basename(thisDir)
+        self.geometryLibrary = os.path.join(thisDir, 'geometryLibrary')
+        if not os.path.exists(self.geometryLibrary):
+            os.makedirs(self.geometryLibrary)
         
         # HZB PC properties
         if self.institution == 'HZB':

@@ -40,18 +40,21 @@ class SimulationAdministration:
      
     """
     def __init__(self, PC, constants, parameters, geometry, jobName, 
-                 geometryFolder = 'geometry', resultFolder = 'results', 
-                 tag_ = '_01', customFolder = '', wSpec = {}, qSpec = {},
-                 resourceInfo = False, cleanMode = True, delim = ', ',
-                 useSaveFilesIfAvailable = True, silentLoad = True,
-                 loadDataOnly = False, maxNumberParallelSims = 'all', 
-                 verb = True, loadFromResultsFile = False, 
-                 sureAboutDbase = False, viewGeometry = False, 
-                 viewGeometryOnly = False, runOnLocalMachine = False,
-                 writeLogsToFile = '', overrideDatabase = False, 
-                 JCMPattern = None, warningMode = True, propsNot2record = None):
+                 geometryFolder = 'geometry', resultFolder = 'results', tag_ =
+                 '_01', customFolder = '', wSpec = {}, qSpec = {}, resourceInfo
+                 = False, cleanMode = True, delim = ', ',
+                 useSaveFilesIfAvailable = True, silentLoad = True, loadDataOnly
+                 = False, maxNumberParallelSims = 'all', verb = True,
+                 loadFromResultsFile = False, sureAboutDbase = False,
+                 viewGeometry = False, viewGeometryOnly = False,
+                 generateGeometryLibrary = False, useGeometryLibrary = True,
+                 runOnLocalMachine = False, writeLogsToFile = '',
+                 overrideDatabase = False, JCMPattern = None, warningMode =
+                 True, propsNot2record = None):
         
         self.PC = PC
+        self.geometryLibraryFile = os.path.join(self.PC.geometryLibrary, 
+                                                'geometryLibrary.pkl')
         self.constants = constants
         self.parameters = parameters
         self.geometry = geometry
@@ -76,6 +79,11 @@ class SimulationAdministration:
         self.viewGeometryOnly = viewGeometryOnly
         if viewGeometryOnly:
             self.viewGeometry = True
+        self.generateGeometryLibrary = generateGeometryLibrary
+        if generateGeometryLibrary:
+            self.useGeometryLibrary = False
+        else:
+            self.useGeometryLibrary = useGeometryLibrary
         self.runOnLocalMachine = runOnLocalMachine
         self.writeLogsToFile = writeLogsToFile
         self.overrideDatabase = overrideDatabase
@@ -449,36 +457,76 @@ class SimulationAdministration:
         self.sortIndices = np.argsort(geomtetryTypes)
         for i in range(self.NdifferentGeometries):
             self.rerunJCMgeo[i] = np.where(sortedGeometryTypes == (i+1))[0][0]
- 
+    
+    
+    def loadFromGeometryLibrary(self):
+        import pickle
+        if not os.path.exists(self.geometryLibraryFile):
+            return {}
+        else:
+            with open(self.geometryLibraryFile, 'r') as f:
+                return pickle.load(f)
+    
+    
+    def saveToGeometryLibrary(self, glKey, glValue):
+        import pickle
+        currentLibrary = self.loadFromGeometryLibrary()
+        currentLibrary[glKey] = glValue
+        with open(self.geometryLibraryFile, 'w') as f:
+            pickle.dump(currentLibrary, f)
+    
          
     def runJCMgeo(self, simulation, backup = False):
         """
         Runs jcmwave.geo() inside the desired subfolder
         """
-        # Run jcm.geo using the above defined parameters
-        thisDir = os.getcwd()
-        if not os.path.exists(self.geometryFolder):
-            raise Exception(
-                'Subfolder "{0}" is missing.'.format(self.geometryFolder))
-            return
-        os.chdir(self.geometryFolder)
-        jcm.geo(working_dir = '.', keys = simulation.keys, 
-                jcmt_pattern = self.JCMPattern)
-        os.chdir(thisDir)
-      
-         
-            # Copy grid.jcm to project directory and store backup files of grid.jcm 
-            # and layout.jcm
-        cp( os.path.join(self.geometryFolder, 'grid.jcm'), 
-                    os.path.join('grid.jcm') )
-        if backup:
+        
+        loadedFromLibrary = False
+        if self.useGeometryLibrary:
+            jcm.jcmt2jcm( os.path.join(self.geometryFolder, 'layout.jcmt'),
+                          keys = simulation.keys )
+            with open( os.path.join(self.geometryFolder, 
+                                    'layout.jcm'), 'r' ) as f:
+                glKey = f.read()
+            geometryLibrary = self.loadFromGeometryLibrary()
+            if glKey in geometryLibrary:
+                with open( 'grid.jcm', 'w' ) as f:
+                    f.write(geometryLibrary[glKey])
+                loadedFromLibrary = True
+        
+        if not loadedFromLibrary:
+            # Run jcm.geo using the above defined parameters
+            thisDir = os.getcwd()
+            if not os.path.exists(self.geometryFolder):
+                raise Exception(
+                    'Subfolder "{0}" is missing.'.format(self.geometryFolder))
+                return
+            os.chdir(self.geometryFolder)
+            jcm.geo(working_dir = '.', keys = simulation.keys, 
+                    jcmt_pattern = self.JCMPattern)
+            os.chdir(thisDir)
+          
+            # Copy grid.jcm to project directory and store backup files of
+            # grid.jcm and layout.jcm
+            cp( os.path.join(self.geometryFolder, 'grid.jcm'), 'grid.jcm' )
+        
+        if self.generateGeometryLibrary:
+            with open( os.path.join(self.geometryFolder, 
+                                    'layout.jcm'), 'r' ) as f:
+                glKey = f.read()
+            with open( os.path.join(self.geometryFolder, 
+                                    'grid.jcm'), 'r' ) as f:
+                glValue = f.read()
+            self.saveToGeometryLibrary(glKey, glValue)
+        
+        if backup and not loadedFromLibrary:
             cp( os.path.join(self.geometryFolder, 'grid.jcm'), 
                     os.path.join('geometry', 'grid'+self.tag_+'.jcm') )
             cp( os.path.join(self.geometryFolder, 'layout.jcm'), 
                     os.path.join('geometry', 'layout'+self.tag_+'.jcm') )
       
         if self.viewGeometry:
-            jcm.view(os.path.join(self.geometryFolder, 'grid.jcm'))
+            jcm.view('grid.jcm')
  
  
     def registerResources(self):
@@ -552,7 +600,8 @@ class SimulationAdministration:
                             not self.doneSimulations == self.Nsimulations):
                 if self.verb: print 'Running JCMgeo...'
                 self.runJCMgeo(simulation=sim)
-            if not self.viewGeometryOnly:
+                
+            if not self.viewGeometryOnly and not self.generateGeometryLibrary:
                 sim.run(pattern = self.JCMPattern)
                 if hasattr(sim, 'jobID'):
                     if self.verb: 
