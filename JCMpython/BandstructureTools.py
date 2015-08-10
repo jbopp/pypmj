@@ -82,7 +82,7 @@ class BrillouinPath(object):
     equal Euclidian distance.
     """
     
-    def __init__(self, kpoints):
+    def __init__(self, kpoints, manuallyInterpolatedKpoints = None):
         
         # Check if kpoints is a list of numpy-array with at most 3 values
         assert isinstance(kpoints, list)
@@ -90,6 +90,7 @@ class BrillouinPath(object):
             assert isinstance(k, blochVector)
         
         self.kpoints = kpoints
+        self.manuallyInterpolatedKpoints = manuallyInterpolatedKpoints
         self.Nkpoints = len(kpoints)
         self.projections = {} # stores the calculated projections for each N
 
@@ -130,6 +131,10 @@ class BrillouinPath(object):
         self.kpoints. The initial k-points are guaranteed to be included and 
         the N points have approximately the same Euclidian distance.
         """
+        
+        if isinstance(self.manuallyInterpolatedKpoints, np.ndarray):
+            return self.manuallyInterpolatedKpoints
+        
         cornerPoints = self.Nkpoints
         if self.Nkpoints == 1:
             return [self.kpoints[0]]
