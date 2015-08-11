@@ -665,7 +665,12 @@ class Bandstructure(object):
         self.numKvalsReady = {}
         for p in self.polarizations:
             self.numKvalsReady[p] = self.numKvals
-            
+        
+        if not hasattr(self, 'xVals'):
+            self.interpolateBrillouin()
+            self.xVals, self.cornerPointXvals = \
+                            self.brillouinPath.projectedKpoints(self.numKvals)
+        
         self.message('Loading was successful.')
     
     
@@ -867,6 +872,7 @@ class BandstructureSolver(object):
         self.keys = keys
         self.bs = bandstructure2solve
         self.dim = bandstructure2solve.dimensionality
+        self.JCMPattern = str(self.dim) + 'D'
         self.materialPore = materialPore
         self.materialSlab = materialSlab
         self.materialSubspace = materialSubspace
@@ -1078,7 +1084,8 @@ class BandstructureSolver(object):
         with Indentation(1, prefix = '[JCMdaemon] ', 
                          suppress = self.suppressDaemonOutput):
             wdir = self.getWorkingDir(prescan = True)
-            _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir)
+            _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir,
+                          jcmt_pattern = self.JCMPattern)
             results, _ = daemon.wait()
         
         if not hasattr(self, 'assignment'):
@@ -1130,6 +1137,7 @@ class BandstructureSolver(object):
             self.prescanFrequencies = freqs
             self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
                          1, relevance = 2)
+            return True
             
         elif self.dim == 3:
             results = MultipleSolutions3D()
@@ -1397,7 +1405,8 @@ class BandstructureSolver(object):
             wdir = self.getWorkingDir(band=bandNums[0])
             jobID = jcm.solve(self.projectFileName, 
                               keys = keys, 
-                              working_dir = wdir)
+                              working_dir = wdir,
+                              jcmt_pattern = self.JCMPattern)
         jcmpFile = os.path.join(wdir, self.projectFileName)
         return jobID, forceStop, jcmpFile
     
@@ -1589,6 +1598,165 @@ class BandstructureSolver(object):
             daemon.resource_info(self.resourceIDs)
 
 
+
+# =============================================================================
+# ============================ MPB Loading Tools ==============================
+# =============================================================================
+
+def getNumInterpolatedKpointsFromCTL(ctlFile):
+    with open(ctlFile, 'r') as f:
+        lines = f.readlines()
+    for l in lines:
+        sl = l.split(' ')
+        if sl[:2] == ['(set!', 'k-points'] and '(interpolate' in sl:
+            return int( sl[ sl.index('(interpolate')+1] )
+    return None
+
+
+def coordinateConversion(vector, lattice, direction = 'reciprocal->cartesian'):
+    
+    def changeBasis( vec, oldBasis, newBasis ):
+        matrix = np.dot( np.linalg.inv(newBasis), oldBasis )
+        return np.dot( matrix, vec )
+    
+    cartesian = np.vstack((np.array([ 1., 0., 0. ]), 
+                           np.array([ 0., 1., 0. ]), 
+                           np.array([ 0., 0., 1. ]))).T
+    reciprocal = np.linalg.inv( lattice.T )
+    
+    if direction == 'reciprocal->cartesian':
+        return changeBasis( vector, reciprocal, cartesian )
+    elif direction == 'cartesian->reciprocal':
+        return changeBasis( vector, cartesian, reciprocal )
+    elif direction == 'lattice->cartesian':
+        return changeBasis( vector, lattice, cartesian )
+    elif direction == 'cartesian->lattice':
+        return changeBasis( vector, cartesian, lattice )
+    elif direction == 'reciprocal->lattice':
+        return changeBasis( vector, reciprocal, lattice )
+    elif direction == 'lattice->reciprocal':
+        return changeBasis( vector, lattice, reciprocal )
+    else:
+        raise Exception('Unknown direction.')
+        return
+
+
+def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality, 
+                             pathNames = None, convertFreqs = False,
+                             lattice = None, maxBands = np.inf):
+    pols = polFileDictionary.keys()
+    
+    # load numpy structured arrays from the MPB result files for each 
+    # polarization
+    data = {}
+    for p in pols:
+        dropname = p.lower()+'freqs'
+        dataFile = polFileDictionary[p]
+        data[p] = np.lib.recfunctions.drop_fields(np.genfromtxt(dataFile, 
+                                                                delimiter=', ', 
+                                                                names = True), 
+                                                  dropname)
+    
+    # check for data shape and dtype consistency
+    for i, p in enumerate(pols[1:]):
+        assert data[p].shape == data[pols[i-1]].shape, 'Found missmatch in data shapes'
+        assert data[p].dtype == data[pols[i-1]].dtype, 'Found missmatch in data dtypes'
+        names = data[p].dtype.names
+        for name in ['k_index', 'k1', 'k2', 'k3', 'kmag2pi']:
+            assert name in names, 'name '+name+' is not in dtype: '+str(names)
+    
+    # extract k-point specific data
+    sample = data[pols[0]]
+    NumKvals = len(sample['k1'])
+    nEigenvalues = int(names[-1].split('_')[-1])
+    nEigenvalues2use = nEigenvalues
+    if not np.isinf(maxBands):
+        if maxBands < nEigenvalues:
+            nEigenvalues2use = maxBands
+    kpointsFromF = np.empty( (NumKvals, 3) )
+    kpointsFromF[:,0] = sample['k1']
+    kpointsFromF[:,1] = sample['k2']
+    kpointsFromF[:,2] = sample['k3']
+    if lattice is not None:
+        assert isinstance(lattice, np.ndarray)
+        assert lattice.shape == (3,3)
+        for i in range(NumKvals):
+            kpointsFromF[i,:] = coordinateConversion( kpointsFromF[i,:], 
+                                                      lattice )
+    
+    print 'Found data for', NumKvals, 'k-points and', nEigenvalues, 'bands'
+    if nEigenvalues2use != nEigenvalues:
+        print 'Using only', nEigenvalues2use, 'bands'
+        nEigenvalues = nEigenvalues2use
+    
+    # read the number of interpolated k-points from the CTL-file
+    mpbInterpolateKpoints = getNumInterpolatedKpointsFromCTL(ctlFile)
+    print 'Number of interpolated points between each k-point is', mpbInterpolateKpoints
+    
+    # The number of non-interpolated k-points in the MPB-simulation is given by
+    # the remainder of total number of k-points in the result file modulo
+    # mpbInterpolateKpoints
+    NpathPoints = divmod(NumKvals, mpbInterpolateKpoints)[1]
+    print 'Non-interpolated k-points:', NpathPoints
+    if pathNames:
+        assert len(pathNames) == NpathPoints
+    else:
+        pathNames = [ 'kpoint'+str(i+1) for i in range(NpathPoints) ]
+    
+    # The indices of the non-interpolated k-points are separated by the value
+    # of mpbInterpolateKpoints
+    pathPointIndices = []
+    for i in range(NpathPoints):
+        pathPointIndices.append(i + i*mpbInterpolateKpoints)
+    
+    # construct the brillouinPath
+    path = []
+    for i, idx in enumerate(pathPointIndices):
+        path.append( blochVector(kpointsFromF[idx,0], 
+                                 kpointsFromF[idx,1],
+                                 kpointsFromF[idx,2],
+                                 pathNames[i]) )
+    brillouinPath = BrillouinPath( path, 
+                                   manuallyInterpolatedKpoints = kpointsFromF )
+    
+    # Manually include the projection of the brillouin path to the 
+    # projections-dictionary of the BrillouinPath-instance
+    xVals = np.zeros( (NumKvals) )
+    for i,k in enumerate(kpointsFromF[:-1]):
+        xVals[i+1] = brillouinPath.pointDistance(k, kpointsFromF[i+1] )+xVals[i]
+    cornerPointXvals = np.empty((NpathPoints))
+    for i, idx in enumerate(pathPointIndices):
+        cornerPointXvals[i] = xVals[idx]
+    brillouinPath.projections[NumKvals] = [xVals, cornerPointXvals]
+    print '\nFinished constructing the brillouinPath:\n', brillouinPath, '\n'
+    
+    # Initialize the Bandstructure-instance
+    bandstructure = Bandstructure( dimensionality,
+                                   pols, 
+                                   nEigenvalues, 
+                                   brillouinPath, 
+                                   NumKvals )
+    print 'Initialized the Bandstructure-instance'
+    
+    # Fill the bandstructure with the loaded values
+    for p in pols:
+        bands = np.empty((NumKvals, nEigenvalues))
+        for i in range(nEigenvalues):
+            if isinstance(convertFreqs, float):
+                bands[:, i] = omegaFromDimensionless(data[p][p.lower()+\
+                                            '_band_'+str(i+1)], convertFreqs)
+            else:
+                bands[:, i] = data[p][p.lower()+'_band_'+str(i+1)]
+        bandstructure.addResults(p, 'all', bands)
+    
+    print '\nResulting bandstructure:'
+    print bandstructure
+    
+    return brillouinPath, bandstructure
+
+
+# =============================================================================
+# =============================================================================
 # =============================================================================
 def unitTest(silent=False):
     
