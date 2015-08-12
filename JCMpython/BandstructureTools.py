@@ -729,7 +729,7 @@ class Bandstructure(object):
              = 'default', figsize_cm = (10.,10.), plotDir = '.',
              bandGapThreshold = 1e-3, legendLOC = 'best'):
         
-        if self.dimensionality == 3:
+        if self.dimensionality == 2:
             # There is no light cone in the 2D-case!
             showLightcone = False
         
@@ -738,9 +738,29 @@ class Bandstructure(object):
         elif isinstance(polarizations, str):
             polarizations = [polarizations]
         
-        for p in polarizations:
-            assert self.numKvalsReady[p] == self.numKvals, \
-                   'Bandstructure:plot: Results for plotting are incomplete.'
+        if self.dimensionality == 2:
+            for p in polarizations:
+                assert self.numKvalsReady[p] == self.numKvals, \
+                   'Bandstructure.plot: Results for plotting are incomplete.'
+        elif self.dimensionality == 3:
+            assert self.checkIfResultsComplete(), \
+                   'Bandstructure.plot: Results for plotting are incomplete.'
+        
+        if self.dimensionality == 3:
+            if polarizations == ['all']:
+                polarizations = ['TE', 'TM']
+            nEigenvaluesPerPol = self.nEigenvalues/2
+            bands2plot = {}
+            for p in polarizations:
+                isTE = p == 'TE'
+                idx = self.bands['all']['isTE'] == isTE
+                ishape = self.bands['all']['omega_re'].shape
+                bands2plot[p] = self.bands['all']['omega_re'][idx]
+                bands2plot[p] = np.reshape(bands2plot[p], 
+                                           (ishape[0], ishape[1]/2))
+        else:
+            nEigenvaluesPerPol = self.nEigenvalues
+            bands2plot = self.bands
         
         if showBandgaps:
             if not hasattr(self, 'bandgaps'):
@@ -778,7 +798,7 @@ class Bandstructure(object):
         with matplotlib.rc_context(rc = customRC):
             plt.figure(1, (cm2inch(figsize_cm[0]), cm2inch(figsize_cm[1])))
             
-            for i in range(self.nEigenvalues):
+            for i in range(nEigenvaluesPerPol):
                 if showBandgaps:
                     hatches = ['//', '\\\\']
                     for hi, p in enumerate(polarizations):
@@ -808,11 +828,11 @@ class Bandstructure(object):
                                     
                 if i == 0:
                     for p in polarizations:
-                        plt.plot( self.xVals, self.bands[p][:,i], 
+                        plt.plot( self.xVals, bands2plot[p][:,i], 
                                   color=colors[p], label=p )
                 else:
                     for p in polarizations:
-                        plt.plot( self.xVals, self.bands[p][:,i], 
+                        plt.plot( self.xVals, bands2plot[p][:,i], 
                                   color=colors[p] )
             
             if showLightcone:
@@ -1643,24 +1663,43 @@ def coordinateConversion(vector, lattice, direction = 'reciprocal->cartesian'):
 
 def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality, 
                              pathNames = None, convertFreqs = False,
-                             lattice = None, maxBands = np.inf):
+                             lattice = None, maxBands = np.inf,
+                             polNameTranslation = None):
+    
     pols = polFileDictionary.keys()
+    if not polNameTranslation:
+        polNameTranslation = {}
+        for pol in pols:
+            polNameTranslation[pol] = pol
+    pNT = polNameTranslation # shorter name
     
     # load numpy structured arrays from the MPB result files for each 
     # polarization
     data = {}
     for p in pols:
-        dropname = p.lower()+'freqs'
+        dropname = pNT[p].lower()+'freqs'
         dataFile = polFileDictionary[p]
         data[p] = np.lib.recfunctions.drop_fields(np.genfromtxt(dataFile, 
                                                                 delimiter=', ', 
                                                                 names = True), 
                                                   dropname)
     
+    # Change the names according to the desired polarization naming scheme,
+    # i.e. the keys of the polNameTranslation-dictionary
+    for p in pols:
+        names = data[p].dtype.names
+        namemapper = {}
+        for n in names:
+            if pNT[p] in n:
+                namemapper[n] = n.replace( pNT[p], p.lower() )
+        data[p] = np.lib.recfunctions.rename_fields(data[p], namemapper)
+    
     # check for data shape and dtype consistency
     for i, p in enumerate(pols[1:]):
-        assert data[p].shape == data[pols[i-1]].shape, 'Found missmatch in data shapes'
-        assert data[p].dtype == data[pols[i-1]].dtype, 'Found missmatch in data dtypes'
+        assert data[p].shape == data[pols[i-1]].shape, \
+                                                'Found missmatch in data shapes'
+        assert data[p].dtype == data[pols[i-1]].dtype, \
+                                                'Found missmatch in data dtypes'
         names = data[p].dtype.names
         for name in ['k_index', 'k1', 'k2', 'k3', 'kmag2pi']:
             assert name in names, 'name '+name+' is not in dtype: '+str(names)
@@ -1691,7 +1730,8 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
     
     # read the number of interpolated k-points from the CTL-file
     mpbInterpolateKpoints = getNumInterpolatedKpointsFromCTL(ctlFile)
-    print 'Number of interpolated points between each k-point is', mpbInterpolateKpoints
+    print 'Number of interpolated points between each k-point is', \
+                                                        mpbInterpolateKpoints
     
     # The number of non-interpolated k-points in the MPB-simulation is given by
     # the remainder of total number of k-points in the result file modulo
@@ -1731,24 +1771,52 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
     print '\nFinished constructing the brillouinPath:\n', brillouinPath, '\n'
     
     # Initialize the Bandstructure-instance
+    if dimensionality == 2:
+        bsPols = pols
+        bsNEigenvalues = nEigenvalues
+    elif dimensionality == 3:
+        bsPols = ['all']
+        bsNEigenvalues = len(pols)*nEigenvalues
     bandstructure = Bandstructure( dimensionality,
-                                   pols, 
-                                   nEigenvalues, 
+                                   bsPols, 
+                                   bsNEigenvalues, 
                                    brillouinPath, 
                                    NumKvals )
     print 'Initialized the Bandstructure-instance'
     
     # Fill the bandstructure with the loaded values
-    for p in pols:
-        bands = np.empty((NumKvals, nEigenvalues))
-        for i in range(nEigenvalues):
-            if isinstance(convertFreqs, float):
-                bands[:, i] = omegaFromDimensionless(data[p][p.lower()+\
-                                            '_band_'+str(i+1)], convertFreqs)
-            else:
-                bands[:, i] = data[p][p.lower()+'_band_'+str(i+1)]
-        bandstructure.addResults(p, 'all', bands)
-    
+    if dimensionality == 2:
+        for p in pols:
+            bands = np.empty((NumKvals, nEigenvalues))
+            for i in range(nEigenvalues):
+                if isinstance(convertFreqs, float):
+                    bands[:, i] = omegaFromDimensionless(data[p][p.lower()+\
+                                               '_band_'+str(i+1)], convertFreqs)
+                else:
+                    bands[:, i] = data[p][p.lower()+'_band_'+str(i+1)]
+            bandstructure.addResults(p, 'all', bands)
+    elif dimensionality == 3:
+        for i in range(NumKvals):
+            solutions = MultipleSolutions3D()
+            rarray = np.empty( (len(pols)*nEigenvalues), 
+                                dtype = solution3DstandardDType )
+            for j, p in enumerate(pols):
+                for k in range(nEigenvalues):
+                    sstring = p.lower()+'_band_'+str(k+1)
+                    idx = j*nEigenvalues+k
+                    if isinstance(convertFreqs, float):
+                        rarray['omega_re'][idx] = omegaFromDimensionless(\
+                                            data[p][sstring][i], convertFreqs)
+                    else:
+                        rarray['omega_re'][idx] = data[p][sstring][i]
+                    if p == 'TE':
+                        rarray['isTE'][idx] = True
+                    elif p == 'TM':
+                        rarray['isTE'][idx] = False
+            solutions.array = rarray
+            solutions.uptodate = True
+            bandstructure.addResults('all', i, solutions)
+        
     print '\nResulting bandstructure:'
     print bandstructure
     
@@ -1843,6 +1911,7 @@ def unitTest(silent=False):
 
 if __name__ == '__main__':
     unitTest()
+
 
 
 
