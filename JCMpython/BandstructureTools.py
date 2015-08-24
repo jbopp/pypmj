@@ -554,9 +554,9 @@ class Bandstructure(object):
         return complete
     
     
-    def getLightcone(self):
+    def getLightcone(self, scale = 1.):
         kpointsXY = self.kpoints[:, :2]
-        return c0 * np.sqrt( np.sum( np.square(kpointsXY), axis=1 ) )
+        return c0 * np.sqrt( np.sum( np.square(kpointsXY), axis=1 ) ) * scale
     
     
     def findBandgaps(self, polarizations = 'all'):
@@ -725,9 +725,10 @@ class Bandstructure(object):
 
     
     def plot(self, polarizations = 'all', filename = False, 
-             showBandgaps = True, showLightcone = False, useAgg = False, colors
-             = 'default', figsize_cm = (10.,10.), plotDir = '.',
-             bandGapThreshold = 1e-3, legendLOC = 'best'):
+             showBandgaps = True, showLightcone = False, LCscaleFactor = 1.,
+             useAgg = False, colors = 'default', figsize_cm = (10.,10.), 
+             plotDir = '.', bandGapThreshold = 1e-3, legendLOC = 'best', 
+             polsInSolution = 2):
         
         if self.dimensionality == 2:
             # There is no light cone in the 2D-case!
@@ -749,15 +750,15 @@ class Bandstructure(object):
         if self.dimensionality == 3:
             if polarizations == ['all']:
                 polarizations = ['TE', 'TM']
-            nEigenvaluesPerPol = self.nEigenvalues/2
+            nEigenvaluesPerPol = self.nEigenvalues/polsInSolution
             bands2plot = {}
             for p in polarizations:
                 isTE = p == 'TE'
                 idx = self.bands['all']['isTE'] == isTE
                 ishape = self.bands['all']['omega_re'].shape
                 bands2plot[p] = self.bands['all']['omega_re'][idx]
-                bands2plot[p] = np.reshape(bands2plot[p], 
-                                           (ishape[0], ishape[1]/2))
+                bands2plot[p] = np.reshape(bands2plot[p],
+                                      (ishape[0], ishape[1]/polsInSolution))
         else:
             nEigenvaluesPerPol = self.nEigenvalues
             bands2plot = self.bands
@@ -836,24 +837,25 @@ class Bandstructure(object):
                                   color=colors[p] )
             
             if showLightcone:
-                lightcone = self.getLightcone()
+                lightcone = self.getLightcone( scale = LCscaleFactor )
+                plt.plot(self.xVals, lightcone, color='k', label = 'light line',
+                         zorder = 1001)
                 ymax = plt.gca().get_ylim()[1]
                 plt.fill_between(self.xVals, lightcone, ymax, interpolate=True,
                                  color=HZBcolors[9], zorder = 1000)
-                plt.plot(self.xVals, lightcone, color='k', label = 'light line',
-                         zorder = 1001)
             
             plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
             plt.xticks( self.cornerPointXvals, self.brillouinPath.getNames() )
             plt.xlabel('$k$-vector')
-            plt.ylabel('angular frequency $\omega$ in \si{\per\second}')
-            plt.legend(frameon=False, loc=legendLOC)
+            plt.ylabel('angular frequency $\omega$ in s$^{-1}$')
+            legend = plt.legend(frameon=False, loc=legendLOC)
+            legend.set_zorder(1002)
             ax1 = plt.gca()
             ytics = ax1.get_yticks()
             ax2 = ax1.twinx()
             ytics2 = ['{0:.0f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
             plt.yticks( ytics, ytics2 )
-            ax2.set_ylabel('wavelength in nm (rounded)')
+            ax2.set_ylabel('wavelength $\lambda$ in nm (rounded)')
             plt.grid(axis='x')
             
             if filename:
