@@ -9,7 +9,10 @@ from shutil import rmtree, copyfile
 from warnings import warn
 
 
+# =============================================================================
 # Globals
+# =============================================================================
+
 solution3DstandardDType = [  ('omega_im', float),
                              ('omega_re', float),
                              ('isTE', bool),
@@ -21,6 +24,21 @@ solution3DstandardDType = [  ('omega_im', float),
                              ('parity_5', float),
                              ('parity_6', float),
                              ('spurious', bool)  ]
+
+# Default format for band columns in a pandas DataFrame
+bandColumnFormat = 'band{0:03d}'
+
+# pandas column specifiers
+bdfNames = ['kind','prop']
+pathColName = 'path'
+addDataName = ['additional']
+pdColumns = sorted(['x', 'y', 'z', 'vector', 'isHighSymmetryPoint', 
+                 'name', 'nameAsLatex', 'xVal'])
+bandColumns = sorted(['omega_re', 'omega_im', 'polarization', 
+               'parity_0', 'parity_1', 'parity_2', 
+               'parity_3', 'parity_4', 'parity_5', 
+               'parity_6', 'spurious', 'nIters', 
+               'deviation'])
 
 
 # =============================================================================
@@ -39,6 +57,40 @@ def freq2wvl(freq):
     return 2*np.pi*c0/freq
 
 
+def bname(nums):
+    """
+    Returns a formatted string for a band index (e.g. 1 -> band001)
+    or a list of the same if a list of indices is provided.
+    """
+    if isinstance(nums, int):
+        return bandColumnFormat.format(nums)
+    else:
+        return [bandColumnFormat.format(n) for n in nums]
+
+
+def addColumn2bandDframe(df, colNames, vals, index = None):
+    if isinstance(colNames, str):
+        colNames = [colNames]
+    columns = pd.MultiIndex.from_product([addDataName, colNames], 
+                                          names=bdfNames)
+    newData = pd.DataFrame(vals, index=index, columns=columns)
+    return pd.concat([df,newData], axis=1).sortlevel(axis=1)
+
+
+def getMultiIndex(band = None, path = None):
+    if band is not None and path is not None:
+        raise Exception('getMultiIndex: band excludes path.')
+    if band is not None:
+        return pd.MultiIndex.from_product([[bname(band)], bandColumns],
+                                          names = bdfNames)
+    if path:
+        return pd.MultiIndex.from_product([[pathColName], pdColumns],
+                                          names = bdfNames)
+
+
+def getSingleKdFrame(k, band = None, path = None):
+    return pd.DataFrame(index=[k], columns=getMultiIndex(band, path))
+
 
 # =============================================================================
 class blochVector(np.ndarray):
@@ -51,25 +103,68 @@ class blochVector(np.ndarray):
         Gamma = blochVector( 0., 0., 0., 'Gamma')
     """
     
-    def __new__(cls, x, y, z, name=None):
+    def __new__(cls, x, y, z, name=None, isGreek=False):
         theNDarray = np.asarray( np.array([x, y, z]) )
         obj = theNDarray.view(cls)
         obj.name = name
+        obj.isGreek = isGreek
         obj.theNDarray = theNDarray
         return obj
 
+    
     def __array_finalize__(self, obj):
         if obj is None: return
         self.name = getattr(obj, 'name', None)
+        self.isGreek = getattr(obj, 'isGreek', None)
         self.theNDarray = getattr(obj, 'theNDarray', None)
+    
+    
+    # http://stackoverflow.com/questions/26598109/preserve-custom-attributes-whe
+    # n-pickling-subclass-of-numpy-array
+    def __reduce__(self):
+        # Get the parent's __reduce__ tuple
+        pickled_state = super(blochVector, self).__reduce__()
+        # Create our own tuple to pass to __setstate__
+        new_state = pickled_state[2] + (self.name, self.isGreek,self.theNDarray)
+        # Return a tuple that replaces the parent's __setstate__ tuple with our 
+        # own
+        return (pickled_state[0], pickled_state[1], new_state)
+
+    
+    def __setstate__(self, state):
+        self.name = state[-3]
+        self.isGreek = state[-2]
+        self.theNDarray = state[-1]
+        # Call the parent's __setstate__ with the other tuple elements.
+        super(blochVector, self).__setstate__(state[0:-3])
+    
     
     def __str__(self):
         return 'blochVector({0}, {1})'.format(self.name, 
                                               self.theNDarray.__str__())
     
+    
     def __repr__(self):
         return self.__str__()
-
+    
+    
+    def __eq__(self, bloch2compare):
+        if isinstance(bloch2compare, blochVector):
+            return np.all(self.theNDarray == bloch2compare.theNDarray)
+        elif isinstance(bloch2compare, np.ndarray):
+            return np.all(self.theNDarray == bloch2compare)
+        elif isinstance(bloch2compare, list):
+            return np.all(self.theNDarray == np.array(bloch2compare))
+        else:
+            raise Exception('Cannot compare blochVector with {0}'.format(
+                                                        type(bloch2compare)))
+    
+    
+    def nameAsLatex(self):
+        if self.isGreek:
+            return r'$\{0}$'.format(self.name)
+        else:
+            return r'${0}$'.format(self.name)
 
 
 # =============================================================================
@@ -90,22 +185,65 @@ class BrillouinPath(object):
             assert isinstance(k, blochVector)
         
         self.kpoints = kpoints
+        self.dframe = self.kVectors2DataFrame(kpoints)
         self.manuallyInterpolatedKpoints = manuallyInterpolatedKpoints
         self.Nkpoints = len(kpoints)
         self.projections = {} # stores the calculated projections for each N
 
     
-    def __repr__(self):
-        ans = 'BrillouinPath{'
+    def __repr__(self, indent=0):
+        ind = indent*' '
+        ans = ind+'BrillouinPath{'
         for k in self.kpoints:
-            ans += '\n\t' + str(k)
-        ans += '\n}'
+            ans += 2*ind+'\n\t' + str(k)
+        ans += '\n' + ind + '}'
         return ans
+    
+    
+    def kVectors2DataFrame(self, kVectors, xVals = None):
+        """
+        Generates a pandas.DataFrame from a list of numpy.ndarrays and
+        blochVectors
+        """
+        if isinstance(kVectors, blochVector):
+            kVectors = [kVectors]
+        if isinstance(xVals, float):
+            xVals = [xVals]
+        assert isinstance(kVectors, (list, np.ndarray))
+        
+        dframe = pd.DataFrame(columns =  pdColumns,
+                              index = np.arange(len(kVectors)))
+        for i,k in enumerate(kVectors):
+            dframe['x'][i] = k[0]
+            dframe['y'][i] = k[1]
+            dframe['z'][i] = k[2]
+            dframe['vector'][i] = k
+            # if k is a blochVector, it is assumed to be a high symmetry point
+            isBloch = isinstance(k, blochVector)
+            dframe['isHighSymmetryPoint'][i] = isBloch
+            if isBloch:
+                dframe['name'][i] = k.name
+                dframe['nameAsLatex'][i] = k.nameAsLatex()
+            else:
+                dframe['name'][i] = ''
+                dframe['nameAsLatex'][i] = ''
+            if xVals is not None:
+                dframe['xVal'][i] = xVals[i]
+        dframe = dframe.convert_objects(convert_numeric=True)
+        return dframe
     
     
     def getNames(self):
         return [ bv.name for bv in self.kpoints ]
     
+    
+    def isClosedPath(self):
+        if self.Nkpoints == 1:
+            return False
+        else:
+            return self.dframe['vector'].iloc[0] == \
+                                        self.dframe['vector'].iloc[-1]
+        
     
     def pointDistance(self, p1, p2):
         """
@@ -114,15 +252,16 @@ class BrillouinPath(object):
         return np.sqrt( np.sum( np.square( p2-p1 ) ) )
     
     
-    def interpolate2points(self, p1, p2, nVals, endpoint = False):
+    def interpolate2points(self, p1, p2, nVals, x0, x1):
         """
         Interpolates nVals points between the two given points p1 and p2.
         """
-        interpPoints = np.empty((nVals, 3))
+        interpPoints = np.empty((nVals+1, 3))
         for i in range(3):
-            interpPoints[:,i] = np.linspace( p1[i], p2[i], nVals, 
-                                             endpoint=endpoint )
-        return interpPoints
+            interpPoints[:,i] = np.linspace( p1[i], p2[i], nVals+1 )
+        vectors = interpPoints[1:-1].tolist()
+        xVals = np.linspace( x0, x1, nVals+1 )[1:-1].tolist()
+        return xVals, vectors
     
     
     def interpolate(self, N):  
@@ -133,11 +272,15 @@ class BrillouinPath(object):
         """
         
         if isinstance(self.manuallyInterpolatedKpoints, np.ndarray):
+            #CHECK
             return self.manuallyInterpolatedKpoints
         
         cornerPoints = self.Nkpoints
         if self.Nkpoints == 1:
-            return [self.kpoints[0]]
+            # CHECK
+            self.interpolatedKpoints = self.kVectors2DataFrame(self.kpoints[0], 
+                                                               xVals=0.)
+            return self.interpolatedKpoints
         
         lengths = np.empty((cornerPoints-1))
         for i in range(1, cornerPoints):
@@ -145,55 +288,26 @@ class BrillouinPath(object):
                                               self.kpoints[i-1])
         totalLength = np.sum(lengths)
         fractions = lengths/totalLength
-        pointsPerPath = np.array(np.ceil(fractions*(N)), dtype=int)
-        pointsPerPath[-1] = N - np.sum(pointsPerPath[:-1])
+        pointsPerPath = np.array(np.floor(fractions*(N)), dtype=int)
+        pointsPerPath[-1] = N - np.sum(pointsPerPath[:-1]) -1
         cornerPointXvals = np.hstack((np.array([0]), 
                                       np.cumsum(lengths) ))
         
-        xVals = np.empty((N))
-        lengths = np.cumsum(lengths)
-        allPaths = np.empty((N, 3))
-        lastPPP = 1
-        for i, ppp in enumerate(pointsPerPath):
-            if i == len(pointsPerPath)-1:
-                xVals[lastPPP-1:] = np.linspace( lengths[i-1], lengths[i], ppp)
-                allPaths[lastPPP-1:,:] = \
-                    self.interpolate2points( self.kpoints[i], 
-                                             self.kpoints[i+1], 
-                                             ppp, 
-                                             endpoint=True )
-            else:
-                if i == 0: start = 0
-                else: start = lengths[i-1]
-                xVals[lastPPP-1:lastPPP+ppp-1] = \
-                    np.linspace( start, lengths[i], ppp, endpoint=False )
-                allPaths[lastPPP-1:lastPPP+ppp-1,:] = \
-                    self.interpolate2points( self.kpoints[i], 
-                                             self.kpoints[i+1], 
-                                             ppp )
-            lastPPP += ppp
-        
-        self.projections[N] = [xVals, cornerPointXvals]
-        return allPaths
-    
-    
-    def projectedKpoints(self, N):
-        """
-        Returns:
-        --------
-            xVals: numpy array holding the positions of the k-points when
-                   plotting them along the x-axis (i.e. the distances to the
-                   first point in the list when walking along the path)
-            --
-            cornerPointXvals: coordinates of the initial k-points in the same
-                              manner as for <xVals>
-        """
-        if not N in self.projections:
-            _ = self.interpolate(N)
-        if self.Nkpoints == 1:
-            return np.array([0.]), np.array([0.])
-        xVals, cornerPointXvals = self.projections[N]
-        return xVals, cornerPointXvals
+        # The interpolated path is written to a single pandas.Dataframe
+        dframes = []
+        for i, cPX0 in enumerate(cornerPointXvals[:-1]):
+            cPX1 = cornerPointXvals[i+1]
+            dframes.append(self.kVectors2DataFrame(self.kpoints[i], xVals=cPX0))
+            xVals, vectors = self.interpolate2points(self.kpoints[i], 
+                                                     self.kpoints[i+1], 
+                                                     pointsPerPath[i], 
+                                                     x0=cPX0,
+                                                     x1=cPX1)
+            dframes.append( self.kVectors2DataFrame(vectors, xVals = xVals) )
+        dframes.append( self.kVectors2DataFrame(self.kpoints[-1], 
+                                                xVals=cornerPointXvals[-1]) )
+        self.interpolatedKpoints = pd.concat(dframes, ignore_index=True)
+        return self.interpolatedKpoints
 
 
 
@@ -404,77 +518,69 @@ class Bandstructure(object):
     
     """
     
-    def __init__(self, dimensionality = None, polarizations=None,
-                 nEigenvalues=None, brillouinPath=None, numKvals=None, 
-                 verb = True):
+    # Default data and filenames for data storage
+    params2save = ['dimensionality', 'nBands', 'nKvals', 
+                   'polarizations']
+    paramFileName = 'bsParameters.pkl'
+    dfFileName = 'bsResults.pkl'
+    
+    
+    def __init__(self, storageFolder = 'bsStore', dimensionality = None, 
+                 nBands=None, brillouinPath=None, nKvals=None, 
+                 polarizations = None, overwrite = False, verb = True):
         
+        # Some preliminary attributes
         self.verb = verb
-        self.dimensionality = dimensionality
-        self.polarizations = polarizations
-        self.nEigenvalues = nEigenvalues
-        self.brillouinPath = brillouinPath
-        if brillouinPath is not None:
-            if brillouinPath.Nkpoints == 1:
-                if numKvals != 1:
-                    self.message('numKvals must be =1 if the brillouinPath' + \
-                                 ' has only one kpoint. Adjusting...')
-                    numKvals = 1
-        self.numKvals = numKvals
+        self.storageFolder = storageFolder
+        self.paramFile = os.path.join(storageFolder, 
+                                      self.paramFileName)
+        self.dfFile = os.path.join(storageFolder, 
+                                      self.dfFileName)
         
-        self.isDummy = False
-        self.wasSaved = False
-        self.bands = {}
+        # Try to load data from storageFolder, ...
+        if self.isDataAvailable() and not overwrite:
+            self.loadWarningOccured = False
+            doWarn = any([eval(p) for p in self.params2save])
+            self.load(doWarn=doWarn)
         
-        if dimensionality is not None:
-            assert dimensionality in [2,3], 'Only 2D or 3D is supported.'
-        if dimensionality == 3 and self.polarizations[0] != 'all':
-            self.message('In 3D polarizations must be "all".')
-            self.polarizations = ['all']
+        # or save the BandStructure to it:
+        else:
+            # Store residual attributes
+            self.dimensionality = dimensionality
+            self.nBands = nBands
+            self.brillouinPath = brillouinPath
+            self.nKvals = nKvals
+            self.polarizations = polarizations
+            self.overwrite = overwrite
+            
+            # Set folders and save
+            self.prepare()
+            self.save()
         
-        # Interpolate the Brillouin path
-        if isinstance(self.brillouinPath, BrillouinPath):
-            self.interpolateBrillouin()
-            self.xVals, self.cornerPointXvals = self.brillouinPath.\
-                                                projectedKpoints(self.numKvals)
-        
-        # For dummy instances used to load break here
-        if dimensionality == None: 
-            self.isDummy = True
-            return
-        
-        # Initialize numpy-arrays to store the results for the frequencies
-        # for each polarization
-        for p in polarizations:
-            if dimensionality == 2:
-                self.bands[p] = np.zeros((numKvals, nEigenvalues))
-            elif dimensionality == 3:
-                self.bands[p] = np.zeros((numKvals, nEigenvalues),
-                                         dtype = solution3DstandardDType)
-        
-#         if isinstance( frequencies[0], SingleSolution3D ):
-        
-        self.numKvalsReady = {}
-        for p in polarizations:
-            self.numKvalsReady[p] = 0
+        # Set default values for some parameters if they are
+        # still None here
+        if self.polarizations is None:
+            self.polarizations = 'all'
     
     
     def __repr__(self):
+        """
+        Formatted output of BandStructure instance.
+        """
         sep = 4*' '
         ans = 'Bandstructure{{\n'
         ans += sep + 'Dimensionality: {0}\n'
         ans += sep + 'Polarizations: {1}\n'
-        ans += sep + '#Eigenvalues: {2}\n'
+        ans += sep + '#Bands: {2}\n'
         ans += sep + 'Brillouin path: {3}\n'
         ans += sep + '#k-values: {4}\n'
         ans += sep + 'Results complete: {5}\n'
-        ans += sep + 'Saved to file: {6}}}\n'
         ans = ans.format( self.dimensionality,
                           self.polarizations,
-                          self.nEigenvalues,
+                          self.nBands,
                           self.brillouinPath,
-                          self.numKvals,
-                          self.checkIfResultsComplete(),
-                          self.wasSaved )
+                          self.nKvals,
+                          self.checkIfResultsComplete() )
         return ans
     
     
@@ -482,394 +588,456 @@ class Bandstructure(object):
         if self.verb: print string
     
     
-    def interpolateBrillouin(self):
-        self.kpoints = self.brillouinPath.interpolate( self.numKvals )
-    
-    
-    def addResults(self, polarization, kIndex, frequencies, plotLive=False):
+    def absStorageFolder(self):
+        """
+        Absolute path of the storage folder.
+        """
+        return os.path.abspath(self.storageFolder)
+
+
+    def getBandDframe(self, brillouinData, N='all'):
+        """
+        Returns a lexically sorted pandas.DataFrame including the
+        BrillouinPath information to store the complete band data. 
+        """
+        # Use all bands as default
+        if N=='all': N=self.nBands
         
-        if self.numKvalsReady[polarization] == self.numKvals:
-            warn('Bandstructure.addResults: Already have all results' +\
-                 ' for polarization ' + polarization + '. Skipping.')
+        # Generate a pandas.MultiIndex to hold the data for the
+        # BrillouinPath and all bands
+        bandDesc = []
+        for i in range(N):
+            bandDesc += [bname(i)]*len(bandColumns)
+        arrays = [np.array(bandDesc + [pathColName]*len(pdColumns)),
+                  np.array(N*bandColumns + pdColumns)]
+        bMultIndex = pd.MultiIndex.from_arrays(arrays, names=bdfNames)
+        
+        # Generate the DataFrame and update it with the BrillouinPath
+        # information
+        df = pd.DataFrame(index=self.kData.index, columns=bMultIndex)
+        df[pathColName] = brillouinData
+        return df.convert_objects(convert_numeric=True).sortlevel(axis=1)
+    
+    
+    def prepare(self):
+        """
+        Sets up the storageFolder, interpolates the BrillouinPath and
+        prepares the pandas.DataFrame for the band results.
+        """
+        if not os.path.exists(self.storageFolder):
+            os.makedirs(self.storageFolder)
+        self.kData = self.brillouinPath.interpolate(self.nKvals)
+        self.data = self.getBandDframe(self.kData)
+    
+    
+    def isDataAvailable(self):
+        """
+        Checks wether the storageFolder contains valid save-files.
+        """
+        if os.path.exists(self.storageFolder) and \
+                    os.path.isfile(self.paramFile) and\
+                    os.path.isfile(self.dfFile):
+            return True
+        return False
+    
+    
+    def load(self, doWarn=False):
+        """
+        Loads a saved BandStructure with all its parameters and data.
+        """
+        if not self.isDataAvailable():
             return
+        self.message('Loading data from {0}'.format(
+                                 self.absStorageFolder()))
+        if doWarn and not self.loadWarningOccured:
+            warn('Any specified init args will be ignored,'+\
+                                 ' except you set overwrite=True.')
+            self.loadWarningOccured = True
         
-        if isinstance(frequencies, MultipleSolutions3D):
-            frequencies = frequencies.getArray()
+        # Read in the DataFrame holding the class attributes and load
+        # them to the namespace
+        params = pd.read_pickle(self.paramFile)
+        for p in self.params2save:
+            setattr(self, p, params.loc[p].values[0])
         
-        if isinstance(kIndex, int) and \
-                        frequencies.shape == (self.nEigenvalues,):
-            self.bands[polarization][kIndex, :] = frequencies
-            self.numKvalsReady[polarization] += 1
-        
-        elif isinstance(kIndex, (list, np.ndarray)):
-            for i, ki in enumerate(kIndex):
-                self.bands[polarization][ki, :] = frequencies[i, :]
-            self.numKvalsReady[polarization] += len(kIndex)
-        
-        elif kIndex == 'all':
-            self.bands[polarization] = frequencies
-            self.numKvalsReady[polarization] = self.numKvals
+        # Read the band data and restore the BrillouinPath from it
+        self.overwrite = False # always False after loading
+        self.data = pd.read_pickle(self.dfFile)
+        self.kData = self.data[pathColName]
+        self.brillouinPath = BrillouinPath(
+                list(self.kData[self.kData['isHighSymmetryPoint']].vector))
+    
+    
+    def save(self, saveAttributes = True):
+        """
+        Saves the complete BandStructure using pickled DataFrames.
+        """
+        if saveAttributes:
+            values = [getattr(self, p) for p in self.params2save]
+            paramFrame = pd.DataFrame(values, index=self.params2save)
+            paramFrame.to_pickle(self.paramFile)
+        self.data.to_pickle(self.dfFile)
+        self.message('BandStructure was saved to folder: {0}'.format(
+                                 self.absStorageFolder()))
+    
+    
+    def getPathData(self, cols, ks = None):
+        """
+        Returns specified columns of the BrillouinPath data
+        """
+        if isinstance(cols, str):
+            if ks is None:
+                return self.data.loc[:,(pathColName, cols)]
+            else:
+                return self.data.loc[ks,(pathColName, cols)]
+        elif isinstance(cols, (list, tuple, np.ndarray)):
+            if ks is None:
+                return self.data.loc[:,([pathColName], cols)]
+            else:
+                return self.data.loc[ks,([pathColName], cols)]
+    
+    
+    def getBandData(self, bands=None, cols=None, ks=None):
+        """
+        Returns specified columns of all specified bands,
+        defaults to all comumns / all bands.
+        """
+        if bands is None:
+            bands = list(range(self.nBands))
+        bnames = bname(bands)
+        if cols is None:
+            if ks is None:
+                return self.data.loc[:, bnames]
+            else:
+                return self.data.loc[ks, bnames]
+        if ks is None:
+            return self.data.loc[:, (bnames, cols)]
         else:
-            raise Exception('Did not understand the results to add.')
+            return self.data.loc[ks, (bnames, cols)]
+    
+    
+    def getColFromAllBands(self, col):
+        bands = bname(range(self.nBands))
+        return self.data.loc[:, (bands, col)]
+    
+    
+    def getAllFreqs(self, returnComplex = False):
+        freqs = self.getColFromAllBands('omega_re')
+        freqs.columns = freqs.columns.droplevel(1)
+        if returnComplex:
+            freqsIm = self.getColFromAllBands('omega_im')
+            freqsIm.columns = freqsIm.columns.droplevel(1)
+            freqs += 1.j*freqsIm
+        return freqs
+    
+    
+    def getFinishStatus(self, axis=0):
+        return self.getAllFreqs().notnull().all(axis=axis)
+    
+    
+    def getNfinishedCalculations(self):
+        return self.getAllFreqs().count(axis=0).sum()
+    
+    
+    def statusInfo(self): 
+        NvalsTotal = self.nBands*self.nKvals
+        bandReady = self.getFinishStatus()
+        bd = bandReady.to_dict()
+        Nf = self.getNfinishedCalculations()
+        print 'Band finish status:'
+        for bdk in bd:
+            print '\t{0}: {1}'.format(bdk, bd[bdk])
+        print 'Sum of finished Bands:', bandReady.sum()
+        print 'Sum of finished calculations:', self.getNfinishedCalculations()
+        print 'Percent finished:', float(Nf)/float(NvalsTotal)*100
+    
+    
+    def checkIfResultsComplete(self):
+        return False
+    
+    
+    def addResults(self, dataFrame=None, rDict=None, k=None, band=None, 
+                   array=None, singleValueTuple=None, save=True, 
+                   saveAttributes = False, plotLive=False):
         
-        if self.numKvalsReady[polarization] == self.numKvals:
-            self.message('Bandstructure.addResults: Got all results for ' +\
-                         'polarization ' + polarization)
+        done = False
+        # Input = pandas.DataFrame
+        if dataFrame is not None:
+            self.data.update(dataFrame)
+            done = True
         
-        if plotLive:
-            self.plotLive(polarization = polarization)
-    
-    
-    def getBands(self, polarization):
-        if polarization in self.polarizations or len(self.polarizations) == 1:
-            return self.bands[polarization]
-        elif polarization == 'all':
-            allbands = self.bands[self.polarizations[0]]
-            for p in self.polarizations[1:]:
-                allbands = np.append(allbands,
-                                     self.bands[p],
-                                     axis = -1)
-            return np.sort(allbands, axis=-1)
-        else:
-            raise Exception('{0} not in known polarizations: {1}'.format(
-                                            polarization, self.polarizations))
-    
-    
-    def checkIfResultsComplete(self, polarizations = 'all'):
-        if polarizations == 'all':
-            polarizations = self.polarizations
-        if not isinstance(polarizations, list):
-            polarizations = [polarizations]
-        complete = True
-        for p in polarizations:
-            if not self.numKvalsReady[p] == self.numKvals:
-                complete = False
-        if polarizations == self.polarizations and complete:
+        # Input = dict ...
+        if rDict is not None and not done:
             try:
-                self.bandgaps, self.Nbandgaps = self.findBandgaps()
+                # ... with full data
+                firstKey = rDict.keys()[0]
+                #firstVal = rDict[firstKey]
+                if isinstance(firstKey, tuple):
+                    newDFrame = pd.DataFrame(rDict)
+                    self.data.update(newDFrame)
+                    done = True
+
+                # ...  without k and band
+                elif isinstance(firstKey, str):
+                    for dkey in rDict:
+                        self.data.ix[k, (bname(band), dkey)] = rDict[dkey]
+                    done = True
             except:
-                warn('Bandgap-finding was not successful.')
-                self.bandgaps = {}
-                self.Nbandgaps = {}
-        return complete
+                self.resultWarning(addLines='Your dict was of wrong format.')
+        
+        # Input = array/list with all values
+        if array is not None and not done:
+            if isinstance(array, list): 
+                array = np.array(array)
+            try:
+                self.data.loc[k,bname(band)] = array
+                done = True
+            except:
+                self.resultWarning(addLines='Your array/list was of wrong format.')
+        
+        # Input = tuple of form (column/key, value)
+        if singleValueTuple is not None and not done:
+            try:
+                self.data.ix[k, (bname(band), singleValueTuple[0])] = singleValueTuple[1]
+                done = True
+            except:
+                self.resultWarning(addLines='Your tuple was of wrong format.')
+        
+        # Save if everything went fine and save==True
+        if done and save:
+            self.save(saveAttributes = saveAttributes)
     
     
-    def getLightcone(self, scale = 1.):
-        kpointsXY = self.kpoints[:, :2]
-        return c0 * np.sqrt( np.sum( np.square(kpointsXY), axis=1 ) ) * scale
+    def resultWarning(self, addLines=None):
+        w = ['\nCould not parse the results you wished to add!',
+             'Bandstructure.addResult understands one of the following '+\
+             'data formats:',
+             '\t- a pandas.DataFrame with an apropriate pandas.MultiIndex',
+             "\t- a dict with full information, e.g. {('band002', 'deviation'): {15: 0.1},...}",
+             "\t- a dict with reduced information, e.g. {'deviation': 0.1,...} plus k- and band-index",
+             "\t- a numpy.ndarray/list with reduced information plus k- and band-index",
+             "\t- a tuple of the form (key,value), e.g. ('deviation', 0.1) plus k- and band-index"]
+        if isinstance(addLines, str):
+            addLines = [addLines]
+        if isinstance(addLines, list):
+            w += addLines
+        warn('\n'.join(w)+'\n')
+    
+        
+    def getLightcone(self, scale = 1., add2Data = False, 
+                     refractiveIndex = 1., colName = 'lightcone'):
+        """
+        Calculates the light line for a given refractive index of the
+        substrate material. The data can be added to self.data if
+        add2Data=True using a specified column name <colName>. 
+        """
+        kpointsXY = self.getPathData(['x', 'y'])
+        lightcone = c0 * scale * np.sqrt( np.sum( np.square(kpointsXY), axis=1 ) )
+        if add2Data:
+            self.data = addColumn2bandDframe(self.data, colName, lightcone)
+        return lightcone
     
     
     def findBandgaps(self, polarizations = 'all'):
-        if polarizations == 'all':
-            polarizations = self.polarizations
-        if not isinstance(polarizations, list):
-            polarizations = [polarizations]
-        
-        bandgaps = {}
-        Nbandgaps = {}
-        for p in polarizations:
-            gaps = []
-            for i in range(self.nEigenvalues-1):
-                minima = []
-                maxima = []
-                for j in range(0, i+1):
-                    maxima.append( np.max(self.bands[p][:, j]) )
-                for j in range(i+1, self.nEigenvalues):
-                    minima.append( np.min(self.bands[p][:, j]) )
-                
-                bandMin = np.min(minima)
-                bandMax = np.max(maxima)
-                if bandMin > bandMax:
-                    gaps.append( Bandgap( bandMax, bandMin) )
-            bandgaps[p] = gaps
-            Nbandgaps[p] = len(gaps)
-        return bandgaps, Nbandgaps
+        pass
     
     
-    def save(self, folder, filename = 'bandstructure'):
-        if not self.checkIfResultsComplete():
-            warn('Bandstructure.save: Results are incomplete! Skipping...')
-            return
-            
-        if filename.endswith('.npz'):
-            filename = filename.replace('.npz', '')
-        npzfilename = os.path.join(folder, filename)
-        resultDict = {}
-        resultDict.update(self.bands)
-        resultDict['dimensionality'] = self.dimensionality
-        resultDict['polarizations'] = self.polarizations
-        resultDict['brillouinPath'] = self.brillouinPath.kpoints
-        resultDict['brillouinPathNames'] = self.brillouinPath.getNames()
-        resultDict['numKvals'] = self.numKvals
-        np.savez( npzfilename, savename = resultDict )
-        self.wasSaved = os.path.abspath( npzfilename + '.npz' )
-        self.message( 'Saved bandstructure to ' + npzfilename + '.npz' )
-    
-    
-    def load(self, folder, filename = 'bandstructure'):
-        if not filename.endswith('.npz'):
-            filename += '.npz'
-        npzfilename = os.path.join(folder, filename)
-        self.message('Loading file ' + npzfilename + ' ...')
-        
-        npzfile = np.load( npzfilename )
-        loadedDict = npzfile['savename'][()]
-        
-        if self.isDummy:
-            self.numKvals = loadedDict['numKvals']
-            try:
-                self.dimensionality = loadedDict['dimensionality']
-            except:
-                self.dimensionality = 2
-            self.polarizations = loadedDict['polarizations']
-            
-            bp = loadedDict['brillouinPath']
-            bpnames = loadedDict['brillouinPathNames']
-            blochVectors = []
-            for i,b in enumerate(bp):
-                blochVectors.append( blochVector(b[0], b[1], b[2], bpnames[i]) )
-            self.brillouinPath = BrillouinPath(blochVectors)
-#             self.brillouinPath = BrillouinPath(loadedDict['brillouinPath'])
-            self.interpolateBrillouin()
-        
-        else:
-            recalc = False
-            if not loadedDict['numKvals'] == self.numKvals:
-                warn('Bandstructure.load: Found mismatch in numKvals')
-                self.numKvals = loadedDict['numKvals']
-                recalc = True
-            
-            try:
-                if not loadedDict['dimensionality'] == self.dimensionality:
-                    warn('Bandstructure.load: Found mismatch in dimensionality')
-                    self.dimensionality = loadedDict['dimensionality']
-            except:
-                pass
-                
-            if not loadedDict['polarizations'] == self.polarizations:
-                warn('Bandstructure.load: Found mismatch in polarizations')
-                self.polarizations = loadedDict['polarizations']
-            
-            if not loadedDict['brillouinPath'] == self.brillouinPath.kpoints:
-                warn('Bandstructure.load: Found mismatch in brillouinPath')
-                self.brillouinPath = BrillouinPath(loadedDict['brillouinPath'])
-                recalc = True
-            
-            if recalc: self.interpolateBrillouin()
-        
-        for p in self.polarizations:
-            self.bands[p] = loadedDict[p]
-        self.nEigenvalues = self.bands[self.polarizations[0]].shape[1]
-        
-        self.isDummy = False
-        self.numKvalsReady = {}
-        for p in self.polarizations:
-            self.numKvalsReady[p] = self.numKvals
-        
-        if not hasattr(self, 'xVals'):
-            self.interpolateBrillouin()
-            self.xVals, self.cornerPointXvals = \
-                            self.brillouinPath.projectedKpoints(self.numKvals)
-        
-        self.message('Loading was successful.')
-    
-    
-    def plotLive(self, polarization, saveSnapshot = True):
-        try:
-            if not hasattr(self, 'liveFigure'):
-                import matplotlib.pyplot as plt
-                plt.switch_backend('TkAgg')
-                plt.ion()
-                self.liveFigure = plt.figure()
-                self.liveLines = {}
-                for p in self.polarizations:
-                    self.liveLines[p] = [None]*self.nEigenvalues
-                for i in range(self.nEigenvalues):
-                    for p in self.polarizations:
-                        self.liveLines[p][i], = plt.plot( [], [], '-o',
-                                  color=HZBcolors[self.polarizations.index(p)] )
-                    plt.xlim((self.cornerPointXvals[0], 
-                              self.cornerPointXvals[-1]))
-                    plt.xticks( self.cornerPointXvals, 
-                                self.brillouinPath.getNames() )
-                    plt.xlabel('$k$-vector')
-                    plt.ylabel('angular frequency $\omega$ in $s^{-1}$')
-                    plt.title('Live Plot')
-                    self.liveAxis = plt.gca()
-                    self.liveFigure.canvas.draw()
-            
-            thisN = self.numKvalsReady[polarization]
-            x = self.xVals[:thisN]
-
-            for i in range(self.nEigenvalues):
-                self.liveLines[polarization][i].set_xdata(x)
-                if self.dimensionality == 2:
-                    self.liveLines[polarization][i].set_ydata(
-                                    self.bands[polarization][:thisN, i])
-                elif self.dimensionality == 3:
-                    self.liveLines[polarization][i].set_ydata(
-                                self.bands[polarization][:thisN, i]['omega_re'])
-                
-            self.liveAxis.relim()
-            self.liveAxis.autoscale_view()
-            self.liveFigure.canvas.draw()
-            if saveSnapshot:
-                if not os.path.isdir('snapshots'):
-                    os.mkdir('snapshots')
-                self.liveFigure.savefig( 
-                            os.path.join('snapshots',
-                                         'snapshot_{0:04d}'.format(thisN)) )
-        
-        except:
-            self.message('Sorry, the live plotting failed.')
-
-    
-    def plot(self, polarizations = 'all', filename = False, 
-             showBandgaps = True, showLightcone = False, LCscaleFactor = 1.,
-             useAgg = False, colors = 'default', figsize_cm = (10.,10.), 
-             plotDir = '.', bandGapThreshold = 1e-3, legendLOC = 'best', 
-             polsInSolution = 2):
-        
-        if self.dimensionality == 2:
-            # There is no light cone in the 2D-case!
-            showLightcone = False
-        
-        if polarizations == 'all':
-            polarizations = self.polarizations
-        elif isinstance(polarizations, str):
-            polarizations = [polarizations]
-        
-        if self.dimensionality == 2:
-            for p in polarizations:
-                assert self.numKvalsReady[p] == self.numKvals, \
-                   'Bandstructure.plot: Results for plotting are incomplete.'
-        elif self.dimensionality == 3:
-            assert self.checkIfResultsComplete(), \
-                   'Bandstructure.plot: Results for plotting are incomplete.'
-        
-        if self.dimensionality == 3:
-            if polarizations == ['all']:
-                polarizations = ['TE', 'TM']
-            nEigenvaluesPerPol = self.nEigenvalues/polsInSolution
-            bands2plot = {}
-            for p in polarizations:
-                isTE = p == 'TE'
-                idx = self.bands['all']['isTE'] == isTE
-                ishape = self.bands['all']['omega_re'].shape
-                bands2plot[p] = self.bands['all']['omega_re'][idx]
-                bands2plot[p] = np.reshape(bands2plot[p],
-                                      (ishape[0], ishape[1]/polsInSolution))
-        else:
-            nEigenvaluesPerPol = self.nEigenvalues
-            bands2plot = self.bands
-        
-        if showBandgaps:
-            if not hasattr(self, 'bandgaps'):
-                self.bandgaps, self.Nbandgaps = self.findBandgaps()
-        
-        import matplotlib
-        if useAgg:
-            matplotlib.use('Agg', warn=False, force=True)
-        else:
-            matplotlib.use('TkAgg', warn=False, force=True)
-        import matplotlib.pyplot as plt
-        
-        # Define rc-params for LaTeX-typesetting etc. if a filename is given
-        customRC = plt.rcParams
-        if filename:
-            
-            customRC['text.usetex'] = True
-            customRC['font.family'] = 'serif'
-            customRC['font.sans-serif'] = ['Helvetica']
-            customRC['font.serif'] = ['Times']
-            customRC['text.latex.preamble'] = \
-                        [r'\usepackage[detect-all]{siunitx}']
-            customRC['axes.titlesize'] = 9
-            customRC['axes.labelsize'] = 8
-            customRC['xtick.labelsize'] = 7
-            customRC['ytick.labelsize'] = 7
-            customRC['lines.linewidth'] = 1.
-            customRC['legend.fontsize'] = 7
-            customRC['ps.usedistiller'] = 'xpdf'
-        
-        if colors == 'default':
-            colors = {'TE': HZBcolors[6], 
-                      'TM': HZBcolors[0] }
-        
-        with matplotlib.rc_context(rc = customRC):
-            plt.figure(1, (cm2inch(figsize_cm[0]), cm2inch(figsize_cm[1])))
-            
-            for i in range(nEigenvaluesPerPol):
-                if showBandgaps:
-                    hatches = ['//', '\\\\']
-                    for hi, p in enumerate(polarizations):
-                        for bg in self.bandgaps[p]:
-                            if bg.gapMidgapRatio > bandGapThreshold:
-                                if len(self.bandgaps.keys()) <= 1 or \
-                                            len(polarizations) <= 1:
-                                    plt.fill_between(
-                                             self.xVals, 
-                                             bg.fmin, 
-                                             bg.fmax,
-                                             color = 'none',
-                                             facecolor = colors[p],
-                                             lw = 0,
-                                             alpha = 0.1)
-                                else:
-                                    plt.fill_between(
-                                             self.xVals, 
-                                             bg.fmin, 
-                                             bg.fmax,
-                                             color = colors[p],
-                                             edgecolor = colors[p],
-                                             facecolor = 'none',
-                                             alpha = 0.1,
-                                             hatch = hatches[divmod(hi, 2)[1]],
-                                             linestyle = 'dashed')
-                                    
-                if i == 0:
-                    for p in polarizations:
-                        plt.plot( self.xVals, bands2plot[p][:,i], 
-                                  color=colors[p], label=p )
-                else:
-                    for p in polarizations:
-                        plt.plot( self.xVals, bands2plot[p][:,i], 
-                                  color=colors[p] )
-            
-            if showLightcone:
-                lightcone = self.getLightcone( scale = LCscaleFactor )
-                plt.plot(self.xVals, lightcone, color='k', label = 'light line',
-                         zorder = 1001)
-                ymax = plt.gca().get_ylim()[1]
-                plt.fill_between(self.xVals, lightcone, ymax, interpolate=True,
-                                 color=HZBcolors[9], zorder = 1000)
-            
-            plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
-            plt.xticks( self.cornerPointXvals, self.brillouinPath.getNames() )
-            plt.xlabel('$k$-vector')
-            plt.ylabel('angular frequency $\omega$ in s$^{-1}$')
-            legend = plt.legend(frameon=False, loc=legendLOC)
-            legend.set_zorder(1002)
-            ax1 = plt.gca()
-            ytics = ax1.get_yticks()
-            ax2 = ax1.twinx()
-            ytics2 = ['{0:.0f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
-            plt.yticks( ytics, ytics2 )
-            ax2.set_ylabel('wavelength $\lambda$ in nm (rounded)')
-            plt.grid(axis='x')
-            
-            if filename:
-                if not filename.endswith('.pdf'):
-                    filename = filename + '.pdf'
-                if not os.path.exists(plotDir):
-                    os.makedirs(plotDir)
-                pdfName = os.path.join(plotDir, filename)
-                print 'Saving plot to', pdfName
-                plt.savefig(pdfName, format='pdf', dpi=300, bbox_inches='tight')
-                plt.clf()
-            else:
-                plt.show()
-            return
+#     def plotLive(self, polarization, saveSnapshot = True):
+#         try:
+#             if not hasattr(self, 'liveFigure'):
+#                 import matplotlib.pyplot as plt
+#                 plt.switch_backend('TkAgg')
+#                 plt.ion()
+#                 self.liveFigure = plt.figure()
+#                 self.liveLines = {}
+#                 for p in self.polarizations:
+#                     self.liveLines[p] = [None]*self.nEigenvalues
+#                 for i in range(self.nEigenvalues):
+#                     for p in self.polarizations:
+#                         self.liveLines[p][i], = plt.plot( [], [], '-o',
+#                                   color=HZBcolors[self.polarizations.index(p)] )
+#                     plt.xlim((self.cornerPointXvals[0], 
+#                               self.cornerPointXvals[-1]))
+#                     plt.xticks( self.cornerPointXvals, 
+#                                 self.brillouinPath.getNames() )
+#                     plt.xlabel('$k$-vector')
+#                     plt.ylabel('angular frequency $\omega$ in $s^{-1}$')
+#                     plt.title('Live Plot')
+#                     self.liveAxis = plt.gca()
+#                     self.liveFigure.canvas.draw()
+#             
+#             thisN = self.numKvalsReady[polarization]
+#             x = self.xVals[:thisN]
+# 
+#             for i in range(self.nEigenvalues):
+#                 self.liveLines[polarization][i].set_xdata(x)
+#                 if self.dimensionality == 2:
+#                     self.liveLines[polarization][i].set_ydata(
+#                                     self.bands[polarization][:thisN, i])
+#                 elif self.dimensionality == 3:
+#                     self.liveLines[polarization][i].set_ydata(
+#                                 self.bands[polarization][:thisN, i]['omega_re'])
+#                 
+#             self.liveAxis.relim()
+#             self.liveAxis.autoscale_view()
+#             self.liveFigure.canvas.draw()
+#             if saveSnapshot:
+#                 if not os.path.isdir('snapshots'):
+#                     os.mkdir('snapshots')
+#                 self.liveFigure.savefig( 
+#                             os.path.join('snapshots',
+#                                          'snapshot_{0:04d}'.format(thisN)) )
+#         
+#         except:
+#             self.message('Sorry, the live plotting failed.')
+# 
+#     
+#     def plot(self, polarizations = 'all', filename = False, 
+#              showBandgaps = True, showLightcone = False, LCscaleFactor = 1.,
+#              useAgg = False, colors = 'default', figsize_cm = (10.,10.), 
+#              plotDir = '.', bandGapThreshold = 1e-3, legendLOC = 'best', 
+#              polsInSolution = 2):
+#         
+#         if self.dimensionality == 2:
+#             # There is no light cone in the 2D-case!
+#             showLightcone = False
+#         
+#         if polarizations == 'all':
+#             polarizations = self.polarizations
+#         elif isinstance(polarizations, str):
+#             polarizations = [polarizations]
+#         
+#         if self.dimensionality == 2:
+#             for p in polarizations:
+#                 assert self.numKvalsReady[p] == self.numKvals, \
+#                    'Bandstructure.plot: Results for plotting are incomplete.'
+#         elif self.dimensionality == 3:
+#             assert self.checkIfResultsComplete(), \
+#                    'Bandstructure.plot: Results for plotting are incomplete.'
+#         
+#         if self.dimensionality == 3:
+#             if polarizations == ['all']:
+#                 polarizations = ['TE', 'TM']
+#             nEigenvaluesPerPol = self.nEigenvalues/polsInSolution
+#             bands2plot = {}
+#             for p in polarizations:
+#                 isTE = p == 'TE'
+#                 idx = self.bands['all']['isTE'] == isTE
+#                 ishape = self.bands['all']['omega_re'].shape
+#                 bands2plot[p] = self.bands['all']['omega_re'][idx]
+#                 bands2plot[p] = np.reshape(bands2plot[p],
+#                                       (ishape[0], ishape[1]/polsInSolution))
+#         else:
+#             nEigenvaluesPerPol = self.nEigenvalues
+#             bands2plot = self.bands
+#         
+#         if showBandgaps:
+#             if not hasattr(self, 'bandgaps'):
+#                 self.bandgaps, self.Nbandgaps = self.findBandgaps()
+#         
+#         import matplotlib
+#         if useAgg:
+#             matplotlib.use('Agg', warn=False, force=True)
+#         else:
+#             matplotlib.use('TkAgg', warn=False, force=True)
+#         import matplotlib.pyplot as plt
+#         
+#         # Define rc-params for LaTeX-typesetting etc. if a filename is given
+#         customRC = plt.rcParams
+#         if filename:
+#             
+#             customRC['text.usetex'] = True
+#             customRC['font.family'] = 'serif'
+#             customRC['font.sans-serif'] = ['Helvetica']
+#             customRC['font.serif'] = ['Times']
+#             customRC['text.latex.preamble'] = \
+#                         [r'\usepackage[detect-all]{siunitx}']
+#             customRC['axes.titlesize'] = 9
+#             customRC['axes.labelsize'] = 8
+#             customRC['xtick.labelsize'] = 7
+#             customRC['ytick.labelsize'] = 7
+#             customRC['lines.linewidth'] = 1.
+#             customRC['legend.fontsize'] = 7
+#             customRC['ps.usedistiller'] = 'xpdf'
+#         
+#         if colors == 'default':
+#             colors = {'TE': HZBcolors[6], 
+#                       'TM': HZBcolors[0] }
+#         
+#         with matplotlib.rc_context(rc = customRC):
+#             plt.figure(1, (cm2inch(figsize_cm[0]), cm2inch(figsize_cm[1])))
+#             
+#             for i in range(nEigenvaluesPerPol):
+#                 if showBandgaps:
+#                     hatches = ['//', '\\\\']
+#                     for hi, p in enumerate(polarizations):
+#                         for bg in self.bandgaps[p]:
+#                             if bg.gapMidgapRatio > bandGapThreshold:
+#                                 if len(self.bandgaps.keys()) <= 1 or \
+#                                             len(polarizations) <= 1:
+#                                     plt.fill_between(
+#                                              self.xVals, 
+#                                              bg.fmin, 
+#                                              bg.fmax,
+#                                              color = 'none',
+#                                              facecolor = colors[p],
+#                                              lw = 0,
+#                                              alpha = 0.1)
+#                                 else:
+#                                     plt.fill_between(
+#                                              self.xVals, 
+#                                              bg.fmin, 
+#                                              bg.fmax,
+#                                              color = colors[p],
+#                                              edgecolor = colors[p],
+#                                              facecolor = 'none',
+#                                              alpha = 0.1,
+#                                              hatch = hatches[divmod(hi, 2)[1]],
+#                                              linestyle = 'dashed')
+#                                     
+#                 if i == 0:
+#                     for p in polarizations:
+#                         plt.plot( self.xVals, bands2plot[p][:,i], 
+#                                   color=colors[p], label=p )
+#                 else:
+#                     for p in polarizations:
+#                         plt.plot( self.xVals, bands2plot[p][:,i], 
+#                                   color=colors[p] )
+#             
+#             if showLightcone:
+#                 lightcone = self.getLightcone( scale = LCscaleFactor )
+#                 plt.plot(self.xVals, lightcone, color='k', label = 'light line',
+#                          zorder = 1001)
+#                 ymax = plt.gca().get_ylim()[1]
+#                 plt.fill_between(self.xVals, lightcone, ymax, interpolate=True,
+#                                  color=HZBcolors[9], zorder = 1000)
+#             
+#             plt.xlim((self.cornerPointXvals[0], self.cornerPointXvals[-1]))
+#             plt.xticks( self.cornerPointXvals, self.brillouinPath.getNames() )
+#             plt.xlabel('$k$-vector')
+#             plt.ylabel('angular frequency $\omega$ in s$^{-1}$')
+#             legend = plt.legend(frameon=False, loc=legendLOC)
+#             legend.set_zorder(1002)
+#             ax1 = plt.gca()
+#             ytics = ax1.get_yticks()
+#             ax2 = ax1.twinx()
+#             ytics2 = ['{0:.0f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
+#             plt.yticks( ytics, ytics2 )
+#             ax2.set_ylabel('wavelength $\lambda$ in nm (rounded)')
+#             plt.grid(axis='x')
+#             
+#             if filename:
+#                 if not filename.endswith('.pdf'):
+#                     filename = filename + '.pdf'
+#                 if not os.path.exists(plotDir):
+#                     os.makedirs(plotDir)
+#                 pdfName = os.path.join(plotDir, filename)
+#                 print 'Saving plot to', pdfName
+#                 plt.savefig(pdfName, format='pdf', dpi=300, bbox_inches='tight')
+#                 plt.clf()
+#             else:
+#                 plt.show()
+#             return
 
 
 # =============================================================================
@@ -1538,12 +1706,9 @@ class BandstructureSolver(object):
     
     def getFreqs(self):
         if hasattr(self, 'prescanFrequencies'):
-            if hasattr(self, 'prescanCartesian'):
-                pass
-            else:
-                ans = self.prescanFrequencies.copy()
-                del self.prescanFrequencies
-                return (ans, 'prescan')
+            ans = self.prescanFrequencies.copy()
+            del self.prescanFrequencies
+            return (ans, 'prescan')
         if self.dim == 2:
             return self.bs.getBands(self.currentPol)
         elif self.dim == 3:
