@@ -4,7 +4,7 @@ from numpy.lib import recfunctions
 import sqlite3 as sql
 import warnings
 from pprint import pprint
-from functions import getPowerIn, getFourierReflection, getRefractive
+from functions import getPowerIn, getFourierReflection, getRefractive, getAbsorbedPower
 
 # =============================================================================
 class Results:
@@ -34,7 +34,7 @@ class Results:
     
     def computeResults(self):
         tres = self.jcmResults
-	#pprint(tres[2])
+	# pprint(tres)
         
         try:
             # Get simulation related results
@@ -45,15 +45,13 @@ class Results:
             
             # Determine input power per unit cell
             refractive_superspace =  abs(getRefractive(self.keys['wavelength'], self.keys['filename_glass']))
-            power_in = getPowerIn(refractive_superspace, self.keys['P'], self.keys['radius_A'])   
+            power_in = getPowerIn(refractive_superspace, self.keys['P'], self.keys['radius_A'], 0.0)   
             
             # Determine reflection, absorption and incident-reflection for both polarizations
             for pol_number in range(2):
-		#print power_in
-                self.results['Absorption_'+str(pol_number+1)] = np.real(tres[1]['ElectromagneticFieldEnergyFlux'][pol_number])/power_in
-                self.results['Reflection_'+str(pol_number+1)] = np.real(tres[2]['ElectromagneticFieldEnergyFlux'][pol_number])/power_in
-                self.results['Incident-Reflection_'+str(pol_number+1)] = np.real(tres[3]['ElectromagneticFieldEnergyFlux'][pol_number])/power_in
-                self.results['ReflectionFourier_'+str(pol_number+1)] = getFourierReflection(tres[4],self.keys['radius_A'],self.keys['theta_k'],pol_number)
+                self.results['Abs_Si_'+str(pol_number+1)] = np.real(tres[1]['ElectromagneticFieldEnergyFlux'][pol_number])/power_in
+                self.results['Abs_solGel_'+str(pol_number+1)] = getAbsorbedPower(self.keys['wavelength'],tres[2]['ElectricFieldEnergy'][pol_number][0])/power_in
+                self.results['ReflectionFourier_'+str(pol_number+1)] = getFourierReflection(tres[3],self.keys['radius_A'],self.keys['theta_k'],pol_number)
                         
             # Get all result keys which do not belong to the input parameters
             allKeys = self.results.keys()
@@ -79,10 +77,8 @@ class Results:
         formats = ['f64']*len(keys)
         for i, k in enumerate(keys):
             if np.iscomplex(d[k]):
-            	print k, d[k]
-            	formats[i] = 'c128'
-	    else: 
-		d[k] = np.real(d[k])
+                print k, d[k]
+                formats[i] = 'c128'
         dtype = dict(names = keys, formats=formats)
         arr = np.array(np.zeros((1)), dtype=dtype)
         if len(keys) == 0:

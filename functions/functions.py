@@ -64,37 +64,31 @@ def getFlux(number_source, flux_file):
     flux = np.real(temp[0,index])
     return flux
 
-def getPowerIn(refractive, side_length, field_amplitude):
+def getPowerIn(refractive, side_length, field_amplitude, theta_in):
     "Calculate incident power flow (in W)"
     side_length *= 1.e-7
     area = 0.5*np.sqrt(3.)*side_length**2
     poynting_constant = 0.5*refractive/(c*mu_0)
     poynting_in = field_amplitude**2*poynting_constant
-    power = poynting_in*area
+    power = poynting_in*area*np.cos(theta_in)
     return power
+
+def getAbsorbedPower(wavelength, ElectricEnergyDensity):
+    #calculate the absorbed power in a layer (solid) if the ElectricEnergyDensity is given
+    omega = 2*math.pi*c/wavelength
+    return -2.*omega*np.imag(ElectricEnergyDensity)
 
 def getFourierReflection(results, radius_A, theta_in, pol_number):
     K_r = results['K']
-    print K_r
-    id_max = np.where(np.abs(K_r[:,2])==np.amax(np.abs(K_r[:,2])))
-    cos_thetas_r = np.abs(K_r[:,2]) / norm(K_r[id_max,:])
+    #print K_r
+    #id_max = np.where(np.abs(K_r[:,2])==np.amax(np.abs(K_r[:,2])))
+    #cos_thetas_r = np.abs(K_r[:,2]) / norm(K_r[id_max,:])
+    cos_thetas_r = np.abs(K_r[:,2]) / norm(K_r[0,:])
     if np.any(cos_thetas_r > 1.) or np.any(cos_thetas_r < 0.):
         print 'Warning: clipping data to calculate arccos.'
         cos_thetas_r = np.clip(cos_thetas_r, 0., 1.)
     er = results['ElectricFieldStrength'][pol_number]
-    cosFac_r = cos_thetas_r / np.cos(theta_in)
-    R = np.sum( np.sum( np.abs(er)**2, axis=1 ) * cosFac_r )
-    R= R/np.power(radius_A, 2)
-    return R
-
-
-#def getFourierReflection(results, theta_in, pol_number):
-#    K_r = results[4]['K']
-#    thetas_r = np.arccos( np.abs(K_r[:,2]) / norm(K_r[0,:]) )
-#    er = results[4]['ElectricFieldStrength'][pol_number]
-#    cosFac_r = np.cos(thetas_r) / np.cos(theta_in)
-#    R = np.sum( np.sum( np.abs(er)**2, axis=1 ) * cosFac_r )
-#     print 'Reflection (Fourier): {0:.2f}%.'.format(100*R)
-#    return R
-    
-    
+    R = np.sum( np.sum( np.abs(er)**2, axis=1 ) * cos_thetas_r )
+    power_in = np.power(radius_A, 2)*np.cos(theta_in)
+    R= R/power_in
+    return R  
