@@ -8,6 +8,10 @@ from pprint import pformat#, pprint
 from shutil import rmtree, copyfile
 from warnings import warn
 
+import logging
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
 
 # =============================================================================
 # Globals
@@ -27,6 +31,8 @@ solution3DstandardDType = [  ('omega_im', float),
 
 # Default format for band columns in a pandas DataFrame
 bandColumnFormat = 'band{0:03d}'
+parityColumnFormat = 'parity_{0}'
+Nparities = 7
 
 # pandas column specifiers
 bdfNames = ['kind','prop']
@@ -50,7 +56,8 @@ def omegaDimensionless(omega, a):
 
 
 def omegaFromDimensionless(omega, a):
-    return omega/a*(2*np.pi*c0)
+#     return omega/a*(2*np.pi*c0)
+    return omega*2*np.pi*c0/a
 
 
 def freq2wvl(freq):
@@ -68,6 +75,18 @@ def bname(nums):
         return [bandColumnFormat.format(n) for n in nums]
 
 
+def parityName(nums):
+    """
+    Returns a formatted string for a parity index (e.g. 1 -> parity_1)
+    or a list of the same if a list of indices is provided.
+    """
+    if isinstance(nums, int):
+        return parityColumnFormat.format(nums)
+    else:
+        return [parityColumnFormat.format(n) for n in nums]
+
+allParities = [parityName(i) for i in range(Nparities)]
+
 def addColumn2bandDframe(df, colNames, vals, index = None):
     if isinstance(colNames, str):
         colNames = [colNames]
@@ -81,6 +100,9 @@ def getMultiIndex(band = None, path = None):
     if band is not None and path is not None:
         raise Exception('getMultiIndex: band excludes path.')
     if band is not None:
+        if isinstance(band, (list, np.ndarray)):
+            return pd.MultiIndex.from_product([bname(band), bandColumns],
+                                          names = bdfNames)
         return pd.MultiIndex.from_product([[bname(band)], bandColumns],
                                           names = bdfNames)
     if path:
@@ -273,7 +295,7 @@ class BrillouinPath(object):
         
         if isinstance(self.manuallyInterpolatedKpoints, np.ndarray):
             #CHECK
-            return self.manuallyInterpolatedKpoints
+            return self.kVectors2DataFrame(self.manuallyInterpolatedKpoints, 0.)
         
         cornerPoints = self.Nkpoints
         if self.Nkpoints == 1:
@@ -475,6 +497,13 @@ class MultipleSolutions3D(object):
     def getArray(self):
         self.completeArray()
         return self.array
+    
+    def getDataFrame(self, iStart = 0):
+        arr = self.getArray()
+        df = pd.DataFrame(arr, index = range(iStart, iStart+len(arr)))
+        df['polarization'] = df['isTE'].map(lambda x: 'TE' if x else 'TM')
+        del df['isTE']
+        return df.convert_objects(convert_numeric=True)
     
     def sort(self):
         def extractFreq(solution):
@@ -681,6 +710,13 @@ class Bandstructure(object):
                                  self.absStorageFolder()))
     
     
+    def getPath(self):
+        """
+        Returns the BrillouinPath as a DataFrame
+        """
+        return self.data[pathColName]
+    
+    
     def getPathData(self, cols, ks = None):
         """
         Returns specified columns of the BrillouinPath data
@@ -753,7 +789,8 @@ class Bandstructure(object):
     
     
     def checkIfResultsComplete(self):
-        return False
+        # TODO: !!!!!!!!!!!!!!
+        return self.getFinishStatus().all()
     
     
     def addResults(self, dataFrame=None, rDict=None, k=None, band=None, 
@@ -832,15 +869,102 @@ class Bandstructure(object):
         add2Data=True using a specified column name <colName>. 
         """
         kpointsXY = self.getPathData(['x', 'y'])
-        lightcone = c0 * scale * np.sqrt( np.sum( np.square(kpointsXY), axis=1 ) )
+        lightcone = c0 * scale * np.sqrt( np.sum( np.square(kpointsXY), 
+                                                  axis=1 ) )
         if add2Data:
             self.data = addColumn2bandDframe(self.data, colName, lightcone)
         return lightcone
     
+
+    def calcThetaPhi(self, lattice, pitch):
+        path = self.getPathData(['vector', 'name'])
+        path.columns = path.columns.droplevel(0)
+        i0M = np.where(path.name=='Gamma')[0][0]
+        i1M = np.where(path.name=='M')[0][0]
+        i0K = np.where(path.name=='K')[0][0]
+        i1K = np.where(path.name=='Gamma')[0][1]
     
+        bands = []
+        for ib in range(self.nBands):
+            df = pd.DataFrame(index=path.index, columns=[u'theta', u'phi', 
+                                                         u'wavelength', 
+                                                         u'polarization'])
+            df.loc[i0M:i1M, 'phi'] = 0.
+            df.loc[i0K:i1K, 'phi'] = 90.
+            vectors = np.empty((len(path), 3))
+            for i,v in enumerate(path.vector):
+                vectors[i,:] = coordinateConversion(np.array(v), 
+                                                    lattice, 
+                                                    'cartesian->reciprocal')
+    
+            freq = self.getBandData(bands=ib, cols='omega_re').values
+            zparity = self.getBandData(bands=ib, cols='parity_6').values
+            pol = []
+            for i,zp in enumerate(zparity):
+                if zp > 0.: 
+                    pol.append('TE')
+                elif zp < 0.: 
+                    pol.append('TM')
+                else: 
+                    pol.append(np.nan)
+            df.theta = np.rad2deg( np.arcsin( 
+                                    np.linalg.norm(vectors, axis=1) / freq ))
+            df.wavelength = freq2wvl(
+                              omegaFromDimensionless(freq, pitch))*1.e9
+            df.polarization = pol
+            df = df.dropna()
+            bands.append(df)
+        return bands
+
+
     def findBandgaps(self, polarizations = 'all'):
         pass
+
+
+    def plot(self, ax = None, cmap = None, figsize=(10,10), 
+             polDecisionColumn = 'parity_6', 
+             fromDimensionlessWithPitch = None):
+        if ax is None:
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=figsize)
+            ax = plt.gca()
+        if cmap is None:
+            import matplotlib.pyplot as plt
+            cmap = plt.cm.coolwarm
+            
+        if self.dimensionality == 3:
     
+            xVal = self.getPathData('xVal')
+            for ib in range(self.nBands):
+                freq = self.getBandData(bands=ib, cols='omega_re')
+                if fromDimensionlessWithPitch is not None:
+                    freq = omegaFromDimensionless(freq, 
+                                                  fromDimensionlessWithPitch)
+                ax.scatter( xVal, 
+                            freq,
+                            c=self.getBandData(bands=ib, 
+                                               cols=polDecisionColumn),
+                            cmap=cmap,
+                            vmin=-1, vmax=1)
+    #         plt.plot(xVal, self.getLightcone(), c='k')
+            HSPidx = self.data.loc[:,(pathColName,'isHighSymmetryPoint')]
+            HSPs = self.data[HSPidx][pathColName]
+            ax.set_xticks(HSPs['xVal'].values)
+            ax.set_xticklabels(HSPs['nameAsLatex'].values)
+            ax.autoscale(True, tight=True)
+            ax.set_xlim( (xVal.iat[0], xVal.iat[-1]) )
+            ax.set_ylim((0., plt.ylim()[1]))
+            ax.set_xlabel('$k$-vector')
+            ax.set_ylabel('angular frequency $\omega$ in $s^{-1}$')
+            
+            ytics = ax.get_yticks()
+            ax2 = ax.twinx()
+            ytics2 = ['{0:.0f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
+            ax.set_yticks( ytics )
+            ax2.set_yticklabels( ytics2 )
+            ax2.set_ylabel('wavelength $\lambda$ in nm (rounded)')
+            ax.grid(axis='x')
+
     
 #     def plotLive(self, polarization, saveSnapshot = True):
 #         try:
@@ -1497,7 +1621,7 @@ class BandstructureSolver(object):
                                   1, relevance = 2)
                     if not allValid:
                         spurious = results.getSpuriousIndices()
-                        self.message( 'Spurious modes:'.format(allValid), 
+                        self.message( 'Spurious modes:', 
                                   1, relevance = 2)
                         for si in spurious:
                             self.message( 'Index: {0}, Parity-z: {1}'.format(
@@ -1795,8 +1919,8 @@ def getNumInterpolatedKpointsFromCTL(ctlFile):
         lines = f.readlines()
     for l in lines:
         sl = l.split(' ')
-        if sl[:2] == ['(set!', 'k-points'] and '(interpolate' in sl:
-            return int( sl[ sl.index('(interpolate')+1] )
+        if sl[:2] == ['(define-param', 'k-interp']:
+            return int( sl[2][:-1] )
     return None
 
 
@@ -1828,10 +1952,41 @@ def coordinateConversion(vector, lattice, direction = 'reciprocal->cartesian'):
         return
 
 
+def dataFrameFromMPB(freqFilename, zparityFilename=None, yparityFilename=None, dropCol = 'freqs:'):
+    freqs = pd.read_table(freqFilename,
+                          sep=',', 
+                          skipinitialspace=True,
+                          index_col=1)
+    
+    names = list(freqs.columns)
+    names.insert(1, freqs.index.names[0])
+    zparities = yparities = None
+    if zparityFilename:
+        zparities = pd.read_table(zparityFilename,
+                                  sep=',', 
+                                  skipinitialspace=True,
+                                  index_col=1,
+                                  header=None,
+                                  names=names)
+    if yparityFilename:
+        yparities = pd.read_table(yparityFilename,
+                                  sep=',', 
+                                  skipinitialspace=True,
+                                  index_col=1,
+                                  header=None,
+                                  names=names)
+    
+    freqs.drop(dropCol, axis=1, inplace=True)
+    if zparityFilename: zparities.drop(dropCol, axis=1, inplace=True)
+    if yparityFilename: yparities.drop(dropCol, axis=1, inplace=True)
+    return freqs, zparities, yparities
+
+
 def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality, 
-                             pathNames = None, convertFreqs = False,
+                             pathNames = None, greek = None, convertFreqs = False,
                              lattice = None, maxBands = np.inf,
-                             polNameTranslation = None):
+                             polNameTranslation = None, 
+                             bsSaveName = 'bandstructureFromMPB'):
     
     pols = polFileDictionary.keys()
     if not polNameTranslation:
@@ -1840,45 +1995,28 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
             polNameTranslation[pol] = pol
     pNT = polNameTranslation # shorter name
     
-    # load numpy structured arrays from the MPB result files for each 
-    # polarization
+    logging.debug('pols: %s', pols)
+    logging.debug('pNT: %s', pNT)
+    
     data = {}
     for p in pols:
-        dropname = pNT[p].lower()+'freqs'
-        dataFile = polFileDictionary[p]
-        data[p] = np.lib.recfunctions.drop_fields(np.genfromtxt(dataFile, 
-                                                                delimiter=', ', 
-                                                                names = True), 
-                                                  dropname)
-    
-    # Change the names according to the desired polarization naming scheme,
-    # i.e. the keys of the polNameTranslation-dictionary
-    for p in pols:
-        names = data[p].dtype.names
-        namemapper = {}
-        for n in names:
-            if pNT[p] in n:
-                namemapper[n] = n.replace( pNT[p], p.lower() )
-        data[p] = np.lib.recfunctions.rename_fields(data[p], namemapper)
-    
-    # check for data shape and dtype consistency
-    for i, p in enumerate(pols[1:]):
-        assert data[p].shape == data[pols[i-1]].shape, \
-                                                'Found missmatch in data shapes'
-        assert data[p].dtype == data[pols[i-1]].dtype, \
-                                                'Found missmatch in data dtypes'
-        names = data[p].dtype.names
-        for name in ['k_index', 'k1', 'k2', 'k3', 'kmag2pi']:
-            assert name in names, 'name '+name+' is not in dtype: '+str(names)
+        fdict = polFileDictionary[p]
+        data[p] = dataFrameFromMPB(fdict['freqs'], 
+                                   fdict['parity_z'], 
+                                   fdict['parity_y'],
+                                   dropCol = pNT[p])
     
     # extract k-point specific data
-    sample = data[pols[0]]
-    NumKvals = len(sample['k1'])
-    nEigenvalues = int(names[-1].split('_')[-1])
+    sample = data[pols[0]][0]
+    NumKvals = sample['k1'].count()
+    logging.debug('NumKvals: %s', NumKvals)
+    nEigenvalues = int(sample.columns[-1].split()[-1])*len(pols)
+    logging.debug('nEigenvalues: %s', nEigenvalues)
     nEigenvalues2use = nEigenvalues
     if not np.isinf(maxBands):
         if maxBands < nEigenvalues:
             nEigenvalues2use = maxBands
+    logging.debug('nEigenvalues2use: %s', nEigenvalues2use)
     kpointsFromF = np.empty( (NumKvals, 3) )
     kpointsFromF[:,0] = sample['k1']
     kpointsFromF[:,1] = sample['k2']
@@ -1890,21 +2028,22 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
             kpointsFromF[i,:] = coordinateConversion( kpointsFromF[i,:], 
                                                       lattice )
     
-    print 'Found data for', NumKvals, 'k-points and', nEigenvalues, 'bands'
+    logging.info('Found data for %s k-points and %s bands', NumKvals, 
+                 nEigenvalues)
     if nEigenvalues2use != nEigenvalues:
-        print 'Using only', nEigenvalues2use, 'bands'
+        logging.info( 'Using only %s bands', nEigenvalues2use)
         nEigenvalues = nEigenvalues2use
     
     # read the number of interpolated k-points from the CTL-file
     mpbInterpolateKpoints = getNumInterpolatedKpointsFromCTL(ctlFile)
-    print 'Number of interpolated points between each k-point is', \
-                                                        mpbInterpolateKpoints
+    logging.info('Number of interpolated points between each k-point is %s', 
+                 mpbInterpolateKpoints)
     
     # The number of non-interpolated k-points in the MPB-simulation is given by
     # the remainder of total number of k-points in the result file modulo
     # mpbInterpolateKpoints
     NpathPoints = divmod(NumKvals, mpbInterpolateKpoints)[1]
-    print 'Non-interpolated k-points:', NpathPoints
+    logging.info('Non-interpolated k-points: %s', NpathPoints)
     if pathNames:
         assert len(pathNames) == NpathPoints
     else:
@@ -1922,72 +2061,235 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
         path.append( blochVector(kpointsFromF[idx,0], 
                                  kpointsFromF[idx,1],
                                  kpointsFromF[idx,2],
-                                 pathNames[i]) )
-    brillouinPath = BrillouinPath( path, 
-                                   manuallyInterpolatedKpoints = kpointsFromF )
+                                 name = pathNames[i], 
+                                 isGreek = greek[i]) )
     
-    # Manually include the projection of the brillouin path to the 
-    # projections-dictionary of the BrillouinPath-instance
+    def pointDistance(p1, p2):
+        return np.sqrt( np.sum( np.square( p2-p1 ) ) )
+    
     xVals = np.zeros( (NumKvals) )
     for i,k in enumerate(kpointsFromF[:-1]):
-        xVals[i+1] = brillouinPath.pointDistance(k, kpointsFromF[i+1] )+xVals[i]
-    cornerPointXvals = np.empty((NpathPoints))
-    for i, idx in enumerate(pathPointIndices):
-        cornerPointXvals[i] = xVals[idx]
-    brillouinPath.projections[NumKvals] = [xVals, cornerPointXvals]
-    print '\nFinished constructing the brillouinPath:\n', brillouinPath, '\n'
+        xVals[i+1] = pointDistance(k, kpointsFromF[i+1] )+xVals[i]
+    kpointsFromF = kpointsFromF.tolist()
+    for i,ppi in enumerate(pathPointIndices):
+        kpointsFromF[ppi] = path[i]
     
+    brillouinPath = BrillouinPath( path, 
+                                   manuallyInterpolatedKpoints = kpointsFromF )
     # Initialize the Bandstructure-instance
-    if dimensionality == 2:
-        bsPols = pols
-        bsNEigenvalues = nEigenvalues
-    elif dimensionality == 3:
-        bsPols = ['all']
-        bsNEigenvalues = len(pols)*nEigenvalues
-    bandstructure = Bandstructure( dimensionality,
-                                   bsPols, 
-                                   bsNEigenvalues, 
+    bandstructure = Bandstructure( bsSaveName,
+                                   dimensionality,
+                                   nEigenvalues, 
                                    brillouinPath, 
-                                   NumKvals )
-    print 'Initialized the Bandstructure-instance'
+                                   NumKvals,
+                                   overwrite = True,
+                                   verb=False )
+    bandstructure.data = bandstructure.data.sortlevel(axis=1)
+    logging.info('Initialized the Bandstructure-instance')
     
-    # Fill the bandstructure with the loaded values
-    if dimensionality == 2:
-        for p in pols:
-            bands = np.empty((NumKvals, nEigenvalues))
-            for i in range(nEigenvalues):
-                if isinstance(convertFreqs, float):
-                    bands[:, i] = omegaFromDimensionless(data[p][p.lower()+\
-                                               '_band_'+str(i+1)], convertFreqs)
-                else:
-                    bands[:, i] = data[p][p.lower()+'_band_'+str(i+1)]
-            bandstructure.addResults(p, 'all', bands)
-    elif dimensionality == 3:
-        for i in range(NumKvals):
-            solutions = MultipleSolutions3D()
-            rarray = np.empty( (len(pols)*nEigenvalues), 
-                                dtype = solution3DstandardDType )
-            for j, p in enumerate(pols):
-                for k in range(nEigenvalues):
-                    sstring = p.lower()+'_band_'+str(k+1)
-                    idx = j*nEigenvalues+k
-                    if isinstance(convertFreqs, float):
-                        rarray['omega_re'][idx] = omegaFromDimensionless(\
-                                            data[p][sstring][i], convertFreqs)
+    bidx = 0
+    polZPdict = {'TE':1., 'TM':-1}
+    for p in pols:
+        datas = data[p]
+        for col in datas[0].columns:
+            if 'band' in col:
+#                 bidx = int(col.split()[-1])-1
+                
+                freqs = datas[0].loc[:,col]
+                if p == 'all':
+                    zparity = datas[1].loc[:,col]
+                    yparity = datas[2].loc[:,col]
+
+                
+                for k in range(NumKvals):
+                    bandstructure.addResults(k=k, band=bidx, 
+                                             singleValueTuple=('omega_re', 
+                                                               freqs.iat[k]),
+                                             save = False)
+                    if p == 'all':
+                        bandstructure.addResults(k=k, band=bidx, 
+                                                 singleValueTuple=('parity_6', 
+                                                                zparity.iat[k]),
+                                                 save = False)
+                        bandstructure.addResults(k=k, band=bidx, 
+                                                 singleValueTuple=('parity_0', 
+                                                                yparity.iat[k]),
+                                                 save = False)
                     else:
-                        rarray['omega_re'][idx] = data[p][sstring][i]
-                    if p == 'TE':
-                        rarray['isTE'][idx] = True
-                    elif p == 'TM':
-                        rarray['isTE'][idx] = False
-            solutions.array = rarray
-            solutions.uptodate = True
-            bandstructure.addResults('all', i, solutions)
-        
-    print '\nResulting bandstructure:'
-    print bandstructure
-    
+                        bandstructure.addResults(k=k, band=bidx, 
+                                                 singleValueTuple=('parity_6', 
+                                                                polZPdict[p]),
+                                                 save = False)
+                        bandstructure.addResults(k=k, band=bidx, 
+                                        singleValueTuple=('polarization', p),
+                                        save = False)
+                bidx += 1
+    bandstructure.save()
+    logging.info('Resulting bandstructure:')
+    logging.info(bandstructure.__repr__())
     return brillouinPath, bandstructure
+
+
+# def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality, 
+#                              pathNames = None, convertFreqs = False,
+#                              lattice = None, maxBands = np.inf,
+#                              polNameTranslation = None):
+#     
+#     pols = polFileDictionary.keys()
+#     if not polNameTranslation:
+#         polNameTranslation = {}
+#         for pol in pols:
+#             polNameTranslation[pol] = pol
+#     pNT = polNameTranslation # shorter name
+#     
+#     # load numpy structured arrays from the MPB result files for each 
+#     # polarization
+#     data = {}
+#     for p in pols:
+#         dropname = pNT[p].lower()+'freqs'
+#         dataFile = polFileDictionary[p]
+#         data[p] = np.lib.recfunctions.drop_fields(np.genfromtxt(dataFile, 
+#                                                                 delimiter=', ', 
+#                                                                 names = True), 
+#                                                   dropname)
+#     
+#     # Change the names according to the desired polarization naming scheme,
+#     # i.e. the keys of the polNameTranslation-dictionary
+#     for p in pols:
+#         names = data[p].dtype.names
+#         namemapper = {}
+#         for n in names:
+#             if pNT[p] in n:
+#                 namemapper[n] = n.replace( pNT[p], p.lower() )
+#         data[p] = np.lib.recfunctions.rename_fields(data[p], namemapper)
+#     
+#     # check for data shape and dtype consistency
+#     for i, p in enumerate(pols[1:]):
+#         assert data[p].shape == data[pols[i-1]].shape, \
+#                                                 'Found missmatch in data shapes'
+#         assert data[p].dtype == data[pols[i-1]].dtype, \
+#                                                 'Found missmatch in data dtypes'
+#         names = data[p].dtype.names
+#         for name in ['k_index', 'k1', 'k2', 'k3', 'kmag2pi']:
+#             assert name in names, 'name '+name+' is not in dtype: '+str(names)
+#     
+#     # extract k-point specific data
+#     sample = data[pols[0]]
+#     NumKvals = len(sample['k1'])
+#     nEigenvalues = int(names[-1].split('_')[-1])
+#     nEigenvalues2use = nEigenvalues
+#     if not np.isinf(maxBands):
+#         if maxBands < nEigenvalues:
+#             nEigenvalues2use = maxBands
+#     kpointsFromF = np.empty( (NumKvals, 3) )
+#     kpointsFromF[:,0] = sample['k1']
+#     kpointsFromF[:,1] = sample['k2']
+#     kpointsFromF[:,2] = sample['k3']
+#     if lattice is not None:
+#         assert isinstance(lattice, np.ndarray)
+#         assert lattice.shape == (3,3)
+#         for i in range(NumKvals):
+#             kpointsFromF[i,:] = coordinateConversion( kpointsFromF[i,:], 
+#                                                       lattice )
+#     
+#     print 'Found data for', NumKvals, 'k-points and', nEigenvalues, 'bands'
+#     if nEigenvalues2use != nEigenvalues:
+#         print 'Using only', nEigenvalues2use, 'bands'
+#         nEigenvalues = nEigenvalues2use
+#     
+#     # read the number of interpolated k-points from the CTL-file
+#     mpbInterpolateKpoints = getNumInterpolatedKpointsFromCTL(ctlFile)
+#     print 'Number of interpolated points between each k-point is', \
+#                                                         mpbInterpolateKpoints
+#     
+#     # The number of non-interpolated k-points in the MPB-simulation is given by
+#     # the remainder of total number of k-points in the result file modulo
+#     # mpbInterpolateKpoints
+#     NpathPoints = divmod(NumKvals, mpbInterpolateKpoints)[1]
+#     print 'Non-interpolated k-points:', NpathPoints
+#     if pathNames:
+#         assert len(pathNames) == NpathPoints
+#     else:
+#         pathNames = [ 'kpoint'+str(i+1) for i in range(NpathPoints) ]
+#     
+#     # The indices of the non-interpolated k-points are separated by the value
+#     # of mpbInterpolateKpoints
+#     pathPointIndices = []
+#     for i in range(NpathPoints):
+#         pathPointIndices.append(i + i*mpbInterpolateKpoints)
+#     
+#     # construct the brillouinPath
+#     path = []
+#     for i, idx in enumerate(pathPointIndices):
+#         path.append( blochVector(kpointsFromF[idx,0], 
+#                                  kpointsFromF[idx,1],
+#                                  kpointsFromF[idx,2],
+#                                  pathNames[i]) )
+#     brillouinPath = BrillouinPath( path, 
+#                                    manuallyInterpolatedKpoints = kpointsFromF )
+#     
+#     # Manually include the projection of the brillouin path to the 
+#     # projections-dictionary of the BrillouinPath-instance
+#     xVals = np.zeros( (NumKvals) )
+#     for i,k in enumerate(kpointsFromF[:-1]):
+#         xVals[i+1] = brillouinPath.pointDistance(k, kpointsFromF[i+1] )+xVals[i]
+#     cornerPointXvals = np.empty((NpathPoints))
+#     for i, idx in enumerate(pathPointIndices):
+#         cornerPointXvals[i] = xVals[idx]
+#     brillouinPath.projections[NumKvals] = [xVals, cornerPointXvals]
+#     print '\nFinished constructing the brillouinPath:\n', brillouinPath, '\n'
+#     
+#     # Initialize the Bandstructure-instance
+#     if dimensionality == 2:
+#         bsPols = pols
+#         bsNEigenvalues = nEigenvalues
+#     elif dimensionality == 3:
+#         bsPols = ['all']
+#         bsNEigenvalues = len(pols)*nEigenvalues
+#     bandstructure = Bandstructure( dimensionality,
+#                                    bsPols, 
+#                                    bsNEigenvalues, 
+#                                    brillouinPath, 
+#                                    NumKvals )
+#     print 'Initialized the Bandstructure-instance'
+#     
+#     # Fill the bandstructure with the loaded values
+#     if dimensionality == 2:
+#         for p in pols:
+#             bands = np.empty((NumKvals, nEigenvalues))
+#             for i in range(nEigenvalues):
+#                 if isinstance(convertFreqs, float):
+#                     bands[:, i] = omegaFromDimensionless(data[p][p.lower()+\
+#                                                '_band_'+str(i+1)], convertFreqs)
+#                 else:
+#                     bands[:, i] = data[p][p.lower()+'_band_'+str(i+1)]
+#             bandstructure.addResults(p, 'all', bands)
+#     elif dimensionality == 3:
+#         for i in range(NumKvals):
+#             solutions = MultipleSolutions3D()
+#             rarray = np.empty( (len(pols)*nEigenvalues), 
+#                                 dtype = solution3DstandardDType )
+#             for j, p in enumerate(pols):
+#                 for k in range(nEigenvalues):
+#                     sstring = p.lower()+'_band_'+str(k+1)
+#                     idx = j*nEigenvalues+k
+#                     if isinstance(convertFreqs, float):
+#                         rarray['omega_re'][idx] = omegaFromDimensionless(\
+#                                             data[p][sstring][i], convertFreqs)
+#                     else:
+#                         rarray['omega_re'][idx] = data[p][sstring][i]
+#                     if p == 'TE':
+#                         rarray['isTE'][idx] = True
+#                     elif p == 'TM':
+#                         rarray['isTE'][idx] = False
+#             solutions.array = rarray
+#             solutions.uptodate = True
+#             bandstructure.addResults('all', i, solutions)
+#         
+#     print '\nResulting bandstructure:'
+#     print bandstructure
+#     
+#     return brillouinPath, bandstructure
 
 
 # =============================================================================

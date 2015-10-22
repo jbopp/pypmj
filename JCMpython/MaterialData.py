@@ -533,6 +533,10 @@ class RefractiveIndexInfo(object):
                                       convert = False )
         return np.array( [ np.min(perms), np.max(perms) ] )
     
+    
+    def isConstant(self):
+        return self.fixedN
+    
 
     def plotData(self, wavelengths = None, wvlRange = None, Nvals = 1000,
                  convert = False, plotKnownValues = False, show = True):
@@ -588,6 +592,14 @@ class RefractiveIndexInfo(object):
         
 
 if __name__ == '__main__':
+    
+    # Check if distinction between constant n and wavelength dependent n works
+    ms = [ RefractiveIndexInfo(material = np.sqrt(12.)),
+           RefractiveIndexInfo(material = 'air'),
+           RefractiveIndexInfo(material = 'glass_CorningEagleXG'),
+           RefractiveIndexInfo(material = 'silicon') ]
+    for m in ms:
+        print m.name, m.isConstant()       
     
     d = RefractiveIndexInfo('silicon')
     d.plotData()

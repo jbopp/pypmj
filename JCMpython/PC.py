@@ -95,6 +95,9 @@ class PC:
             if dataNumerikInstalDir == 'bzfherrm':
                 hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
                 jcmFolderName = 'JCMsuite{0}'.format(''.join(hzbJCMnoCAD))
+            elif dataNumerikInstalDir == 'bzfwohlf':
+                hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
+                jcmFolderName = 'JCMsuite_{0}'.format('_'.join(hzbJCMnoCAD))
             else:
                 hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
                 jcmFolderName = 'JCMsuite.{0}'.format('.'.join(hzbJCMnoCAD))

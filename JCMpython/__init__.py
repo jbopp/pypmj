@@ -13,7 +13,7 @@ Copyright(C) 2015 Carlo Barth.
 from JCMpython.Accessory import * 
 from JCMpython.BandstructureTools import * 
 from JCMpython.config import * 
-from JCMpython.DaemonResources import Workstation, Queue
+from JCMpython.DaemonResources import Workstation, Queue, ResourceRegistry
 from JCMpython.MaterialData import MaterialData, RefractiveIndexInfo
 from JCMpython.Results import Results
 from JCMpython.Simulation import Simulation
