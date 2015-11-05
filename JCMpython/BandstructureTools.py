@@ -51,6 +51,27 @@ bandColumns = sorted(['omega_re', 'omega_im', 'polarization',
 # Functions
 # =============================================================================
 
+def relDev(sample, reference):
+    """
+    Returns the relative deviation d=|A/B-1| of sample A
+    and reference B. A can be a (complex) number or a 
+    list/numpy.ndarray of (complex) numbers. In case of
+    complex numbers, the average relative deviation of
+    real and imaginary part (d_real+d_imag)/2 is returned.
+    """
+    def relDevReal(A,B):
+        return np.abs( A/B -1. )
+    if isinstance(sample, list): sample = np.array(sample)
+    if np.any(np.iscomplex(sample)):
+        assert np.iscomplex(reference), \
+            'relDev for complex numbers is only possible '+\
+            'if the refrence is complex as-well.'
+        return (relDevReal(sample.real, reference.real) +\
+               relDevReal(sample.imag, reference.imag))/2.
+    else:
+        return relDevReal(sample, reference.real)
+
+
 def omegaDimensionless(omega, a):
     return omega*a/(2*np.pi*c0)
 
@@ -61,7 +82,7 @@ def omegaFromDimensionless(omega, a):
 
 
 def freq2wvl(freq):
-    return 2*np.pi*c0/freq
+    return 2*np.pi*c0/freq.real
 
 
 def bname(nums):
@@ -114,6 +135,9 @@ def getSingleKdFrame(k, band = None, path = None):
     return pd.DataFrame(index=[k], columns=getMultiIndex(band, path))
 
 
+
+# =============================================================================
+# =============================================================================
 # =============================================================================
 class blochVector(np.ndarray):
     """
@@ -189,6 +213,9 @@ class blochVector(np.ndarray):
             return r'${0}$'.format(self.name)
 
 
+
+# =============================================================================
+# =============================================================================
 # =============================================================================
 class BrillouinPath(object):
     """
@@ -334,6 +361,8 @@ class BrillouinPath(object):
 
 
 # =============================================================================
+# =============================================================================
+# =============================================================================
 class Bandgap(object):
     """
     
@@ -371,6 +400,8 @@ class Bandgap(object):
 
 
 # =============================================================================
+# =============================================================================
+# =============================================================================
 class HexSymmetryPlane(object):
     """
     Class that represents the symmetry planes of the hexagonal photonic crystal
@@ -402,6 +433,8 @@ class HexSymmetryPlane(object):
 
 
 
+# =============================================================================
+# =============================================================================
 # =============================================================================
 class SingleSolution3D(object):
     """
@@ -462,6 +495,8 @@ class SingleSolution3D(object):
 
 
 # =============================================================================
+# =============================================================================
+# =============================================================================
 class MultipleSolutions3D(object):
     """
     
@@ -518,7 +553,7 @@ class MultipleSolutions3D(object):
     def getSingleValue(self, solutionIndex, key):
         return self.solutions[solutionIndex].data[key]
     
-    def getFrequencies(self, returnComplex = False):
+    def getFrequencies(self, returnComplex = True):
         self.completeArray()
         if self.isEmpty():
             return np.array([])
@@ -541,6 +576,8 @@ class MultipleSolutions3D(object):
 
 
 
+# =============================================================================
+# =============================================================================
 # =============================================================================
 class Bandstructure(object):
     """
@@ -830,12 +867,14 @@ class Bandstructure(object):
                 self.data.loc[k,bname(band)] = array
                 done = True
             except:
-                self.resultWarning(addLines='Your array/list was of wrong format.')
+                self.resultWarning(addLines = \
+                                   'Your array/list was of wrong format.')
         
         # Input = tuple of form (column/key, value)
         if singleValueTuple is not None and not done:
             try:
-                self.data.ix[k, (bname(band), singleValueTuple[0])] = singleValueTuple[1]
+                self.data.ix[k, (bname(band), singleValueTuple[0])] = \
+                                                            singleValueTuple[1]
                 done = True
             except:
                 self.resultWarning(addLines='Your tuple was of wrong format.')
@@ -1164,195 +1203,110 @@ class Bandstructure(object):
 #             return
 
 
+
 # =============================================================================
-class BandstructureSolver(object):
+# =============================================================================
+# =============================================================================
+class JCMresultAnalyzer(object):
+    """
+    Depending on the dimensionality of the band structure computation, different
+    kinds of evaluations are done on the results returned by JCMwave.
     """
     
-    """
+    def __init__(self, computation = None):
+        self.projectFile = None
+        self.analyzeResultFolder = False
+        if computation is not None:
+            self.addComputation(computation)
     
-    MaxNtrials = 100 # maximum number of iterations per k and band
+    
+    def addComputation(self, comp):
+        if isinstance(comp, JCMresonanceModeComputation):
+            assert comp.isFinished()
+            self.computation = comp
+            self.dim = self.computation.dim
+            self.data = self.computation.results
+            self.analyzeData()
     
     
-    def __init__(self, keys, bandstructure2solve, materialPore, materialSlab,
-                 materialSubspace = None, materialSuperspace = None,
-                 projectFileName = 'project.jcmp', firstKlowerBoundGuess = 0.,
-                 firstKfrequencyGuess = None, prescanMode = 'Fundamental',
-                 degeneracyTolerance = 1.e-4, targetAccuracy = 'fromKeys',
-                 extrapolationMode = 'spline', absorption = False, customFolder
-                 = '', cleanMode = False, wSpec = {}, qSpec = {},
-                 runOnLocalMachine = False, resourceInfo = False, verb = True,
-                 infoLevel = 3, suppressDaemonOutput = False, plotLive = False):
+    def getResultsFromFolder(self, folder, dim, 
+                             outputQuantity = 'ElectricFieldStrength'):
+        """
+        Analyzes the results inside of a JCM project_results folder.
+        """
+        self.analyzeResultFolder = True
+        self.dim = dim
+        eigFile = os.path.join(folder, 'eigenvalues.jcm')
         
-        self.keys = keys
-        self.bs = bandstructure2solve
-        self.dim = bandstructure2solve.dimensionality
-        self.JCMPattern = str(self.dim) + 'D'
-        self.materialPore = materialPore
-        self.materialSlab = materialSlab
-        self.materialSubspace = materialSubspace
-        self.materialSuperspace = materialSuperspace
-        self.projectFileName = projectFileName
-        self.firstKlowerBoundGuess = firstKlowerBoundGuess
-        if firstKfrequencyGuess is not None:
-            assert isinstance(firstKfrequencyGuess, (list, np.ndarray))
-            if isinstance(firstKfrequencyGuess, list):
-                firstKfrequencyGuess = np.array(firstKfrequencyGuess)
-            assert len(firstKfrequencyGuess) == self.bs.nEigenvalues
-            self.skipPrescan = True
-        else:
-            self.skipPrescan = False
-        self.firstKfrequencyGuess = firstKfrequencyGuess
-        self.prescanMode = prescanMode
-        if jcmKernel == 3:
-            self.prescanMode = 'NearGuess'
-        self.degeneracyTolerance = degeneracyTolerance
-        self.extrapolationMode = extrapolationMode
-        self.absorption = absorption
-        self.customFolder = customFolder
-        self.cleanMode = cleanMode
-        self.wSpec = wSpec
-        self.qSpec = qSpec
-        self.runOnLocalMachine = runOnLocalMachine
-        self.resourceInfo = resourceInfo
-        self.verb = verb
-        self.infoLevel = infoLevel
-        self.suppressDaemonOutput = suppressDaemonOutput
-        self.plotLive = plotLive
-        self.dateToday = date.today().strftime("%y%m%d")
+        freqs = jcm.loadtable(eigFile)['eigenmode']
+        nEigenvalues = len(freqs)
         
-        if targetAccuracy == 'fromKeys':
-            self.targetAccuracy = self.keys['precision_eigenvalues']
-        else:
-            assert isinstance(targetAccuracy, float), \
-                            'Wrong type for targetAccuracy: Expecting float.'
-            self.targetAccuracy = targetAccuracy
-        
-        self.setFolders()
-    
-    
-    def message(self, string, indent = 0, spacesPerIndent = 4, prefix = '',
-                relevance = 1):
-        if self.verb and relevance <= self.infoLevel:
-            
-            if not isinstance(string, str):
-                string = pformat(string)
-            lines = string.split('\n')
-            
-            with Indentation(indent, spacesPerIndent, prefix):
-                for l in lines:
-                    print l
-    
-    
-    def setFolders(self):
-        if not self.customFolder:
-            self.customFolder = self.dateToday
-        self.workingBaseDir = os.path.join(thisPC.storageDir,
-                                           self.customFolder)
-        if not os.path.exists(self.workingBaseDir):
-            os.makedirs(self.workingBaseDir)
-        self.message('Using folder '+self.workingBaseDir+' for data storage.')
-
-
-    def run(self, prescanOnly = False):
-        self.registerResources()
-        
-        # Initialize numpy structured array to store the number of iterations,
-        # the degeneracy of each band and the final deviation of the calculation
-        # for each polarization, k and band
-        self.iterationMonitor = \
-            np.recarray( (len( self.bs.polarizations), 
-                               self.bs.numKvals, 
-                               self.bs.nEigenvalues ),
-                         dtype=[('nIters', int), 
-                                ('degeneracy', int),
-                                ('deviation', float)])
-        # Set initial values
-        self.iterationMonitor['nIters'].fill(0)
-        
-        for self.pIdx, self.currentPol in enumerate(self.bs.polarizations):
-            self.currentK = 0
-            self.message('\n*** Solving polarization: {0} ***\n'.\
-                                                    format(self.currentPol))
-            if self.skipPrescan:
-                self.prescanFrequencies = self.firstKfrequencyGuess
+        fields = []
+        for i in range(Nparities):
+            if i < 6:
+                fields.append(jcm.loadtable(os.path.join(folder, 
+                    'fields_vert_mirror_{0}.jcm'.format(i+1)))[outputQuantity])
             else:
-                success = self.prescanAtPoint(self.keys, mode=self.prescanMode)
-                MaxTrials = 10
-                trials = 1
-                while not success or trials > MaxTrials:
-                    #TODO: find a better way to avoid suprious modes here
-                    self.firstKlowerBoundGuess *= 1.1
-                    success = self.prescanAtPoint(self.keys, 
-                                                  mode=self.prescanMode)
-                    trials += 1
-                if not success:
-                    raise Exception('Unable to find a matching prescan.')
-                if prescanOnly:
-                    return self.prescanFrequencies
-            self.runIterations()
-
-            
-        self.message('*** Done ***\n')
+                fields.append(jcm.loadcartesianfields(os.path.join(folder, 
+                                        'fields_z_mirror_plane.jcm'))['field'])
         
-    
-    def addResults(self, frequencies, polarization = 'current'):
-        if polarization == 'current':
-            polarization = self.currentPol
-                
-        self.bs.addResults(polarization, self.currentK, frequencies,
-                           plotLive = self.plotLive)
-        self.currentK += 1
-        
-    
-    def getCurrentBloch(self):
-        return self.bs.kpoints[ self.currentK ]
+        results = MultipleSolutions3D()
+        for i in range(nEigenvalues):
+            results.push( SingleSolution3D(freqs[i],
+                                    [fields[j][i] for j in range(Nparities)]) )
+        results.sort()
+        return results.getDataFrame()
     
     
-    def getWorkingDir(self, band = 0, polarization = 'current', 
-                      kindex = False, prescan = False):
-        if polarization == 'current':
-            polarization = self.currentPol
-        if not kindex:
-            kindex = self.currentK
-        if prescan:
-            dirName = 'prescan_'+polarization
+    def cleanUp(self):
+        """
+        Stores the last computation and cleans up
+        """
+        self.previousComputation = self.computation
+        self.computation = None
+        del self.dim
+        del self.data
+    
+    
+    def ready2analyze(self):
+        if self.analyzeResultFolder:
+            return True
+        return isinstance(self.computation, JCMresonanceModeComputation)
+    
+    
+    def analyzeData(self):
+        if not self.ready2analyze(): return
+        if self.dim == 2:
+            self.__analyze2D()
+        elif self.dim == 3:
+            self.__analyze3D()
         else:
-            dirName = 'k{0:05d}_b{1:02d}_{2}'.format(kindex, band, polarization)
-        return os.path.join( self.workingBaseDir, dirName )
-    
-    
-    def removeWorkingDir(self, band = 0, polarization = 'current', 
-                         kindex = False, prescan = False):
-        if self.cleanMode:
-            wdir = self.getWorkingDir(band, polarization, kindex, prescan)
-            if os.path.exists(wdir):
-                rmtree(wdir, ignore_errors = True)
-    
-    
-    def updatePermittivities(self, keys, wvl, indent = 0):
-        keys['permittivity_pore'] = self.materialPore.\
-                                getPermittivity(wvl, absorption=self.absorption)
-        keys['permittivity_background'] = self.materialSlab.\
-                                getPermittivity(wvl, absorption=self.absorption)
-        if isinstance(self.materialSubspace, RefractiveIndexInfo):
-            keys['permittivity_subspace'] = self.materialSubspace.\
-                                getPermittivity(wvl, absorption=self.absorption)
-        if isinstance(self.materialSuperspace, RefractiveIndexInfo):
-            keys['permittivity_superspace'] = self.materialSuperspace.\
-                                getPermittivity(wvl, absorption=self.absorption)
+            raise Exception('Unsupported dimensionality: {0}'.format(self.dim))
+        self.cleanUp()
         
-        self.message('Updated permittivities: {0} : {1}, {2} : {3}'.\
-                                    format(self.materialPore.name,
-                                           keys['permittivity_pore'],
-                                           self.materialSlab.name,
-                                           keys['permittivity_background']),
-                     indent,
-                     relevance = 3 )
-        return keys
+        
+    def parseProjectFile(self):
+        if isinstance(self.projectFile, ProjectFile):
+            return
+        
+        self.projectFile = ProjectFile( self.computation.jcmpFile )
+        self.assignment = self.assignResults(self.data, 
+                                             self.projectFile)
+        
+        # Analyze the grid types of the PostProcesses
+        self.gridtypes = []
+        self.fieldKeys = []
+        ppCount = 0
+        for rtype in self.assignment:
+            if rtype == 'ExportFields':
+                self.gridtypes.append( 
+                        self.projectFile.getExportFieldsGridType(ppCount))
+                self.fieldKeys.append( 
+                        self.projectFile.getExportFieldsOutputQuantity(ppCount))
+                ppCount += 1
     
     
     def assignResults(self, results, projectFile):
-        
         assert projectFile.getProjectMode() == 'ResonanceMode', \
                'For bandstructure computations the project type must be ' + \
                'Electromagnetics -> TimeHarmonic -> ResonanceMode.' 
@@ -1367,546 +1321,1061 @@ class BandstructureSolver(object):
         return assignment
     
     
-    def prescanAtPoint(self, keys, mode = 'Fundamental',
-                       fixedPermittivities = False):
-    
-        self.message('Performing prescan at point {0} ...'.\
-                                        format(self.getCurrentBloch()))
-        
-        # update the keys
-        keys['polarization'] = self.currentPol
-        keys['guess'] = self.firstKlowerBoundGuess
-        keys['selection_criterion'] = mode
-        keys['n_eigenvalues'] = self.bs.nEigenvalues
-        keys['bloch_vector'] = self.getCurrentBloch()
-        
-        if self.firstKlowerBoundGuess == 0.:
-            wvl = np.inf
-        else:
-            wvl = freq2wvl( self.firstKlowerBoundGuess )
-        
-        if fixedPermittivities:
-            #TODO: get this to run for 3D
-            keys['permittivity_pore'] = \
-                                fixedPermittivities['permittivity_pore']
-            keys['permittivity_background'] = \
-                                fixedPermittivities['permittivity_background']
-        else:
-            keys = self.updatePermittivities(keys, wvl, indent = 1)
-        
-        # Solve
-        with Indentation(1, prefix = '[JCMdaemon] ', 
-                         suppress = self.suppressDaemonOutput):
-            wdir = self.getWorkingDir(prescan = True)
-            _ = jcm.solve(self.projectFileName, keys = keys, working_dir = wdir,
-                          jcmt_pattern = self.JCMPattern)
-            results, _ = daemon.wait()
-        
-        if not hasattr(self, 'assignment'):
-            jcmpFile = os.path.join(wdir, self.projectFileName)
-            projectFile = ProjectFile( jcmpFile )
-            self.assignment = self.assignResults(results[0], projectFile)
-            self.gridtypes = []
-            self.fieldKeys = []
-            ppCount = 0
-            for rtype in self.assignment:
-                if rtype == 'ExportFields':
-                    self.gridtypes.append( projectFile.\
-                                        getExportFieldsGridType(ppCount) )
-                    self.fieldKeys.append( projectFile.\
-                                        getExportFieldsOutputQuantity(ppCount) )
-                    ppCount += 1
-        assignment = self.assignment
-        
-        if self.dim == 2:
-            eigIdx = assignment.index('eigenvalues')
-            freqs = np.sort( results[0][eigIdx]['eigenvalues']\
-                                                            ['eigenmode'].real )
-        
-        if self.dim == 3:
-            ppCount = 0
-            fieldsOnSymmetryPlanes = [[] for _ in range(keys['n_eigenvalues'])]
-            for i, rtype in enumerate(assignment):
-                if rtype == 'eigenvalues':
-                    freqs = results[0][i]['eigenvalues']\
-                                                    ['eigenmode']
-                elif rtype == 'ExportFields':
-                    gridtype = self.gridtypes[ppCount]
-                    if gridtype == 'Cartesian':
-                        fieldKey = 'field'
-                    elif gridtype == 'PointList':
-                        fieldKey = self.fieldKeys[ppCount]
-                    else:
-                        raise Exception('Unsupported grid type in PostProcess.')
-                    
-                    for jobIndex in range(keys['n_eigenvalues']):
-                        thisField = results[0][i][fieldKey][jobIndex]
-                        fieldsOnSymmetryPlanes[jobIndex].append(
-                                                            thisField.copy())
-                    ppCount += 1
-        
-        # save the calculated frequencies to the Bandstructure result
-        #self.removeWorkingDir(prescan = True)
-        if self.dim == 2:
-            self.prescanFrequencies = freqs
-            self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
-                         1, relevance = 2)
-            return True
-            
-        elif self.dim == 3:
-            results = MultipleSolutions3D()
-            
-            for iJob in range(keys['n_eigenvalues']):
-                results.push( SingleSolution3D(freqs[iJob],
-                                                 fieldsOnSymmetryPlanes[iJob]) )
-            results.sort()
-#             self.prescanResults = results
-            freqs = results.getFrequencies()
-            self.prescanFrequencies = freqs
-            self.message( 'Ready for this k.\n\tFrequencies: {0}'.\
-                                            format(freqs), 1, relevance = 2)
-            allValid = results.allValid()
-            self.message( 'All modes valid: {0}'.format(allValid), 
-                          1, relevance = 2)
-            if not allValid:
-                spurious = results.getSpuriousIndices()
-                self.message( 'Spurious modes:'.format(allValid), 
-                          1, relevance = 2)
-                for si in spurious:
-                    self.message( 'Index: {0}, Parity-z: {1}'.format(
-                                    si, results.getSingleValue(si, 'parity_6')), 
-                                  3, relevance = 2)
-            return allValid
-            #TODO: What to do if spurious modes occur?
-            
-        self.message('... done.\n')
+    def __analyze2D(self):
+        pass
     
     
-    def runIterations(self):
+    def __analyze3D(self):
         
-        # Loop over all k-points. The value for self.currentK is updated in
-        # self.addResults, i.e. each time a result was successfully saved
-        while not self.bs.checkIfResultsComplete(polarizations=self.currentPol):
+        # First we parse the JCM-project file to extract information
+        # about the included PostProcesses
+        self.parseProjectFile()
+        
+        ppCount = 0
+        nEigenvalues = self.computation.nEigenvalues
+        fieldsOnSymmetryPlanes = [[] for _ in range(nEigenvalues)]
+        for i, rtype in enumerate(self.assignment):
+        
+            # Get frequency (eigenvalue)
+            if rtype == 'eigenvalues':
+                freqs = self.data[i]['eigenvalues']['eigenmode']
             
-            self.message('Iterating k point {0} of {1} with k = {2} ...'.\
-                                            format(self.currentK,
-                                                   self.bs.numKvals,
-                                                   self.getCurrentBloch()))
-            
-            # Get a guess for the next frequencies using extrapolation
-            freqs2iterate = self.getNextFrequencyGuess()
-            
-            # Analyze the degeneracy of this guess
-            frequencyList, degeneracyList, _ = \
-                                self.analyzeDegeneracy( freqs2iterate )
+            # Get fields
+            elif rtype == 'ExportFields':
+                gridtype = self.gridtypes[ppCount]
+                if gridtype == 'Cartesian':
+                    fieldKey = 'field'
+                elif gridtype == 'PointList':
+                    fieldKey = self.fieldKeys[ppCount]
+                else:
+                    raise Exception(
+                            'Unsupported grid type in PostProcess.')
 
-            self.iterationMonitor[self.pIdx, self.currentK]['degeneracy'] \
-                                = self.degeneracyList2assignment(degeneracyList)
-            
-            # Call of the iteration routine for this k-point
-            self.iterateKpoint(frequencyList, degeneracyList)
-            sims = self.iterationMonitor[self.pIdx, self.currentK-1]['nIters']
-            self.message('Total number of simulations: {0}'.format(
-                                                            np.sum(sims) ),
-                     1, relevance = 2)
-            self.message('... done.\n')
+                for j in range(nEigenvalues):
+                    thisField = self.data[i][fieldKey][j]
+                    fieldsOnSymmetryPlanes[j].append(
+                                                  thisField.copy())
+                ppCount += 1
         
-        
-    def iterateKpoint(self, frequencyList, degeneracyList):
-        
-        
-        currentJobs = [{'freq': f,
-                        'deviation': 10.*self.targetAccuracy,
-                        'status': 'Initialization',
-                        'count': 0,
-                        'add3D': MultipleSolutions3D()} for f in frequencyList]
-        
-        
-        kPointDone = False
-        Njobs = len(frequencyList)
-        jobID2idx = {}
-        while not kPointDone:
-            
-            for iResult, f in enumerate(frequencyList):
-                if not currentJobs[iResult]['status'] in \
-                                                    ['Converged', 'Pending']:
-                    jobID, forceStop, jcmpFile = self.singleIteration(
-                                                   self.keys, 
-                                                   currentJobs[iResult]['freq'],
-                                                   degeneracyList[iResult])
-                    jobID2idx[jobID] = iResult
-                    currentJobs[iResult]['jobID'] = jobID
-                    currentJobs[iResult]['forceStop'] = forceStop
-                    currentJobs[iResult]['jcmpFile'] = jcmpFile
-                    currentJobs[iResult]['count'] += 1
-                    currentJobs[iResult]['add3D'] = MultipleSolutions3D()
-            
-            with Indentation(1, 
-                             prefix = '[JCMdaemon] ', 
-                             suppress = self.suppressDaemonOutput):
-                
-                jobs2waitFor = [j['jobID'] for j in currentJobs if not\
-                                j['status'] == 'Converged']
-                
-                indices, thisResults, _ = daemon.wait(jobs2waitFor, 
-                                                      break_condition = 'any')
-            
-            # mark jobs which have not been returned by daemon.wait as 'Pending'
-            for idx in [ jIdx for jIdx in range(len(jobs2waitFor)) \
-                                                    if not jIdx in indices ]:
-                thisJobID = jobs2waitFor[idx]
-                resultIdx = jobID2idx[ thisJobID ]
-                currentJobs[ resultIdx ]['status'] = 'Pending'
-                
-            # analyze results of the returned jobs
-            for idx in indices:
-                thisJobID = jobs2waitFor[idx]
-                resultIdx = jobID2idx[ thisJobID ]
-                thisJob = currentJobs[ resultIdx ]
-                del jobID2idx[thisJobID]
-                
-                if not hasattr(self, 'assignment'):
-                    jcmpFile = thisJob['jcmpFile']
-                    projectFile = ProjectFile( jcmpFile )
-                    self.assignment = self.assignResults(thisResults[idx], 
-                                                         projectFile)
-                    self.gridtypes = []
-                    ppCount = 0
-                    for rtype in self.assignment:
-                        if rtype == 'ExportFields':
-                            self.gridtypes.append( projectFile.\
-                                            getExportFieldsGridType(ppCount) )
-                            ppCount += 1
-                assignment = self.assignment
-                
-                if self.dim == 2:
-                    eigIdx = assignment.index('eigenvalues')
-                    frequencies = np.sort(
-                            thisResults[idx][eigIdx]['eigenvalues']\
-                                                        ['eigenmode'].real)
-                if self.dim == 3:
-                    ppCount = 0
-                    Neigenvalues = len(thisJob['freq'])
-                    fieldsOnSymmetryPlanes = [[] for _ in range(Neigenvalues)]
-                    for i, rtype in enumerate(assignment):
-                        if rtype == 'eigenvalues':
-                            freqs = thisResults[idx][i]['eigenvalues']\
-                                                            ['eigenmode']
-                        elif rtype == 'ExportFields':
-                            gridtype = self.gridtypes[ppCount]
-                            if gridtype == 'Cartesian':
-                                fieldKey = 'field'
-                            elif gridtype == 'PointList':
-                                fieldKey = self.fieldKeys[ppCount]
-                            else:
-                                raise Exception(
-                                        'Unsupported grid type in PostProcess.')
-                            
-                            for jobIndex in range(Neigenvalues):
-                                thisField = thisResults[idx][i]\
-                                                    [fieldKey][jobIndex]
-                                fieldsOnSymmetryPlanes[jobIndex].append(
-                                                              thisField.copy())
-                            ppCount += 1
-                    
-                    results = thisJob['add3D']
-            
-                    for iJob in range(Neigenvalues):
-                        results.push( SingleSolution3D(freqs[iJob],
-                                                fieldsOnSymmetryPlanes[iJob]) )
-                    results.sort()
-                    frequencies = results.getFrequencies()
-                    allValid = results.allValid()
-                    self.message( 'All modes valid: {0}'.format(allValid), 
-                                  1, relevance = 2)
-                    if not allValid:
-                        spurious = results.getSpuriousIndices()
-                        self.message( 'Spurious modes:', 
-                                  1, relevance = 2)
-                        for si in spurious:
-                            self.message( 'Index: {0}, Parity-z: {1}'.format(
-                                            si, results.getSingleValue(si, 
-                                                                'parity_6')), 
-                                          3, relevance = 2)
-                
-                if thisJob['forceStop']:
-                    thisJob['freq'] = frequencies
-                    thisJob['status'] = 'Converged'
-                   
-                elif np.all(frequencies == 0.):
-                    thisJob['status'] = 'Crashed'
-                    self.message('\tSolver crashed.', 1, relevance=1)
-                       
-                else:
-                    # calculate the deviations
-                    deviations = np.abs( frequencies/thisJob['freq']-1. )
-                    thisJob['deviation'] = np.max(deviations)
-                    thisJob['freq'] = frequencies
-                    
-                    # assess the result
-                    if thisJob['deviation'] > self.targetAccuracy:
-                        thisJob['status'] = 'Running'
-                    else:
-                        thisJob['status'] = 'Converged'
-                
-            # Check Result of this loop
-            Nconverged = sum([currentJobs[iJob]['status'] == 'Converged' \
-                                                    for iJob in range(Njobs)])
-            if Nconverged == Njobs: kPointDone = True
-        
-        
-        freqs = np.sort(self.list2FlatArray([currentJobs[iJob]['freq']  \
-                                                    for iJob in range(Njobs)]))
-        self.message('Successful for this k. Frequencies: {0}'.format(freqs), 
-                     1, relevance = 2)
-        self.updateIterationMonitor(currentJobs, degeneracyList)
-        
-        if self.dim == 2:
-            self.addResults( freqs )
-        
-        elif self.dim == 3:
-            allResults = MultipleSolutions3D()
-            for iJob in range(Njobs):
-                for s in currentJobs[iJob]['add3D'].solutions:
-                    allResults.push(s)
-            allResults.sort()
-            self.addResults( allResults )
-            
-        # clean up if cleanMode
-        for d in degeneracyList:
-            self.removeWorkingDir(band=d[0])
+        results = MultipleSolutions3D()
+        for j in range(nEigenvalues):
+            results.push( SingleSolution3D(freqs[j],
+                                    fieldsOnSymmetryPlanes[j]) )
+        results.sort()
+        self.computation.addProcessedResults(results)
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class JCMresonanceModeComputation(object):
+    """
+    This class should be able to start a ResonanceMode computation 
+    for a fixed set of materials-parameters, a single Bloch-vector 
+    and a specific number of eigenvalues. It stores the jobID, which 
+    is returned by the JCMdaemon.
+    """
+    
+    def __init__(self, dim, blochVector, nEigenvalues, initialGuess,
+                 generalKeys, materials, workingDir, caller = None, 
+                 analyzer = None, selectionCriterion = 'NearGuess', 
+                 polarization='all', projectFileName = 'project.jcmp', 
+                 absorption = False, outputIndentation = 1, 
+                 suppressDaemonOutput = False):
+        self.dim = dim
+        self.JCMPattern = str(self.dim) + 'D'
+        self.blochVector = blochVector
+        self.nEigenvalues = nEigenvalues
+        self.initialGuess = initialGuess
+        self.keys = generalKeys
+        self.materials = materials
+        self.workingDir = workingDir
+        self.analyzer = analyzer
+        self.caller = caller
+        self.isAnalyzerReady = isinstance(analyzer, JCMresultAnalyzer)
+        self.selectionCriterion = selectionCriterion
+        self.polarization = polarization
+        self.projectFileName = projectFileName
+        self.absorption = absorption
+        self.indent = outputIndentation
+        self.suppressDaemonOutput = suppressDaemonOutput
+        self.stopIteration = False
+        self.results = None
+        self.processedResults = None
+        self.status = 'Initialized'
     
     
-    def updateIterationMonitor(self, currentJobs, degeneracyList):
-        
-        k = self.currentK
-        p = self.pIdx
-        for i, job in enumerate(currentJobs):
-            band = degeneracyList[i][0]
-            self.iterationMonitor[p, k, band]['nIters'] = job['count']
-            
-            for d in degeneracyList[i]:
-                self.iterationMonitor[p, k, d]['deviation'] = job['deviation']
+    def setJCMresultAnalyzer(self, analyzer):
+        assert isinstance(analyzer, JCMresultAnalyzer)
+        self.analyzer = analyzer
+        self.isAnalyzerReady = True
     
     
-    def singleIteration(self, keys, initialGuess, bandNums, nEigenvalues = 1):
-         
-        # Update the keys
-        degeneracy = len(initialGuess)
-        initialGuess = np.sort(initialGuess)
-        keys['n_eigenvalues'] = nEigenvalues * degeneracy
-        keys['polarization'] = self.currentPol
-        keys['guess'] = np.average(initialGuess)
-        keys['selection_criterion'] = 'NearGuess'
-        keys['bloch_vector'] = self.getCurrentBloch()
-        forceStop = False
+    def updateKeys(self):
+        self.keys['n_eigenvalues'] = self.nEigenvalues
+        self.keys['polarization'] = self.polarization
+        self.keys['guess'] = self.initialGuess
+        self.keys['selection_criterion'] = self.selectionCriterion
+        self.keys['bloch_vector'] = self.blochVector
         
-        wvl = freq2wvl( keys['guess'] )
-        keys = self.updatePermittivities(keys, wvl, indent = 1)
+        # TODO: Set simulations status to 'Finished' if wavelength is outside
+        # material data ranges
         
-        conWvl = self.materialSlab.convertWvl(wvl)
-        if conWvl > np.real(self.materialSlab.totalWvlRange[1]):
-            self.message('Upper limit of material data wavelengths' +\
-                         ' range reached!', 1, relevance = 3)
-            self.message('Actual wavelength is {0}, but data-limit is {1}'.\
-                         format(conWvl, 
-                                np.real(self.materialSlab.totalWvlRange[1])), 
-                         1, relevance = 3)
-            forceStop = True
-         
-        with Indentation(1, prefix = '[JCMdaemon] ', 
+        # update material properties
+        for m in self.materials.keys():
+            mat = self.materials[m]
+            self.keys[m] = mat.getPermittivity(freq2wvl(self.initialGuess), 
+                                               absorption=self.absorption)
+    
+    
+    def start(self):
+        self.updateKeys()
+        with Indentation(self.indent, prefix = '[JCMdaemon] ', 
                          suppress = self.suppressDaemonOutput):
-            wdir = self.getWorkingDir(band=bandNums[0])
-            jobID = jcm.solve(self.projectFileName, 
-                              keys = keys, 
-                              working_dir = wdir,
-                              jcmt_pattern = self.JCMPattern)
-        jcmpFile = os.path.join(wdir, self.projectFileName)
-        return jobID, forceStop, jcmpFile
+#             print 'JCMresonanceModeComputation: calling jcm.solve()'
+            self.jobID = jcm.solve(self.projectFileName, 
+                                   keys = self.keys, 
+                                   working_dir = self.workingDir,
+                                   jcmt_pattern = self.JCMPattern)
+        self.jcmpFile = os.path.join(self.workingDir, 
+                                     os.path.basename(self.projectFileName))
+        self.jcmpFile = self.jcmpFile.replace('.jcmpt', '.jcmp')
+        self.status = 'Pending'
     
     
-    def list2FlatArray(self, l):
-        return np.array(list(itertools.chain(*l)))
-    
-    
-    def analyzeDegeneracy(self, frequencies):
+    def addResults(self, res, logs):
+        self.results = res
+        self.logs = logs
+        self.status = 'Finished'
         
-        degeneracyList = []
-        indicesNotToCheck = []
-        for i,f in enumerate(frequencies):
-            if not i in indicesNotToCheck:
-                closeIndices = np.where( 
-                            np.isclose(f, frequencies, 
-                                       rtol = self.degeneracyTolerance) )[0].\
-                                       tolist()
-                closeIndices.remove(i)
+        # Pass results to JCMresultAnalyzer
+        if self.isAnalyzerReady:
+            self.analyzer.addComputation(self)
+    
+    
+    def addProcessedResults(self, results):
+        self.processedResults = results
+        if hasattr(self.caller, 'receive'):
+            # Here, the computation itself, which now has processed results,
+            # is send to the EigenvalueIterator
+            self.caller.receive()
+
+    
+    def getStatus(self):
+        return self.status
+    
+    
+    def isFinished(self):
+        return self.status == 'Finished'
+    
+    
+    def areResultsAnalyzed(self):
+        return isinstance(self.processedResults, MultipleSolutions3D)
+    
+    
+    def getAverageModeFrequency(self):
+        if self.areResultsAnalyzed():
+            return np.average( self.processedResults.getFrequencies() )
+        else:
+            warn('Returning initialGuess for average frequency, since no'+
+                 ' processed results are available.')
+            return self.initialGuess
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class ComputationPool(object):
+    """
+    This class is used to constantly wait for finished simulations using 
+    daemon.wait() and to pass the results back to the corresponding 
+    JCMresonanceModeComputation-instance.
+    """
+    
+    def __init__(self, suppressDaemonOutput = None):
+        self.queue = []
+        self.suppressDaemonOutput = suppressDaemonOutput
+    
+    
+    def push(self, computation):
+        assert isinstance(computation, JCMresonanceModeComputation)
+#         print 'POOL: a JCMresonanceModeComputation was pushed to the pool'
+        if self.suppressDaemonOutput is None:
+            self.suppressDaemonOutput = computation.suppressDaemonOutput
+        computation.start()
+        self.queue.append(computation)
+    
+    
+    def getCurrentJobIDs(self):
+        return [c.jobID for c in self.queue]
+    
+    
+    def wait(self, outputIndentation = 1):
+        self.updateQueue()
+        
+        if not self.queue:
+            return
+        
+        # Wait for all jobs which are currently in the queue
+        jobs2waitFor = self.getCurrentJobIDs()
+#         print 'POOL: waiting for Jobs:', jobs2waitFor
+        with Indentation(outputIndentation, 
+                         prefix = '[JCMdaemon] ', 
+                         suppress = self.suppressDaemonOutput):
+            indices, results, logs = daemon.wait(jobs2waitFor, 
+                                                 break_condition = 'any')
+#             print 'READY waiting.'
+        
+        for i, index in enumerate(indices):
+#             print 'Step', i+1, 'of', len(indices), 'in JCMcomputation.addResults()-process.'
+            self.queue[index].addResults( results[index], logs[index] )
+        return len(indices)
+        #self.updateQueue()
+    
+    
+    def updateQueue(self):
+        newQueue = [c for c in self.queue if not c.isFinished()]
+        self.queue = newQueue
+        #self.wait() # recursion #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class EigenvalueIterator(object):
+    """
+
+    """
+    
+    # Globals
+    maxIterations = 10
+    
+    def __init__(self, dim, blochVector, initialGuess, generalKeys, materials, 
+                 workingDir, analyzer, pool, nEigenvalues = 1, caller = None,
+                 selectionCriterion = 'NearGuess', polarization='all', sendSelf
+                 = False, iterate = True, projectFileName = 'project.jcmp',
+                 absorption = False, targetAccuracy = 'fromKeys',
+                 outputIndentation = 1, suppressDaemonOutput = False):
+        self.dim = dim
+        self.JCMPattern = str(self.dim) + 'D'
+        self.blochVector = blochVector
+        self.initialGuess = initialGuess
+        self.keys = generalKeys
+        self.materials = materials
+        self.workingDir = workingDir
+        self.analyzer = analyzer
+        self.pool = pool
+        self.nEigenvalues = nEigenvalues
+        self.caller = caller
+        self.selectionCriterion = selectionCriterion
+        self.polarization = polarization
+        self.sendSelf = sendSelf
+        self.iterate = iterate
+        self.projectFileName = projectFileName
+        self.absorption = absorption
+        self.indent = outputIndentation
+        self.suppressDaemonOutput = suppressDaemonOutput
+        
+        if targetAccuracy == 'fromKeys':
+            self.targetAccuracy = self.keys['precision_eigenvalues']
+        else:
+            assert isinstance(targetAccuracy, float), \
+                            'Wrong type for targetAccuracy: Expecting float.'
+            self.targetAccuracy = targetAccuracy
+        
+        # Analyze material properties if iterate=True
+        if iterate:
+            self.checkMaterialWavelengthDependency()
+        else:
+            self.iterationNeeded = False
+        
+        # Set initial values
+        self.deviation = 10.*self.targetAccuracy
+        self.count = 0
+        self.converged = False
+        self.up2date = False
+    
+    
+    def isFinished(self):#, verb=True):
+#         if verb: print 'FINISHED:', self.converged or self.count > self.maxIterations
+        return self.converged or self.count > self.maxIterations
+    
+    
+    def checkMaterialWavelengthDependency(self):
+        """
+        Checks wether at least one of the materials has a wavelength dependent
+        index of refraction. If True: iterations are done; if False: a single
+        calculation is performed.
+        """
+        props = [m.isConstant() for m in self.materials.values()]
+        self.iterationNeeded = not all(props)
+    
+    
+    def startComputations(self):
+        
+#         if not self.converged and self.count <= self.maxIterations:
+        print 'ITERATION ROUND', self.count+1, 40*'-'
+        if not self.isFinished():
+            self.updateKeys()
+            self.computation = JCMresonanceModeComputation(
+                                        self.dim, self.blochVector,
+                                        self.nEigenvalues, self.currentGuess,
+                                        self.keys, self.materials,
+                                        self.workingDir, caller = self, analyzer
+                                        = self.analyzer, selectionCriterion =
+                                        self.selectionCriterion, polarization =
+                                        self.polarization, projectFileName =
+                                        self.projectFileName, absorption =
+                                        self.absorption, outputIndentation =
+                                        self.indent, suppressDaemonOutput =
+                                        self.suppressDaemonOutput)
+            
+            # Push the computation to the ComputationPool. The recursion will
+            # occur when receive() is called by the JCMresonanceModeComputation
+            # instance.
+#             print 'EigenvalueIterator.startComputations() was called'
+            self.pool.push(self.computation)
+        
+        else:
+            # Inform caller
+            self.send()
+    
+    
+    def updateKeys(self):
+        if not self.up2date:
+            if self.count == 0:
+                self.currentGuess = self.initialGuess
+                print 'USING INITIAL GUESS: ', self.currentGuess
+            else:
+#                 self.currentGuess = self.computation.getAverageModeFrequency()
+                self.currentGuess = self.bestFreq
                 
-                if closeIndices:
-                    indicesNotToCheck += closeIndices
-                    degeneracyList.append([i]+closeIndices)
-                else:
-                    degeneracyList.append([i])
-        degeneracies = [len(i) for i in degeneracyList]
+                print 'UPDATED GUESS: ', self.currentGuess
+            self.up2date = True
         
-        frequencyList = []
-        for d in degeneracyList:
-            frequencyList.append( [frequencies[i] for i in d] )
-        return frequencyList, degeneracyList, degeneracies
     
-    
-    def degeneracyList2assignment(self, dList):
-        assignment = []
-        for d in dList:
-            length = len(d)
-            assignment += length*[length]
-        return np.array(assignment)
-    
-    
-    def extrapolateSpline(self, x, y, nextx, NpreviousValues = 3, k = 2):
-        from scipy.interpolate import UnivariateSpline
-        
-        assert x.shape == y.shape
-        if len(x) == 1:
-            return y[0]
-        elif len(x) < NpreviousValues:
-            NpreviousValues = len(x)
-        
-        if NpreviousValues <= k:
-            k = NpreviousValues-1
-        
-        xFit = x[-NpreviousValues:]
-        yFit = y[-NpreviousValues:]
-        
-        extrapolator = UnivariateSpline( xFit, yFit, k=k )
-        return  extrapolator( nextx )
-    
-    
-    def extrapolateLinear(self, x, y, nextx, NpreviousValues = 3):
-        
-        assert x.shape == y.shape
-        if len(x) == 1:
-            return y[0]
-        elif len(x) < NpreviousValues:
-            NpreviousValues = len(x)
-        
-        xFit = x[-NpreviousValues:]
-        cMatrix = np.vstack([xFit, np.ones(len(xFit))]).T
-        yFit = y[-NpreviousValues:]
-        
-        m, c = np.linalg.lstsq(cMatrix, yFit)[0] # obtaining the parameters
-        return  m*nextx + c
-    
-    
-    def extrapolateFrequencies(self, previousKs, freqs, nextK):
-        
-        nFreqs = freqs.shape[1]
-        extrapolatedFreqs = np.empty((nFreqs,))
-        
-        for i in range(nFreqs):
-            if self.extrapolationMode == 'linear':
-                extrapolatedFreqs[i] = self.extrapolateLinear( previousKs, 
-                                                               freqs[:,i], 
-                                                               nextK )
-            elif self.extrapolationMode == 'spline':
-                extrapolatedFreqs[i] = self.extrapolateSpline( previousKs, 
-                                                               freqs[:,i], 
-                                                               nextK )
+
+    def send(self):
+        if hasattr(self.caller, 'receive'):
+#             print '!!!I am an EigenvalueIterator and I am sending my data now to the BandTraceWaiter!!!'
+            if self.sendSelf:
+                self.caller.receive(self)
             else:
-                raise Exception('extrapolationMode {0} not supported.'.format(
-                                                       self.extrapolationMode))
-        return extrapolatedFreqs
+                self.caller.receive()
     
     
-    def calc_parity(self, field, normal):
-        p = np.real(np.conj(field)*field)
-        if normal == 'x':
-            ans = p[:,:,1] + p[:,:,2] - p[:,:,0]
-        elif normal == 'y':
-            ans = p[:,:,0] - p[:,:,1] + p[:,:,2]
-        elif normal == 'z':
-            ans = p[:,:,0] + p[:,:,1] - p[:,:,2]
-        return ans.sum() / p.sum()
-    
-    
-    def getFreqs(self):
-        if hasattr(self, 'prescanFrequencies'):
-            ans = self.prescanFrequencies.copy()
-            del self.prescanFrequencies
-            return (ans, 'prescan')
-        if self.dim == 2:
-            return self.bs.getBands(self.currentPol)
-        elif self.dim == 3:
-            return self.bs.getBands(self.currentPol)['omega_re']
-    
-    
-    def getNextFrequencyGuess(self):
-        i = self.currentK
-        freqs = self.getFreqs()
-        if isinstance(freqs, tuple):
-            if freqs[1] == 'prescan':
-                freqs = freqs[0]
+    def receive(self):
+        assert self.computation.areResultsAnalyzed()
+        self.count += 1
+        self.up2date = False
         
-        if i == 0:
-            return freqs
+        # Here we analyze if another computation is needed. A number of 
+        # criterions
+        # needs to be checked, which are:
+        #      - was the computation successful, i.e. did not crash
+        #      - did the computation return valid modes (????)
+        #      - did we reach the target accuracy or
+        #      - is no iteration needed because of a constant index of 
+        #        refraction
+        
+        if not self.iterationNeeded:
+            self.converged = True
+            self.deviation = 0.
         else:
-            if self.extrapolationMode in ['linear', 'spline']:
-                freqs = self.extrapolateFrequencies( self.bs.xVals[:i], 
-                                                     freqs[:i, :], 
-                                                     self.bs.xVals[i] )
-            else:
-                freqs = freqs[i-1, :]
-            return freqs
+            freqs = self.computation.processedResults.getFrequencies()
+#             deviations = np.abs( freqs/self.currentGuess -1. )
+            deviations = relDev(freqs, self.currentGuess)
+            mindev = np.min(deviations)
+            self.deviation = mindev
+            bestIdx = np.nonzero(deviations==mindev)[0][0]
+            self.bestFreq = freqs[bestIdx]
+            with Indentation(2, prefix='DEBUG:'):
+                print 'freqs', freqs
+                print 'deviations', deviations
+                print 'mindev', mindev
+                print 'bestFreq', self.bestFreq
+        
+        # Spurious mode case
+        allValid = self.computation.processedResults.allValid()
+        if not allValid:
+            # TODO: change currentGuess
+            self.converged = False  
+        
+        # Iteration convergence test
+        if self.deviation <= self.targetAccuracy:
+            self.converged = True
+        
+        # recursion: if the caller is a BandTracer, the recursion is done there
+        if not hasattr(self.caller, 'receive'):
+#             print 'EigenvalueIterator: manual recursion instantiated'
+            self.startComputations()
+        else:
+#             print 'EigenvalueIterator: sending signal to BandTracer. Converged: ', self.converged
+            self.send()
     
     
-    def registerResources(self):
-        """
+    def getFinalResults(self, kIndex = 0, bandIndex = None):
+        assert self.computation.areResultsAnalyzed()
+        
+        if bandIndex is not None:
+            # Case for single band data
+            bn = bname(bandIndex)
+            solutions = []
+            processedResults = self.computation.processedResults.getDataFrame()
+            
+            for i in processedResults.index:
+                data = getSingleKdFrame(kIndex, band=bandIndex)
+                data.ix[kIndex, bn].update( processedResults.ix[i] )
+                data.ix[kIndex, (bn, 'nIters')] = self.count
+                data.ix[kIndex, (bn, 'deviation')] = self.deviation
+                solutions.append(data.convert_objects(convert_numeric=True))
+            
+            if len(solutions) == 1:
+                solutions = solutions[0]
+            return solutions
+        
+        else:
+            # Case for all-bands data
+            return self.computation.processedResults.getDataFrame()
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class BandTracer(object):
+    """
+
+    """
+    
+    # Globals
+    parityAccuracy = 0.01
+    maxSearchNumber = 9
+    
+    
+    def __init__(self, bandstructure, bandIndex, startingSymmetryPoint, 
+                 generalKeys, materials, workingDir, analyzer, pool = None, 
+                 caller = None, projectFileName = 'project.jcmp', 
+                 absorption = False):
+        
+        self.bandstructure = bandstructure
+        self.dim = bandstructure.dimensionality
+        self.bandIndex = bandIndex
+        self.bname = bname(self.bandIndex)
+        self.startingSymmetryPoint = startingSymmetryPoint
+        self.keys = generalKeys
+        self.materials = materials
+        self.workingDir = workingDir
+        self.prepareWdir(self.workingDir)
+        self.analyzer = analyzer
+        self.pool = pool
+        self.caller = caller
+        self.projectFileName = projectFileName
+        self.absorption = absorption
+        self.up2date = False
+#         self.gotNonValidResultsFromIterator = False
+        
+        # Find out where to start in the Bandstructure and if there are
+        # known frequencies for previous k-points which can be used for
+        # extrapolation.
+        self.orientateInBandstructure()
+        self.checkMaterialWavelengthDependency()
+        self.getBandProperties()
+        self.getNextSearchNumber()
+    
+    
+    def getNextSearchNumber(self):
+        if not hasattr(self, 'currentSearchNumber'):
+            self.currentSearchNumber = 1
+        else:
+            self.currentSearchNumber *= 2
+    
+    
+    def prepareWdir(self, wdir):
+        if not os.path.exists(wdir):
+            os.makedirs(wdir)
+    
+    
+    def setCaller(self, caller):
+        self.caller = caller
+        self.setPool(caller.pool)
+    
+    
+    def setPool(self, pool):
+        self.pool = pool
+    
+    
+    def update(self):
+        if not self.up2date:
+            self.data = self.bandstructure.getBandData(self.bandIndex).\
+                                convert_objects(convert_numeric=True)
+            self.up2date = True
+    
+    
+    def hasIterator(self):
+        return hasattr(self, 'iterator')
+    
+    
+    def isIteratorFinished(self):
+        if self.hasIterator():
+            return self.iterator.isFinished()
+        return False
+    
+    
+    def isSolutionValidForCurrentK(self):
+        if hasattr(self, 'valid'):
+            return self.valid
+        return False
+    
+    
+    def thisKstatus(self):
+        return [self.hasIterator(),
+                self.isIteratorFinished(),
+                self.isSolutionValidForCurrentK()]
+    
+    
+    def isNewIteratorNeeded(self):
+        if not self.hasIterator():
+            return True
+        if not self.isIteratorFinished():
+            return False
+#         else:
+        return True
+#             if not self.isSolutionValidForCurrentK():
+#                 return True
+#         if all(self.thisKstatus()):
+#             return True
+#         return False
+    
+    
+    def orientateInBandstructure(self):
+        
+        # Get k-index of the first occurance of the startingSymmetryPoint
+        # in the Bandstructure's path
+        path = self.bandstructure.getPath()
+        kPointNames = self.bandstructure.getPathData('name')
+        SSPname = self.startingSymmetryPoint.name
+        self.kIndexStart = kPointNames[kPointNames == SSPname].index[0]
+        
+        # Find all high symmetry points (HSPs) and extract the end point for
+        # this band tracing
+        HSPs = path[path['isHighSymmetryPoint']]
+        HSPnames = HSPs['name'].tolist()
+        nextHSP = HSPnames[ HSPnames.index(SSPname)+1 ]
+#         self.kIndexEnd = kPointNames[kPointNames == nextHSP].index[0]-1
+        
+        # TODO: This is a fix to solve the complete bandstructure in one run
+        self.kIndexEnd = kPointNames.index[-1]
+        
+        # Construct the complete path for solving
+        self.solvePath = path.loc[self.kIndexStart:self.kIndexEnd]
+    
+    
+    def getBandStatus(self):
+        self.update()
+        #data = self.bandstructure.getBandData(self.bandIndex)
+        #status = data.loc[:, 'omega_re'].notnull()
+        return self.data.loc[self.solvePath.index, 'omega_re'].notnull()
+    
+    
+    def parityCheck(self, parity, val=None, rtolFactor = 1.):
+        if val is None:   
+            return np.isclose( np.abs(parity), 1., 
+                               rtol=self.parityAccuracy*rtolFactor )
+        else:
+            return np.isclose( parity, val, 
+                               rtol=self.parityAccuracy*rtolFactor )
+    
+    
+    def getBandProperties(self):
+        self.update()
+        status = self.getBandStatus()
+        assert status.loc[self.kIndexStart]
          
-        """
-        # Define the different resources according to their specification and
-        # the PC.institution
-        self.resources = []
-        if self.runOnLocalMachine:
-            w = 'localhost'
-            if not w in self.wSpec:
-                raise Exception('When using runOnLocalMachine, you need to '+
-                                'specify localhost in the wSpec-dictionary.')
-            spec = self.wSpec[w]
-            self.resources.append(
-                Workstation(name = w,
-                            Hostname = w,
-                            JCMROOT = thisPC.jcmBaseFolder,
-                            Multiplicity = spec['M'],
-                            NThreads = spec['N']))
-        else:
-            if thisPC.institution == 'HZB':
-                for w in self.wSpec.keys():
-                    spec = self.wSpec[w]
-                    if spec['use']:
-                        self.resources.append(
-                            Workstation(name = w,
-                                        JCMROOT = thisPC.hmiBaseFolder,
-                                        Hostname = w,
-                                        Multiplicity = spec['M'],
-                                        NThreads = spec['N']))
-            if thisPC.institution == 'ZIB':
-                for q in self.qSpec.keys():
-                    spec = self.qSpec[q]
-                    if spec['use']:
-                        self.resources.append(
-                            Queue(name = q,
-                                  JCMROOT = thisPC.jcmBaseFolder,
-                                  PartitionName = q,
-                                  JobName = 'BandstructureCalculation',
-                                  Multiplicity = spec['M'],
-                                  NThreads = spec['N']))
+        # Retrieve the polarization and parity properties which are
+        # assumed to be constant
+        initData = self.data.loc[self.kIndexStart]
+        self.polarization = initData['polarization']
+        self.stableParities = {}
+        self.forbiddenParities = []
+        for i in range(Nparities):
+            pname = parityName(i)
+            parity = initData[pname]
+            if self.parityCheck(parity):
+                self.stableParities[pname] = np.round(parity)
+            else:
+                self.forbiddenParities.append(pname)
+
+    
+    def verifySolutionWithExtrapolation(self, solution, freqTolerance = 2.e-2):
+        # TODO: search for solutions which vary minimal from previous result
+        previousSolution = self.currentExtrapolationValues
+        polMatch = self.polarization == solution.polarization
         
-        # Add all resources
-        self.resourceIDs = []
-        for resource in self.resources:
-            resource.add()
-            self.resourceIDs += resource.resourceIDs
-        if self.resourceInfo:
-            daemon.resource_info(self.resourceIDs)
+        # trying all parities
+        similarity = {}
+        for prop in previousSolution:
+            estimation = previousSolution[prop]
+            value = solution[prop].iat[0]
+            if prop.startswith('parity'):
+                similarity[prop] = np.abs( np.abs(value) - np.abs(estimation) )
+            else:
+#                 similarity[prop] = np.abs(value / estimation - 1.)
+                similarity[prop] = relDev(value, estimation)
+            
+            # Old attempt:
+            #similarity[prop] = np.abs(value / estimation - 1.)
+        
+        # reject frequency deviations which are too high
+        if similarity['omega_re'] > freqTolerance:
+            return False, np.inf, np.inf
+        
+#         print '\n\nExtrapolation:\n', self.currentExtrapolationValues
+#         print 'Solution:\n', solution
+#         print 'Similarity:\n', similarity, '\n\n'
+        
+        vals = similarity.values()
+        mean = np.average(vals)
+        maximum = np.max(vals)
+        
+        return polMatch.all(), mean, maximum
+        
+
+    def checkMaterialWavelengthDependency(self):
+        """
+        Checks wether at least one of the materials has a wavelength dependent
+        index of refraction. Returns True if no dependency was detected.
+        """
+        return all([m.isConstant() for m in self.materials.values()])
+    
+    
+#     def getNextK(self):
+#         #TODO: Check this method!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#         status = self.getBandStatus()
+#         print '\nSTATUS:', status, '\n'
+#         # Case 1: no values have already been calculated for this band
+#         # on the solvePath except the first one (most likely!)
+#         if status[self.kIndexStart+1] == False:
+#             if hasattr(self, 'iterator'):
+#                 if self.iterator.isFinished():
+#                     kShift = 1
+#                 else:
+#                     kShift = 0
+#             else:
+#                 kShift = int(self.checkMaterialWavelengthDependency())
+#             nextK = self.kIndexStart + kShift
+#         
+#         # Case 2: the complete path is solved
+#         elif np.all(status):
+#             return None
+#         
+#         # Case 3: values have been calculated in an earlier solve. These
+#         # are not calculated again!
+#         else:
+#             nextK = status[status == False].index[0]
+#         return nextK
+
+
+    def getNextK(self):
+        status = self.getBandStatus()
+#         print '\nSTATUS:', status, '\n'
+        
+        # Case 1: the complete path is solved
+        if np.all(status):
+            return None
+        
+        firstNonsolvedK = status[status == False].index[0]
+        thisKstatus = self.thisKstatus()
+        print '###thisKstatus', thisKstatus
+        print '###firstNonsolvedK', firstNonsolvedK
+        if not hasattr(self, 'k'):
+            firstNonsolvedK -= 1
+        else:
+            if self.k == 0: 
+                firstNonsolvedK -= 1
+                if all(thisKstatus): 
+                    firstNonsolvedK += 1
+        print '###returning k', firstNonsolvedK
+        return firstNonsolvedK
+        
+#         if hasattr(self, 'iterator'):
+#             if not self.iterator.isFinished():
+#                 firstNonsolvedK -= 1
+#                 print 'BandTracer has an Iterator which is not yet Finished! k =', firstNonsolvedK
+#             else:
+# #                 if self.gotNonValidResultsFromIterator:
+# #                     print 'BandTracer got non-valid results from iterator! k =', firstNonsolvedK
+# #                 else:
+#                 print 'BandTracer has an Iterator which IS Finished! k =', firstNonsolvedK
+#         else:
+#             firstNonsolvedK -= 1
+#             print 'BandTracer has NO Iterator! k =', firstNonsolvedK
+#         return firstNonsolvedK
+    
+
+    def updateBandstructure(self, kIndex, iterator, targetAccuracy = 0.4):
+        valid = False
+        if iterator.nEigenvalues == 1:
+            solution = iterator.getFinalResults(kIndex, self.bandIndex)
+            match = self.verifySolutionWithExtrapolation(\
+                                                    solution.loc[:,self.bname])
+            if match[0] and match[1] < targetAccuracy:
+                valid = True
+            print 'Is valid:', valid
+        else:
+            solutions = iterator.getFinalResults(kIndex, self.bandIndex)
+            matches = []
+            for s in solutions:
+                match = self.verifySolutionWithExtrapolation(\
+                                                    s.loc[:,self.bname])
+                if match[0]:
+                    matches.append((match[1], s))
+            if len(matches) == 0:
+                valid = False
+            else:
+                sortedMatches = sorted(matches, key=lambda x: x[0])
+                solution = sortedMatches[0][1]
+                bestMatch = sortedMatches[0][0]
+                print 'Best Match:', bestMatch
+                if bestMatch < targetAccuracy:
+                    valid = True
+        
+        self.valid = valid
+        if valid:
+            self.bandstructure.addResults(solution)
+            self.up2date = False
+            self.status = 'Finished'
+            self.currentSearchNumber = 1
+        else:
+            # relaunch EigenvalueIterator with a larger number
+            # of eigenvalues to find a matching mode
+            self.getNextSearchNumber()
+            if self.currentSearchNumber > self.maxSearchNumber:
+                if len(matches) == 0:
+                    raise Exception('Could not find a valid match with this maxSearchNumber.')
+                else:
+                    warn('maxSearchNumber exceeded. Using best match with mean relative deviation = {0}'.format(bestMatch))
+                    self.bandstructure.addResults(solution)
+                    self.up2date = False
+                    self.valid = False #?????????????????
+                    self.status = 'Finished'
+                    self.currentSearchNumber = 1
+                    return
+            print 'Searching again using nEigenvalues =', \
+                                            self.currentSearchNumber
+#             self.gotNonValidResultsFromIterator = True
+            self.solve()
+
+            
+    def getNextSimulationProperties(self, k, returnComplex = True):
+        
+        goToNextK = True
+        if hasattr(self, 'iterator'):
+            if not self.iterator.isFinished():
+                goToNextK = False
+        
+        if goToNextK:
+#             print 'GOING2NextK'
+#             self.bandstructure.statusInfo()
+            self.update()
+            bloch = self.solvePath.loc[k, 'vector']
+            
+            #extrapolationKeys = ['omega_re', 'omega_im'] + allParities
+            if returnComplex:
+                extrapolationKeys = ['omega_re', 'omega_im'] + allParities
+            else:
+                extrapolationKeys = ['omega_re'] + allParities
+            self.currentExtrapolationValues = {}
+            for ek in extrapolationKeys:
+                self.currentExtrapolationValues[ek] = self.extrapolate(self.data,ek)
+            #extrapolation = self.extrapolate(self.data, 'omega_re')
+            if returnComplex:
+                return bloch, self.currentExtrapolationValues['omega_re'] + \
+                              1.j*self.currentExtrapolationValues['omega_im']
+            else:
+                return bloch, self.currentExtrapolationValues['omega_re']
+        
+        else:
+#             print 'STAYINGatThisK'
+            self.iterator.updateKeys()
+            return self.currentBloch, self.iterator.currentGuess
+            
+    
+    def extrapolate(self, df, column):
+        """
+        Extrapolates a single value of the desired column of
+        a pandas.DataFrame using order=2 spline extrapolation
+        (constant or order=1 if not enough previous values are 
+        present). Returns only this scalar value.
+        """
+        dfExt = df.ix[:,column].copy()
+        Nvals = dfExt.count()
+        dfExt.index = self.bandstructure.getPath()['xVal'].values
+        if Nvals < 2:
+            dfExt.interpolate(limit=1, inplace=True)
+        else:
+            dfExt.interpolate(method='spline', 
+                              order=min((Nvals-1,2)), 
+                              limit=1, 
+                              inplace=True)
+        return dfExt.iat[Nvals]
+    
+    
+    def solve(self):
+        self.status = 'Pending'
+        self.k = self.getNextK()
+        #print '\n' + 80*'-', '\nSOLVING for k with index', self.k, '\n' + 80*'-'
+        if self.k is not None:
+            
+            self.currentBloch, self.currentGuess = \
+                                        self.getNextSimulationProperties(self.k)
+            workingDir = os.path.join(self.workingDir, 
+                                      'iteration_at_k{0:04d}'.format(self.k))
+#             initializeIterator = True
+#             if hasattr(self, 'iterator'):
+#                 initializeIterator = self.iterator.isFinished()
+#             if initializeIterator:# or self.gotNonValidResultsFromIterator:
+#                 self.gotNonValidResultsFromIterator = False
+#                 print 'INITIALIZING A NEW ITERATOR'
+            if self.isNewIteratorNeeded():
+                self.valid = False
+                self.iterator = EigenvalueIterator(self.dim, self.currentBloch, 
+                                           self.currentGuess, self.keys,
+                                           self.materials, workingDir,
+                                           self.analyzer, self.pool, caller =
+                                           self, nEigenvalues =
+                                           self.currentSearchNumber,
+                                           projectFileName =
+                                           self.projectFileName)
+
+            self.iterator.startComputations()
+        
+        else:
+            print 'Finished with this BandTrace!'
+            return
+    
+    
+    def receive(self):
+#         print 'BandTracer: receiving data from iterator.'
+        if self.iterator.isFinished():
+            self.updateBandstructure(self.k, self.iterator)
+        else:
+#             print 'BandTracer: Iterator not yet finished. Solving again...'
+            self.solve()
+        
+#         if isinstance(self.caller, BandTraceWaiter):
+#             self.caller.push(self)
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class BandTraceWaiter(object):
+    
+    def __init__(self, nTraces, suppressDaemonOutput = False):
+        self.nTraces = nTraces
+        self.waitQueue = []
+        self.evaluationQueue = []
+        self.suppressDaemonOutput = suppressDaemonOutput
+        self.pool = ComputationPool(suppressDaemonOutput = suppressDaemonOutput)
+    
+    
+    def push(self, tracer):
+        self.waitQueue.append(tracer)
+
+        
+#         print 'BandTraceWaiter.push() was called with', tracer, 'with nReceived = ', len(self.evaluationQueue), \
+#               'and with waitQueue-length:', len(self.waitQueue)
+
+#         if len(self.waitQueue) >= self.nTraces and len(self.evaluationQueue) == 0:
+#             self.wait()
+        
+#         if len(self.evaluationQueue) == self.nTraces:
+#             self.evaluate()
+    
+    
+#     def evaluate(self):
+#         self.evaluationQueue = []
+#         for t in self.evaluationQueue:
+#             t.receive()
+    
+    def getTracerFinishStatus(self):
+        return [t.status=='Finished' for t in self.waitQueue]
+    
+    
+    def getCurrentProperties(self):
+        props = [(t.k, t.currentBloch, t.currentGuess) for t in self.waitQueue]
+#         print 'PROPS:', props
+        return props[0][0], props[0][1], [p[2] for p in props]
+    
+    
+    def wait(self):
+        for t in self.waitQueue:
+            #t.setCaller(self)
+            t.setPool(self.pool)
+            t.solve()
+        kIndex, bloch, guesses = self.getCurrentProperties()
+        
+        if kIndex is None:
+            return
+        
+        print '\n' + 80*'-', '\nSOLVING for k with index', kIndex, 'and vector', \
+              bloch, '\n', 'Current guesses:', guesses
+        count = 0
+        while not all(self.getTracerFinishStatus()) and count < 10:
+            self.pool.wait()
+#             print '###BandTraceWaiter: waited for POOL on loop', count
+            count += 1
+#         self.evaluate()
+        self.wait()
+    
+    
+    def receive(self, sender):
+#         print 'BandTraceWaiter: Receiving data from', sender
+        for tracer in self.waitQueue:
+            if tracer.iterator is sender:
+                #self.waitQueue.remove(tracer)
+                self.evaluationQueue.append(tracer)
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class BandstructureSolver(object):
+    """
+
+    """
+    
+    # Globals
+    
+    
+    def __init__(self, bandstructure, generalKeys, materials, generalWorkingDir, 
+                 firstKfrequencyGuess, projectFileName = 'project.jcmp', 
+                 absorption = False, suppressDaemonOutput = False):
+        
+        self.bandstructure = bandstructure
+        # adopt parameters from Bandstructure-instance
+        self.dim = bandstructure.dimensionality
+        self.nBands = bandstructure.nBands
+        self.nKvals = bandstructure.nKvals
+        self.polarizations = bandstructure.polarizations
+        
+        self.keys = generalKeys
+        self.materials = materials
+        self.generalWorkingDir = generalWorkingDir
+        self.firstKfrequencyGuess = firstKfrequencyGuess
+        self.projectFileName = projectFileName
+        self.absorption = absorption
+        self.suppressDaemonOutput = suppressDaemonOutput
+        
+        self.analyzer = JCMresultAnalyzer()
+        self.nHSPs = self.bandstructure.brillouinPath.Nkpoints
+        self.HSPindex = 0
+    
+    
+    def solve(self):
+        self.prescan()
+        
+        # AHHHH: BandTraceWaiter initializes it's own pool!!!
+        btWaiter = BandTraceWaiter(self.nBands, 
+                                suppressDaemonOutput=self.suppressDaemonOutput)
+        for i in range(self.nBands):
+            workingDir = os.path.join(self.generalWorkingDir, 
+                                      'bandtrace{0:03d}'.format(i))
+            self.prepareWdir(workingDir)
+            BT = BandTracer(self.bandstructure, 
+                            i, 
+                            self.bandstructure.brillouinPath.\
+                                                    kpoints[self.HSPindex-1], 
+                            self.keys, 
+                            self.materials, 
+                            workingDir, 
+                            self.analyzer,
+                            projectFileName = self.projectFileName)
+            btWaiter.push(BT)
+        btWaiter.wait()
+    
+    
+    def prepareWdir(self, wdir):
+        if not os.path.exists(wdir):
+            os.makedirs(wdir)
+    
+    
+    def getNextPrescanParameters(self):
+        blochVector = self.bandstructure.brillouinPath.kpoints[self.HSPindex]
+        if self.HSPindex == 0:
+            guess = self.firstKfrequencyGuess
+        else:
+            # TODO: calculate frequency guess from previous k-point data
+            raise Exception('Guess calculation for next HSP not yet implemented.')
+        workingDir = os.path.join(self.generalWorkingDir, 'prescan{0}'.\
+                                                        format(self.HSPindex))
+        return blochVector, guess, workingDir
+       
+    
+    def getKindexForHSP(self, HSPindex):
+        blochVector = self.bandstructure.brillouinPath.kpoints[HSPindex]
+        #path = self.bandstructure.getPath()
+        kPointNames = self.bandstructure.getPathData('name')
+        HSPname = blochVector.name
+        return kPointNames[kPointNames == HSPname].index[0]
+    
+    
+    def prescan(self):
+        pool = ComputationPool(suppressDaemonOutput = self.suppressDaemonOutput)
+        blochVector, guess, workingDir = self.getNextPrescanParameters()
+        self.prepareWdir(workingDir)
+        
+        # TODO: maybe increase number of bands in case of no success
+        self.iterator = EigenvalueIterator(self.dim, blochVector, guess, 
+                                           self.keys,  self.materials, 
+                                           workingDir, self.analyzer, pool, 
+                                           nEigenvalues = self.nBands, 
+                                           caller = self, iterate = False, 
+                                           sendSelf=True, projectFileName
+                                           = self.projectFileName)
+
+        self.iterator.startComputations()
+        print 'Waiting for', blochVector, guess
+        pool.wait()
+        del pool
+    
+    
+    def assessAndConvertPrescanSolution(self, solution):
+        kIndex = self.getKindexForHSP(self.HSPindex)
+        valid = not solution['spurious'].all()
+        
+        bands = range(0,self.nBands)
+        result = getSingleKdFrame(kIndex, band=bands)
+        for sol in solution.index:
+            bn = bname(sol)
+            result.ix[kIndex, bn].update( solution.ix[sol] )
+            result.ix[kIndex, (bn, 'nIters')] = 1
+            result.ix[kIndex, (bn, 'deviation')] = 0.
+        return valid, result.convert_objects(convert_numeric=True)
+    
+    
+    def updateBandstructure(self, results):
+        self.bandstructure.addResults(results)
+    
+    
+    def receive(self, sender):
+        if sender.iterate == False:
+            # prescan case!
+            #print 'BandstructureSolver: Receiving prescan-data from', sender
+            valid, result = self.assessAndConvertPrescanSolution(
+                                                    sender.getFinalResults())
+            if valid:
+                self.updateBandstructure(result)
+                self.HSPindex += 1 # <- prepare for next high symmetry point
+            else:
+                # TODO: Deal with unsuccessful prescan
+                raise Exception('Not yet implemented.')
 
 
 

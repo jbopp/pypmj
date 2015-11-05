@@ -368,6 +368,7 @@ class ProjectFile:
         
 
     def runJcmt2jcm(self):
+        print '##runJcmt2jcm'
         jcm.jcmt2jcm(self.filepath, self.keys)
         jcmpFile = self.filepath.replace('.jcmpt', '.jcmp')
         with open(jcmpFile, 'r') as f:
@@ -381,6 +382,10 @@ class ProjectFile:
         
         # Float
         point = Literal('.')
+        bracketOpen = Literal('(')
+        bracketClose = Literal(')')
+        comma = Literal(',')
+        whitespace = Literal(' ')
         e = CaselessLiteral('E')
         plusorminus = Literal('+') | Literal('-')
         number = Word(nums) 
@@ -388,6 +393,11 @@ class ProjectFile:
         floatNumber = Combine( integer +
                                Optional( point + Optional(number) ) +
                                Optional( e + integer ) )
+        complexNumber = Combine( bracketOpen +
+                                 floatNumber +
+                                 comma + Optional(whitespace) +
+                                 floatNumber +
+                                 bracketClose )
         
         # Equal sign and comment
         equal = Suppress(Literal('='))
@@ -395,7 +405,7 @@ class ProjectFile:
         
         # Key and value of an equation
         field_name = Word(alphanums)
-        field_val = ( floatNumber | nestedExpr('[', ']') | \
+        field_val = ( complexNumber | floatNumber | nestedExpr('[', ']') | \
                       Word(alphanums ) | quotedString  )
         
         # Define the recursive grammar

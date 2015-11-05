@@ -175,12 +175,10 @@ class ResourceRegistry(object):
     
     
     def restartDaemon(self):
-        print 'Restarting Daemon ...'
         self.resources = []
         self.resourceIDs = []
         daemon.shutdown()
         daemon.startup()
-        print '... Done.'
 
 
 # =============================================================================
