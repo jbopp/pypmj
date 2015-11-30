@@ -2552,6 +2552,7 @@ class BandstructureSolverBrute(object):
         self.absorption = absorption
         self.suppressDaemonOutput = suppressDaemonOutput
         self.analyzer = JCMresultAnalyzer()
+        self.cleanMode = cleanMode
     
     
     def prepareWdir(self, wdir):

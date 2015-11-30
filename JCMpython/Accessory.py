@@ -304,6 +304,43 @@ def runSimusetsInSaveMode(simusets, doAnalyze = False,
     sendStatusEmail(thisPC.institution, msg)
 
 
+def runBSsolversInSaveMode(BSsolvers, PC, Ntrials = 5, verb = True):
+    if not isinstance(BSsolvers, list):
+        BSsolvers = [BSsolvers]
+    Nsets = len(BSsolvers)
+    ti0 = time.time()
+    for i, sset in enumerate(BSsolvers):
+        trials = 0
+        msg = 'Starting BSsolver {0} of {1}'.format(i+1, Nsets)
+        if verb: print msg
+        sendStatusEmail(PC.institution, msg)
+            
+        # Initialize the simulations
+        while trials < Ntrials:
+            tt0 = time.time()
+            try:
+                sset.solve()
+            except:
+                trials += 1
+                msg = 'BSsolver {0} failed at trial {1} of {2}'.\
+                      format(i+1, trials, Ntrials)
+                msg += '\n\n***Error Message:\n'+traceback.format_exc()+'\n***'
+                if verb: print msg
+                sendStatusEmail(PC.institution, msg)
+                continue
+            break
+        ttend = tForm(time.time() - tt0)
+        msg = 'Finished BSsolver {0} of {1}. Runtime: {2}'.\
+              format(i+1, Nsets, ttend)
+        if verb: print msg
+        sendStatusEmail(PC.institution, msg)
+         
+    tend = tForm(time.time() - ti0)
+    msg = 'All BSsolvers finished after {0}'.format(tend)
+    if verb: print msg
+    sendStatusEmail(PC.institution, msg)
+
+
 def lorentzian(x, xc, yc, w):
     return yc*np.power(w,2)/( 4.*np.power((x-xc), 2) + np.power(w, 2) )
 

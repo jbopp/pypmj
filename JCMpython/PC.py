@@ -11,8 +11,8 @@ class PC:
     """
     
     # Class constants
-    HZBPCs = ['nanosippe01', 'nanosippe03']
-    ZusePCs = ['num-pc37', 'htc024']
+    HZBPCs = ['nanosippe01', 'nanosippe03', 'dinux6', 'dinux7']
+    ZusePCs = ['num-pc37', 'htc024', 'htc027']
 
     
     def __init__(self, manualJCMimport, customDataFolderName = False):
