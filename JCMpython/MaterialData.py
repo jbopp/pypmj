@@ -593,6 +593,10 @@ class RefractiveIndexInfo(object):
 
 if __name__ == '__main__':
     
+    RefractiveIndexInfo(material = 'glass_CorningEagleXG').getAllInfo()
+    RefractiveIndexInfo(material = 'silicon').getAllInfo()
+    quit()
+    
     # Check if distinction between constant n and wavelength dependent n works
     ms = [ RefractiveIndexInfo(material = np.sqrt(12.)),
            RefractiveIndexInfo(material = 'air'),

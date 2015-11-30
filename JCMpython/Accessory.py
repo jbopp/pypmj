@@ -5,6 +5,8 @@ import io
 import matplotlib.colors as mcolors
 from numpy.linalg import norm
 from pyparsing import *
+import shutil
+import stat
 import sys
 import time
 
@@ -27,6 +29,33 @@ def acosd(arr):
 
 def tand(arr):
     return np.tan( np.deg2rad(arr) )
+
+
+def findNearest(array,value):
+    """
+    Returns the element of array which is nearest to value.
+    """
+    idx = (np.abs(array-value)).argmin()
+    return array[idx]
+
+def findNearestValues(reference, values):
+    """
+    Finds the elements of values which are nearest to the
+    elements in reference and returns them as a new array
+    with the same length as reference.
+    """
+    assert isinstance(reference, np.ndarray)
+    assert isinstance(values, np.ndarray)
+    assert len(values) >= len(reference)
+    popValues = values.copy()
+    results = []
+    indices = []
+    for r in reference:
+        nearest = findNearest(popValues, r)
+        popValues = np.delete(popValues, np.where(popValues==nearest))
+        results.append(nearest)
+        indices.append(np.where(values == nearest)[0][0])
+    return np.array(indices), np.array(results)
 
 
 def adapt_array(arr):
@@ -476,7 +505,51 @@ class ProjectFile:
 
 
 
+# =============================================================================
+# Functions to savely clear all contents of a directory
+# =============================================================================
+# http://stackoverflow.com/questions/1889597/deleting-directory-in-python
+def _remove_readonly(fn, path_, excinfo):
+    # Handle read-only files and directories
+    if fn is os.rmdir:
+        os.chmod(path_, stat.S_IWRITE)
+        os.rmdir(path_)
+    elif fn is os.remove:
+        os.lchmod(path_, stat.S_IWRITE)
+        os.remove(path_)
 
+
+def force_remove_file_or_symlink(path_):
+    try:
+        os.remove(path_)
+    except OSError:
+        os.lchmod(path_, stat.S_IWRITE)
+        os.remove(path_)
+
+
+# Code from shutil.rmtree()
+def is_regular_dir(path_):
+    try:
+        mode = os.lstat(path_).st_mode
+    except os.error:
+        mode = 0
+    return stat.S_ISDIR(mode)
+
+
+def clear_dir(path_):
+    if is_regular_dir(path_):
+        # Given path is a directory, clear its content
+        for name in os.listdir(path_):
+            fullpath = os.path.join(path_, name)
+            if is_regular_dir(fullpath):
+                shutil.rmtree(fullpath, onerror=_remove_readonly)
+            else:
+                force_remove_file_or_symlink(fullpath)
+    else:
+        # Given path is a file or a symlink.
+        # Raise an exception here to avoid accidentally clearing the content
+        # of a symbolic linked directory.
+        raise OSError("Cannot call clear_dir() on a symbolic link")
 
 
 

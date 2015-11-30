@@ -1,5 +1,6 @@
 from config import *
-from Accessory import cm2inch, Indentation, ProjectFile
+from Accessory import cm2inch, clear_dir, Indentation, ProjectFile, \
+                      findNearestValues
 from DaemonResources import Queue, Workstation
 from datetime import date
 import itertools
@@ -320,9 +321,10 @@ class BrillouinPath(object):
         the N points have approximately the same Euclidian distance.
         """
         
-        if isinstance(self.manuallyInterpolatedKpoints, np.ndarray):
+        if isinstance(self.manuallyInterpolatedKpoints, tuple):
             #CHECK
-            return self.kVectors2DataFrame(self.manuallyInterpolatedKpoints, 0.)
+            return self.kVectors2DataFrame(self.manuallyInterpolatedKpoints[0], 
+                                           self.manuallyInterpolatedKpoints[1])
         
         cornerPoints = self.Nkpoints
         if self.Nkpoints == 1:
@@ -698,7 +700,7 @@ class Bandstructure(object):
     
     def isDataAvailable(self):
         """
-        Checks wether the storageFolder contains valid save-files.
+        Checks whether the storageFolder contains valid save-files.
         """
         if os.path.exists(self.storageFolder) and \
                     os.path.isfile(self.paramFile) and\
@@ -803,6 +805,27 @@ class Bandstructure(object):
             freqs += 1.j*freqsIm
         return freqs
     
+    def extrapolate(self, limit=1, cols=None):
+        """
+        Extrapolates a N='limit' values of the desired cols of
+        the band data using order=2 spline extrapolation
+        (constant or order=1 if not enough previous values are 
+        present). Returns a pandas.DataFrame with the band data
+        including the extrapolated values.
+        """
+        dfExt = self.getBandData(cols=cols)
+        Nvals = dfExt.count().values[0]
+        previousIndex = dfExt.index
+        dfExt.index = self.getPath()['xVal'].values
+        if Nvals < 2:
+            dfExt.interpolate(limit=limit, inplace=True)
+        else:
+            dfExt.interpolate(method='spline', 
+                              order=min((Nvals-1,2)), 
+                              limit=limit, 
+                              inplace=True)
+        dfExt.index = previousIndex
+        return dfExt
     
     def getFinishStatus(self, axis=0):
         return self.getAllFreqs().notnull().all(axis=axis)
@@ -958,11 +981,27 @@ class Bandstructure(object):
 
     def findBandgaps(self, polarizations = 'all'):
         pass
-
+    
+    def clearSpuriousResults(self):
+        self.dataWithSpuriousResults = self.data.copy()
+        for data in self.data:
+            if data[1] == 'spurious':
+                band = data[0]
+                spuriousIdxs = np.where(self.data[data] == True)
+                if len(spuriousIdxs[0]):
+                    self.data.ix[spuriousIdxs[0], band] = np.NaN
+    
+    def restoreSpuriousResults(self):
+        if hasattr(self, 'dataWithSpuriousResults'):
+            self.data = self.dataWithSpuriousResults
+        else:
+            print 'restoreSpuriousResults: Could not find a data backup.'
 
     def plot(self, ax = None, cmap = None, figsize=(10,10), 
-             polDecisionColumn = 'parity_6', 
-             fromDimensionlessWithPitch = None):
+             polDecisionColumn = 'parity_6', clearSpurious = True, ylim = None,
+             fromDimensionlessWithPitch = None, showLightCone = False, 
+             lcTone=0.8, lcAlpha=0.4, llColor='k', llLW=3, llLS='--', 
+             lcKwargs = None):
         if ax is None:
             import matplotlib.pyplot as plt
             plt.figure(figsize=figsize)
@@ -970,39 +1009,68 @@ class Bandstructure(object):
         if cmap is None:
             import matplotlib.pyplot as plt
             cmap = plt.cm.coolwarm
-            
+        
+        if clearSpurious:
+            self.clearSpuriousResults()
+        
         if self.dimensionality == 3:
     
             xVal = self.getPathData('xVal')
+            scatters = []
             for ib in range(self.nBands):
                 freq = self.getBandData(bands=ib, cols='omega_re')
                 if fromDimensionlessWithPitch is not None:
                     freq = omegaFromDimensionless(freq, 
                                                   fromDimensionlessWithPitch)
-                ax.scatter( xVal, 
-                            freq,
-                            c=self.getBandData(bands=ib, 
-                                               cols=polDecisionColumn),
-                            cmap=cmap,
-                            vmin=-1, vmax=1)
+                scatters.append(ax.scatter(xVal, 
+                                           freq,
+                                           c=self.getBandData(bands=ib, 
+                                                        cols=polDecisionColumn),
+                                           cmap=cmap,
+                                           vmin=-1, vmax=1, antialiased=True))
     #         plt.plot(xVal, self.getLightcone(), c='k')
-            HSPidx = self.data.loc[:,(pathColName,'isHighSymmetryPoint')]
+            HSPidx = self.getPathData('isHighSymmetryPoint')
             HSPs = self.data[HSPidx][pathColName]
             ax.set_xticks(HSPs['xVal'].values)
             ax.set_xticklabels(HSPs['nameAsLatex'].values)
-            ax.autoscale(True, tight=True)
-            ax.set_xlim( (xVal.iat[0], xVal.iat[-1]) )
-            ax.set_ylim((0., plt.ylim()[1]))
+            if ylim is not None:
+                ax.autoscale(True, axis='x', tight=True)
+                ax.set_xlim( (xVal.iat[0], xVal.iat[-1]) )
+#                 ax.set_ylim(ylim)
+            else:
+                ax.autoscale(True, tight=True)
+                ax.set_xlim( (xVal.iat[0], xVal.iat[-1]) )
+                ylim = (0., plt.ylim()[1])
+            ax.set_ylim(ylim)
             ax.set_xlabel('$k$-vector')
             ax.set_ylabel('angular frequency $\omega$ in $s^{-1}$')
             
-            ytics = ax.get_yticks()
+            
+            ytics = ax.get_yticks()[:-1]
             ax2 = ax.twinx()
+            ax2.set_ylim(ylim)
             ytics2 = ['{0:.0f}'.format(freq2wvl(yt)*1.e9) for yt in ytics]
-            ax.set_yticks( ytics )
+            ax2.set_yticks( ytics )
             ax2.set_yticklabels( ytics2 )
             ax2.set_ylabel('wavelength $\lambda$ in nm (rounded)')
             ax.grid(axis='x')
+            
+            if showLightCone:
+                if lcKwargs is None:
+                    lcKwargs = {}
+                lc = self.getLightcone(**lcKwargs)
+                ymax = 1.05*np.max(lc)
+                ax.set_ylim((0.,ymax))
+                
+                ax.fill_between(xVal, lc, ymax, color=[lcTone]*3, alpha=lcAlpha)
+                ax.plot(xVal, lc, llLS, color=llColor, lw=llLW, 
+                        label=u'light line')
+                ax.legend(loc='best')
+            
+        if clearSpurious:
+            self.restoreSpuriousResults()
+        
+        return scatters
 
     
 #     def plotLive(self, polarization, saveSnapshot = True):
@@ -1377,6 +1445,8 @@ class JCMresonanceModeComputation(object):
     is returned by the JCMdaemon.
     """
     
+    MAX_TRIALS = 10
+    
     def __init__(self, dim, blochVector, nEigenvalues, initialGuess,
                  generalKeys, materials, workingDir, caller = None, 
                  analyzer = None, selectionCriterion = 'NearGuess', 
@@ -1434,10 +1504,24 @@ class JCMresonanceModeComputation(object):
         with Indentation(self.indent, prefix = '[JCMdaemon] ', 
                          suppress = self.suppressDaemonOutput):
 #             print 'JCMresonanceModeComputation: calling jcm.solve()'
-            self.jobID = jcm.solve(self.projectFileName, 
-                                   keys = self.keys, 
-                                   working_dir = self.workingDir,
-                                   jcmt_pattern = self.JCMPattern)
+            for i in range(self.MAX_TRIALS):
+                try:
+                    self.jobID = jcm.solve(self.projectFileName, 
+                                           keys = self.keys, 
+                                           working_dir = self.workingDir,
+                                           jcmt_pattern = self.JCMPattern)
+                    break
+                except Exception as e:
+                    if 'already locked' in e.message:
+                        # if the "Project file already locked" - Error occurs,
+                        # try to clear the working directory first
+                        print 'Clearing working directory due to "Project ' +\
+                              'file already locked" - Error'
+                        clear_dir(self.workingDir)
+                    else:
+                        raise e
+                        break
+            
         self.jcmpFile = os.path.join(self.workingDir, 
                                      os.path.basename(self.projectFileName))
         self.jcmpFile = self.jcmpFile.replace('.jcmpt', '.jcmp')
@@ -1754,6 +1838,7 @@ class BandTracer(object):
     # Globals
     parityAccuracy = 0.01
     maxSearchNumber = 9
+    maxFEMdegree = 3
     
     
     def __init__(self, bandstructure, bandIndex, startingSymmetryPoint, 
@@ -1767,6 +1852,8 @@ class BandTracer(object):
         self.bname = bname(self.bandIndex)
         self.startingSymmetryPoint = startingSymmetryPoint
         self.keys = generalKeys
+        self.initialFEMdegree = self.keys['fem_degree']
+        self.currentFEMdegree = self.keys['fem_degree']
         self.materials = materials
         self.workingDir = workingDir
         self.prepareWdir(self.workingDir)
@@ -1792,6 +1879,14 @@ class BandTracer(object):
             self.currentSearchNumber = 1
         else:
             self.currentSearchNumber *= 2
+    
+    
+    def getNextFEMdegree(self):
+#         if not hasattr(self, 'currentFEMdegree'):
+#             self.currentFEMdegree = self.initialFEMdegree
+#         else:
+#             self.currentFEMdegree += 1
+        self.currentFEMdegree += 1
     
     
     def prepareWdir(self, wdir):
@@ -1865,10 +1960,10 @@ class BandTracer(object):
         HSPs = path[path['isHighSymmetryPoint']]
         HSPnames = HSPs['name'].tolist()
         nextHSP = HSPnames[ HSPnames.index(SSPname)+1 ]
-#         self.kIndexEnd = kPointNames[kPointNames == nextHSP].index[0]-1
+        self.kIndexEnd = kPointNames[kPointNames == nextHSP].index[0]-1
         
         # TODO: This is a fix to solve the complete bandstructure in one run
-        self.kIndexEnd = kPointNames.index[-1]
+#         self.kIndexEnd = kPointNames.index[-1]
         
         # Construct the complete path for solving
         self.solvePath = path.loc[self.kIndexStart:self.kIndexEnd]
@@ -1994,7 +2089,8 @@ class BandTracer(object):
         if not hasattr(self, 'k'):
             firstNonsolvedK -= 1
         else:
-            if self.k == 0: 
+#             if self.k == 0: 
+            if self.k == self.kIndexStart: # TODO: Check
                 firstNonsolvedK -= 1
                 if all(thisKstatus): 
                     firstNonsolvedK += 1
@@ -2016,7 +2112,7 @@ class BandTracer(object):
 #         return firstNonsolvedK
     
 
-    def updateBandstructure(self, kIndex, iterator, targetAccuracy = 0.4):
+    def updateBandstructure(self, kIndex, iterator, targetAccuracy = 0.15):
         valid = False
         if iterator.nEigenvalues == 1:
             solution = iterator.getFinalResults(kIndex, self.bandIndex)
@@ -2049,23 +2145,34 @@ class BandTracer(object):
             self.up2date = False
             self.status = 'Finished'
             self.currentSearchNumber = 1
+            self.currentFEMdegree = self.initialFEMdegree
         else:
             # relaunch EigenvalueIterator with a larger number
             # of eigenvalues to find a matching mode
             self.getNextSearchNumber()
             if self.currentSearchNumber > self.maxSearchNumber:
-                if len(matches) == 0:
-                    raise Exception('Could not find a valid match with this maxSearchNumber.')
+                if self.currentFEMdegree > self.maxFEMdegree:
+                    if len(matches) == 0:
+                        raise Exception('Could not find a valid match with'+\
+                                        ' this maxSearchNumber and'+\
+                                        ' this maxFEMdegree.')
+                    else:
+                        warn('maxSearchNumber and maxFEMdegree exceeded. '+\
+                             'Using best match with mean relative deviation '+\
+                             '= {0}'.format(bestMatch))
+                        self.bandstructure.addResults(solution)
+                        self.up2date = False
+                        self.valid = False #?????????????????
+                        self.status = 'Finished'
+                        self.currentSearchNumber = 1
+                        self.currentFEMdegree = self.initialFEMdegree
+                        return
                 else:
-                    warn('maxSearchNumber exceeded. Using best match with mean relative deviation = {0}'.format(bestMatch))
-                    self.bandstructure.addResults(solution)
-                    self.up2date = False
-                    self.valid = False #?????????????????
-                    self.status = 'Finished'
                     self.currentSearchNumber = 1
-                    return
-            print 'Searching again using nEigenvalues =', \
-                                            self.currentSearchNumber
+                    self.getNextFEMdegree()
+            print 'Searching again using nEigenvalues={0} and FEMdegree={1}'.\
+                    format(self.currentSearchNumber,
+                           self.currentFEMdegree)
 #             self.gotNonValidResultsFromIterator = True
             self.solve()
 
@@ -2093,8 +2200,17 @@ class BandTracer(object):
                 self.currentExtrapolationValues[ek] = self.extrapolate(self.data,ek)
             #extrapolation = self.extrapolate(self.data, 'omega_re')
             if returnComplex:
-                return bloch, self.currentExtrapolationValues['omega_re'] + \
-                              1.j*self.currentExtrapolationValues['omega_im']
+                re = self.currentExtrapolationValues['omega_re']
+                ri = self.currentExtrapolationValues['omega_im']
+                pev = self.keys['precision_eigenvalues']
+                # In this step, imaginary parts that are too small in comparison
+                # with the real part are treated as zero due to problematic
+                # convergence
+                if ri/re < pev*10.:
+                    print 'RETURNING imaginary part of zero'
+                    ri = 0.
+                    del self.currentExtrapolationValues['omega_im']
+                return bloch, re + 1.j*ri
             else:
                 return bloch, self.currentExtrapolationValues['omega_re']
         
@@ -2142,6 +2258,8 @@ class BandTracer(object):
 #                 print 'INITIALIZING A NEW ITERATOR'
             if self.isNewIteratorNeeded():
                 self.valid = False
+                if hasattr(self, 'currentFEMdegree'):
+                    self.keys['fem_degree'] = self.currentFEMdegree
                 self.iterator = EigenvalueIterator(self.dim, self.currentBloch, 
                                            self.currentGuess, self.keys,
                                            self.materials, workingDir,
@@ -2152,10 +2270,10 @@ class BandTracer(object):
                                            self.projectFileName)
 
             self.iterator.startComputations()
-        
+            return False
         else:
             print 'Finished with this BandTrace!'
-            return
+            return True
     
     
     def receive(self):
@@ -2217,7 +2335,9 @@ class BandTraceWaiter(object):
         for t in self.waitQueue:
             #t.setCaller(self)
             t.setPool(self.pool)
-            t.solve()
+            finished = t.solve()
+        if finished:
+            return
         kIndex, bloch, guesses = self.getCurrentProperties()
         
         if kIndex is None:
@@ -2279,26 +2399,32 @@ class BandstructureSolver(object):
     
     
     def solve(self):
-        self.prescan()
-        
-        # AHHHH: BandTraceWaiter initializes it's own pool!!!
-        btWaiter = BandTraceWaiter(self.nBands, 
+        while self.HSPindex < self.nHSPs-1:
+            HSP = self.bandstructure.brillouinPath.kpoints[self.HSPindex]
+            HSP2 = self.bandstructure.brillouinPath.kpoints[self.HSPindex+1]
+            print '\n\n'+80*'_'
+            print 'STARTING new prescan+trace between high symmetry points '+\
+                  '{0} and {1}'.format(HSP, HSP2)
+            self.prescan()
+            
+            # AHHHH: BandTraceWaiter initializes it's own pool!!!
+            btWaiter = BandTraceWaiter(self.nBands, 
                                 suppressDaemonOutput=self.suppressDaemonOutput)
-        for i in range(self.nBands):
-            workingDir = os.path.join(self.generalWorkingDir, 
-                                      'bandtrace{0:03d}'.format(i))
-            self.prepareWdir(workingDir)
-            BT = BandTracer(self.bandstructure, 
-                            i, 
-                            self.bandstructure.brillouinPath.\
-                                                    kpoints[self.HSPindex-1], 
-                            self.keys, 
-                            self.materials, 
-                            workingDir, 
-                            self.analyzer,
-                            projectFileName = self.projectFileName)
-            btWaiter.push(BT)
-        btWaiter.wait()
+            for i in range(self.nBands):
+                workingDir = os.path.join(self.generalWorkingDir, 
+                                          'bandtrace{0:03d}'.format(i))
+                self.prepareWdir(workingDir)
+                BT = BandTracer(self.bandstructure, 
+                                i, 
+                                HSP, 
+                                self.keys, 
+                                self.materials, 
+                                workingDir, 
+                                self.analyzer,
+                                projectFileName = self.projectFileName)
+                btWaiter.push(BT)
+            btWaiter.wait()
+            del btWaiter
     
     
     def prepareWdir(self, wdir):
@@ -2310,12 +2436,19 @@ class BandstructureSolver(object):
         blochVector = self.bandstructure.brillouinPath.kpoints[self.HSPindex]
         if self.HSPindex == 0:
             guess = self.firstKfrequencyGuess
+            nEigenvalues = self.nBands
         else:
             # TODO: calculate frequency guess from previous k-point data
-            raise Exception('Guess calculation for next HSP not yet implemented.')
+            status = self.bandstructure.getFinishStatus(1)
+            idx = status[status == True].index[-1]
+#             freqs = self.bandstructure.getAllFreqs().loc[idx]
+            extrapolated = self.bandstructure.extrapolate(cols='omega_re')
+            self.prescanTargetFreqs = extrapolated.loc[idx+1].values
+            guess = self.prescanTargetFreqs.mean()
+            nEigenvalues = 2*self.nBands
         workingDir = os.path.join(self.generalWorkingDir, 'prescan{0}'.\
                                                         format(self.HSPindex))
-        return blochVector, guess, workingDir
+        return nEigenvalues, blochVector, guess, workingDir
        
     
     def getKindexForHSP(self, HSPindex):
@@ -2328,14 +2461,15 @@ class BandstructureSolver(object):
     
     def prescan(self):
         pool = ComputationPool(suppressDaemonOutput = self.suppressDaemonOutput)
-        blochVector, guess, workingDir = self.getNextPrescanParameters()
+        nEigenvalues, blochVector, guess, workingDir = \
+                                                self.getNextPrescanParameters()
         self.prepareWdir(workingDir)
         
         # TODO: maybe increase number of bands in case of no success
         self.iterator = EigenvalueIterator(self.dim, blochVector, guess, 
                                            self.keys,  self.materials, 
                                            workingDir, self.analyzer, pool, 
-                                           nEigenvalues = self.nBands, 
+                                           nEigenvalues = nEigenvalues, 
                                            caller = self, iterate = False, 
                                            sendSelf=True, projectFileName
                                            = self.projectFileName)
@@ -2348,8 +2482,17 @@ class BandstructureSolver(object):
     
     def assessAndConvertPrescanSolution(self, solution):
         kIndex = self.getKindexForHSP(self.HSPindex)
+        if len(solution) > self.nBands:
+            assert hasattr(self, 'prescanTargetFreqs')
+            validIdxs = solution[solution['spurious'] == False].index
+            validModeFreqs = solution.loc[validIdxs, 'omega_re']
+            indices, _ = findNearestValues(self.prescanTargetFreqs, 
+                                           validModeFreqs.values)
+            solution = solution.loc[indices]
+            solution.index = range(len(solution))
+            assert(len(solution) == self.nBands)
+
         valid = not solution['spurious'].all()
-        
         bands = range(0,self.nBands)
         result = getSingleKdFrame(kIndex, band=bands)
         for sol in solution.index:
@@ -2376,6 +2519,106 @@ class BandstructureSolver(object):
             else:
                 # TODO: Deal with unsuccessful prescan
                 raise Exception('Not yet implemented.')
+
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
+class BandstructureSolverBrute(object):
+    """
+    A naive BandstructureSolver implementation which simply solves for the
+    specified number of bands defined in the given bandstructure instance for
+    each of its k-values.
+    """
+    
+    def __init__(self, bandstructure, generalKeys, materials, generalWorkingDir, 
+                 frequencyGuess, projectFileName = 'project.jcmp', 
+                 absorption = False, suppressDaemonOutput = False, 
+                 cleanMode = False):
+        
+        self.bandstructure = bandstructure
+        # adopt parameters from Bandstructure-instance
+        self.dim = bandstructure.dimensionality
+        self.nBands = bandstructure.nBands
+        self.nKvals = bandstructure.nKvals
+        self.polarizations = bandstructure.polarizations
+        
+        self.keys = generalKeys
+        self.materials = materials
+        self.generalWorkingDir = generalWorkingDir
+        self.frequencyGuess = frequencyGuess
+        self.projectFileName = projectFileName
+        self.absorption = absorption
+        self.suppressDaemonOutput = suppressDaemonOutput
+        self.analyzer = JCMresultAnalyzer()
+    
+    
+    def prepareWdir(self, wdir):
+        if not os.path.exists(wdir):
+            os.makedirs(wdir)
+    
+    
+    def solve(self):
+        pool = ComputationPool(suppressDaemonOutput = self.suppressDaemonOutput)
+        status = self.bandstructure.getFinishStatus(axis=1)
+        kVectors = self.bandstructure.getPathData('vector')
+        iterators = []
+        for i in status.index:
+            stat = status.at[i]
+            k = kVectors.at[i]
+            if not stat:
+                print 'Pushing k-vector', k, 'to the pool'
+                workingDir = os.path.join(
+                                self.generalWorkingDir, 'k{0:03d}'.format(i))
+                self.prepareWdir(workingDir)
+    
+                iterator = EigenvalueIterator(self.dim, k, self.frequencyGuess, 
+                                              self.keys,  self.materials, 
+                                              workingDir, self.analyzer, pool, 
+                                              nEigenvalues = self.nBands, 
+                                              caller = self, iterate = False, 
+                                              sendSelf=True, projectFileName
+                                              = self.projectFileName)
+                iterator.kIndex = i
+                iterator.startComputations()
+                iterators.append(iterator)
+            else:
+                print 'k-vector', k, 'already solved'
+        print 'Waiting for results...'
+        finished = False
+        while not finished:
+            pool.wait()
+            finished = all( [it.isFinished() for it in iterators] )
+        pool.wait()
+        print 'Finished band structure solve.'
+
+    
+    def convertPrescanSolution(self, iterator):
+        kIndex = iterator.kIndex
+        solution = iterator.getFinalResults()
+
+        bands = range(0,self.nBands)
+        result = getSingleKdFrame(kIndex, band=bands)
+        for sol in solution.index:
+            bn = bname(sol)
+            result.ix[kIndex, bn].update( solution.ix[sol] )
+            result.ix[kIndex, (bn, 'nIters')] = 1
+            result.ix[kIndex, (bn, 'deviation')] = 0.
+        return result.convert_objects(convert_numeric=True)
+    
+    
+    def updateBandstructure(self, results):
+        self.bandstructure.addResults(results)
+    
+    
+    def receive(self, sender):
+        if sender.iterate == False:
+            print '\tBandstructureSolver: Receiving prescan-data from', sender
+            result = self.convertPrescanSolution(sender)
+            self.updateBandstructure(result)
+            if self.cleanMode and os.path.isdir(sender.workingDir):
+                rmtree(sender.workingDir)
 
 
 
@@ -2421,7 +2664,8 @@ def coordinateConversion(vector, lattice, direction = 'reciprocal->cartesian'):
         return
 
 
-def dataFrameFromMPB(freqFilename, zparityFilename=None, yparityFilename=None, dropCol = 'freqs:'):
+def dataFrameFromMPB(freqFilename, zparityFilename=None, yparityFilename=None, 
+                     dropCol = 'freqs:'):
     freqs = pd.read_table(freqFilename,
                           sep=',', 
                           skipinitialspace=True,
@@ -2444,10 +2688,15 @@ def dataFrameFromMPB(freqFilename, zparityFilename=None, yparityFilename=None, d
                                   index_col=1,
                                   header=None,
                                   names=names)
-    
-    freqs.drop(dropCol, axis=1, inplace=True)
-    if zparityFilename: zparities.drop(dropCol, axis=1, inplace=True)
-    if yparityFilename: yparities.drop(dropCol, axis=1, inplace=True)
+    try:
+        freqs.drop(dropCol, axis=1, inplace=True)
+        if zparityFilename: zparities.drop(dropCol, axis=1, inplace=True)
+        if yparityFilename: yparities.drop(dropCol, axis=1, inplace=True)
+    except:
+        dropCol += ':'
+        freqs.drop(dropCol, axis=1, inplace=True)
+        if zparityFilename: zparities.drop(dropCol, axis=1, inplace=True)
+        if yparityFilename: yparities.drop(dropCol, axis=1, inplace=True)
     return freqs, zparities, yparities
 
 
@@ -2523,6 +2772,7 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
     pathPointIndices = []
     for i in range(NpathPoints):
         pathPointIndices.append(i + i*mpbInterpolateKpoints)
+    logging.info('Indices of path corner points: %s', pathPointIndices)
     
     # construct the brillouinPath
     path = []
@@ -2542,9 +2792,10 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
     kpointsFromF = kpointsFromF.tolist()
     for i,ppi in enumerate(pathPointIndices):
         kpointsFromF[ppi] = path[i]
+    mIKp = (kpointsFromF, xVals)
     
     brillouinPath = BrillouinPath( path, 
-                                   manuallyInterpolatedKpoints = kpointsFromF )
+                                   manuallyInterpolatedKpoints = mIKp )
     # Initialize the Bandstructure-instance
     bandstructure = Bandstructure( bsSaveName,
                                    dimensionality,
@@ -2554,20 +2805,23 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
                                    overwrite = True,
                                    verb=False )
     bandstructure.data = bandstructure.data.sortlevel(axis=1)
+#     bandstructure.data.ix[:,(pathColName, 'xVal')] = xVals
     logging.info('Initialized the Bandstructure-instance')
     
     bidx = 0
     polZPdict = {'TE':1., 'TM':-1}
-    for p in pols:
+    for iiP,p in enumerate(pols):
         datas = data[p]
-        for col in datas[0].columns:
+        for iCol, col in enumerate(datas[0].columns):
             if 'band' in col:
 #                 bidx = int(col.split()[-1])-1
                 
                 freqs = datas[0].loc[:,col]
+                if isinstance(convertFreqs, float):
+                    freqs = omegaFromDimensionless(freqs, convertFreqs)
                 if p == 'all':
-                    zparity = datas[1].loc[:,col]
-                    yparity = datas[2].loc[:,col]
+                    zparity = datas[1].iloc[:,iCol-4]
+                    yparity = datas[2].iloc[:,iCol-4]
 
                 
                 for k in range(NumKvals):
@@ -2593,6 +2847,17 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
                                         singleValueTuple=('polarization', p),
                                         save = False)
                 bidx += 1
+        
+        if iiP == 0:
+            lightcone = datas[0].ix[:,'kmag/2pi'].values
+    #         kpointsXY = bandstructure.getPathData(['x', 'y'])
+    #         lightcone = np.linalg.norm(kpointsXY, axis=1)
+            if isinstance(convertFreqs, float):
+                lightcone = omegaFromDimensionless(lightcone, convertFreqs)
+            bandstructure.data = addColumn2bandDframe(bandstructure.data, 
+                                                      'lightcone', 
+                                                      lightcone)
+            
     bandstructure.save()
     logging.info('Resulting bandstructure:')
     logging.info(bandstructure.__repr__())
