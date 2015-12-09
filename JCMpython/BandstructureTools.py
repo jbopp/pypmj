@@ -937,6 +937,42 @@ class Bandstructure(object):
             self.data = addColumn2bandDframe(self.data, colName, lightcone)
         return lightcone
     
+#     def calcAngles(self, refIndex = 1.):
+#         if hasattr(self, 'anglesCalculated'):
+#             warn('The angles for this band structure were already calculated.')
+#             return
+#         kx = self.data[('path', 'x')]
+#         ky = self.data[('path', 'y')]
+#         phi = np.rad2deg(np.arctan2(ky, kx)).values
+#         self.data = addColumn2bandDframe(self.data, 'phi', phi)
+#         for ib in range(self.nBands):
+#             bn = bname(ib)
+#             wvl = freq2wvl(self.data[(bn, 'omega_re')])
+#             k0 = 2.*np.pi*refIndex/wvl
+#             kz = np.sqrt(np.square(k0) - np.square(kx) - np.square(ky))
+#             self.data[(bn, 'theta')] = np.rad2deg(np.arccos( kz*wvl/2./np.pi ))
+#             self.data[(bn, 'wavelength')] = wvl
+#         self.data = self.data.sortlevel(axis=1)
+#         self.anglesCalculated = True
+
+    def calcAngles(self, refIndex = 1.):
+        if hasattr(self, 'anglesCalculated'):
+            warn('The angles for this band structure were already calculated.')
+            return
+        kx = self.data[('path', 'x')]
+        ky = self.data[('path', 'y')]
+        phi = np.rad2deg(np.arctan2(ky, kx)).values
+        self.data = addColumn2bandDframe(self.data, 'phi', phi)
+        for ib in range(self.nBands):
+            bn = bname(ib)
+            wvl = freq2wvl(self.data[(bn, 'omega_re')])
+            km = 2.*np.pi*refIndex/wvl
+            kz = np.sqrt(np.square(km) - np.square(kx) - np.square(ky))
+            self.data[(bn, 'theta')] = np.rad2deg(np.arccos( kz/km ))
+            self.data[(bn, 'wavelength')] = wvl
+        self.data = self.data.sortlevel(axis=1)
+        self.anglesCalculated = True
+
 
     def calcThetaPhi(self, lattice, pitch):
         path = self.getPathData(['vector', 'name'])
@@ -1001,7 +1037,7 @@ class Bandstructure(object):
              polDecisionColumn = 'parity_6', clearSpurious = True, ylim = None,
              fromDimensionlessWithPitch = None, showLightCone = False, 
              lcTone=0.8, lcAlpha=0.4, llColor='k', llLW=3, llLS='--', 
-             lcKwargs = None):
+             lcKwargs = None, additionalBS = None):
         if ax is None:
             import matplotlib.pyplot as plt
             plt.figure(figsize=figsize)
@@ -1012,6 +1048,11 @@ class Bandstructure(object):
         
         if clearSpurious:
             self.clearSpuriousResults()
+        
+        if additionalBS is None:
+            additionalBS = []
+        elif isinstance(additionalBS, self.__class__):
+            additionalBS = [additionalBS]
         
         if self.dimensionality == 3:
     
@@ -1028,6 +1069,31 @@ class Bandstructure(object):
                                                         cols=polDecisionColumn),
                                            cmap=cmap,
                                            vmin=-1, vmax=1, antialiased=True))
+            
+            # Add points from additionalBS
+            for bs in additionalBS:
+                if not isinstance(bs, self.__class__):
+                    break
+                for ib in range(bs.nBands):
+                    freq = bs.getBandData(bands=ib, cols='omega_re')
+                    if fromDimensionlessWithPitch is not None:
+                        freq = omegaFromDimensionless(freq, 
+                                                    fromDimensionlessWithPitch)
+                    if clearSpurious:
+                        bs.clearSpuriousResults()
+                    try:
+                        scatters.append(
+                                ax.scatter(xVal, 
+                                           freq,
+                                           c=bs.getBandData(bands=ib, 
+                                                        cols=polDecisionColumn),
+                                           cmap=cmap,
+                                           vmin=-1, vmax=1, antialiased=True))
+                    except:
+                        print 'Unable to add data of', bs
+                    if clearSpurious:
+                        bs.restoreSpuriousResults()
+            
     #         plt.plot(xVal, self.getLightcone(), c='k')
             HSPidx = self.getPathData('isHighSymmetryPoint')
             HSPs = self.data[HSPidx][pathColName]
@@ -1045,6 +1111,59 @@ class Bandstructure(object):
             ax.set_xlabel('$k$-vector')
             ax.set_ylabel('angular frequency $\omega$ in $s^{-1}$')
             
+            # Draw the light cone(s) and light line(s)
+            if showLightCone:
+                if lcKwargs is None:
+                    lcKwargs = {}
+                
+                if 'scale' in lcKwargs:
+                    scales = lcKwargs['scale']
+                    if isinstance(scales, (list, tuple)):
+                        assert len(scales) == 2
+                        lcKwargList = []
+                        llLabels = []
+                        scales.sort()
+                        for scale in scales:
+                            newlcKwargs = {}
+                            newlcKwargs.update(lcKwargs)
+                            newlcKwargs['scale'] = scale
+                            lcKwargList.append(newlcKwargs)
+                            lcTones = [lcTone, lcTone/2.]
+                            llColors = ['g', llColor]
+                            llLabels.append(
+                                    ur'light line $n={0:.2f}$'.format(1./scale))
+                    else:
+                        lcKwargList = [lcKwargs]
+                        llLabels = [u'light line']
+                        lcTones = [lcTone]
+                        llColors = [llColor]
+                else:
+                    lcKwargList = [lcKwargs]
+                    llLabels = [u'light line']
+                    lcTones = [lcTone]
+                    llColors = [llColor]
+                
+                lcs = []
+                for lcKwargs in lcKwargList:
+                    lcs.append(self.getLightcone(**lcKwargs))
+                
+                for ilc, lc in enumerate(lcs):
+                    ymax = 1.05*np.max(lc)
+                    if ymax > plt.ylim()[1]:
+                        ax.set_ylim((0.,ymax))
+                    else:
+                        ymax = plt.ylim()[1]
+                    
+                    if len(lcs) == 2 and ilc == 0:
+                        ax.fill_between(xVal, lc, lcs[1], 
+                                        color=[lcTones[ilc]]*3, 
+                                        alpha=lcAlpha)
+                    else:
+                        ax.fill_between(xVal, lc, ymax, color=[lcTones[ilc]]*3, 
+                                        alpha=lcAlpha)
+                    ax.plot(xVal, lc, llLS, color=llColors[ilc], lw=llLW, 
+                            label=llLabels[ilc])
+                    ax.legend(loc='best')
             
             ytics = ax.get_yticks()[:-1]
             ax2 = ax.twinx()
@@ -1055,17 +1174,7 @@ class Bandstructure(object):
             ax2.set_ylabel('wavelength $\lambda$ in nm (rounded)')
             ax.grid(axis='x')
             
-            if showLightCone:
-                if lcKwargs is None:
-                    lcKwargs = {}
-                lc = self.getLightcone(**lcKwargs)
-                ymax = 1.05*np.max(lc)
-                ax.set_ylim((0.,ymax))
-                
-                ax.fill_between(xVal, lc, ymax, color=[lcTone]*3, alpha=lcAlpha)
-                ax.plot(xVal, lc, llLS, color=llColor, lw=llLW, 
-                        label=u'light line')
-                ax.legend(loc='best')
+            
             
         if clearSpurious:
             self.restoreSpuriousResults()
