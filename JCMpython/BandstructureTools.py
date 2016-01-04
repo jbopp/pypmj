@@ -1074,16 +1074,17 @@ class Bandstructure(object):
             for bs in additionalBS:
                 if not isinstance(bs, self.__class__):
                     break
+                if clearSpurious:
+                    bs.clearSpuriousResults()
+                thisBSXVal = bs.getPathData('xVal')
                 for ib in range(bs.nBands):
                     freq = bs.getBandData(bands=ib, cols='omega_re')
                     if fromDimensionlessWithPitch is not None:
                         freq = omegaFromDimensionless(freq, 
                                                     fromDimensionlessWithPitch)
-                    if clearSpurious:
-                        bs.clearSpuriousResults()
                     try:
                         scatters.append(
-                                ax.scatter(xVal, 
+                                ax.scatter(thisBSXVal, 
                                            freq,
                                            c=bs.getBandData(bands=ib, 
                                                         cols=polDecisionColumn),
@@ -1091,8 +1092,9 @@ class Bandstructure(object):
                                            vmin=-1, vmax=1, antialiased=True))
                     except:
                         print 'Unable to add data of', bs
-                    if clearSpurious:
-                        bs.restoreSpuriousResults()
+                        break
+                if clearSpurious:
+                    bs.restoreSpuriousResults()
             
     #         plt.plot(xVal, self.getLightcone(), c='k')
             HSPidx = self.getPathData('isHighSymmetryPoint')
@@ -1946,7 +1948,8 @@ class BandTracer(object):
     
     # Globals
     parityAccuracy = 0.01
-    maxSearchNumber = 9
+    maxSearchNumber = 17
+    searchIncrementFactor = 4
     maxFEMdegree = 3
     
     
@@ -1987,14 +1990,10 @@ class BandTracer(object):
         if not hasattr(self, 'currentSearchNumber'):
             self.currentSearchNumber = 1
         else:
-            self.currentSearchNumber *= 2
+            self.currentSearchNumber *= self.searchIncrementFactor
     
     
     def getNextFEMdegree(self):
-#         if not hasattr(self, 'currentFEMdegree'):
-#             self.currentFEMdegree = self.initialFEMdegree
-#         else:
-#             self.currentFEMdegree += 1
         self.currentFEMdegree += 1
     
     

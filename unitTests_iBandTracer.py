@@ -75,12 +75,12 @@ materialsVariableN = {'permittivity_subspace': materialSubspace,
 
 nKvals = 160
 polarizations = ['all']
-# path = [M, K, Gamma, M]
-path = [Gamma, M, K, Gamma]
+path = [M, K, Gamma, M]
+# path = [Gamma, M, K, Gamma]
 brillouinPath = BrillouinPath( path )
 
-workStationSpecification = {'dinux6': {'use':True, 'M':2, 'N':4}, 
-                            'dinux7': {'use':True, 'M':4, 'N':6},
+workStationSpecification = {'dinux6': {'use':False, 'M':2, 'N':4}, 
+                            'dinux7': {'use':True, 'M':1, 'N':16},
                             'localhost': {'use':False, 'M':1, 'N':6}}
 
 resources = ResourceRegistry(thisPC.jcmBaseFolder, thisPC.jcmBaseFolder,
@@ -448,8 +448,8 @@ class Test_BandstructureSolver(unittest.TestCase):
 #                              overwrite=True, verb=False)
     
     def setUp(self):
-        self.bstdir = os.path.join(os.path.abspath('tmp'),'20151123_hzb_bs' )#tempfile.mkdtemp(dir=tmpdir)
-        self.tdir = os.path.join(os.path.abspath('tmp'),'20151123_hzb_data' )#tempfile.mkdtemp(dir=tmpdir)
+        self.bstdir = os.path.join(tmpdir,'20151209_hzb_bs' )#tempfile.mkdtemp(dir=tmpdir)
+        self.tdir = os.path.join(tmpdir,'20151209_hzb_data' )#tempfile.mkdtemp(dir=tmpdir)
         
     def tearDown(self):
         return
@@ -536,10 +536,10 @@ if __name__ == '__main__':
 #                                 loadTestsFromTestCase(Test_Iterator))
 #     suites.append(unittest.TestLoader().\
 #                                 loadTestsFromTestCase(Test_BandTracer))
-#     suites.append(unittest.TestLoader().\
-#                                 loadTestsFromTestCase(Test_BandstructureSolver))
     suites.append(unittest.TestLoader().\
-                        loadTestsFromTestCase(Test_BandstructureSolverBrute))
+                                loadTestsFromTestCase(Test_BandstructureSolver))
+#     suites.append(unittest.TestLoader().\
+#                         loadTestsFromTestCase(Test_BandstructureSolverBrute))
     for suite in suites:
         setUpTmp()
         unittest.TextTestRunner(verbosity=2).run(suite)
