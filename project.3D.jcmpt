@@ -1,0 +1,140 @@
+Project {
+    InfoLevel = %(info_level)i
+    StorageFormat = %(storage_format)s
+    Electromagnetics {
+        TimeHarmonic {
+            ResonanceMode {
+                BlochVector = %(bloch_vector)e
+                FieldComponents = ElectricXYZ
+<?
+if keys['JCMKERNEL'] == 2:
+    ?>
+                FiniteElementDegree = %(fem_degree)i
+<?
+elif keys['JCMKERNEL'] == 3:
+    ?>
+                Accuracy{
+                  FiniteElementDegree{
+                    Adaptive{
+                      #MinimumDegree = 2
+                      MaximumDegree = %(fem_degree)i
+                    }
+                  }
+                }
+<?
+?>
+                Refinement = {
+                    Adaptivity = yes
+                    MaxNumberSteps = %(max_n_refinement_steps)i
+                    PreRefinements = 0
+                    Termination = {
+                        PrecisionEigenvalues = %(precision_eigenvalues)e
+                    }
+                }
+                
+                SelectionCriterion = {
+<?
+if keys['selection_criterion'] == 'NearGuess':
+    ?>
+                    NearGuess {
+                      Guess = %(guess)e
+                      NumberEigenvalues = %(n_eigenvalues)i
+                    }
+<?
+elif keys['selection_criterion'] == 'Fundamental':
+    ?>
+                    Fundamental {
+                       LowerBoundGuess = %(guess)e
+                       NumberEigenvalues = %(n_eigenvalues)i
+                    }
+<?
+?>
+                }
+                
+                PML = {
+                    LogFile = "project_results/pml.txt"
+                    AnglePreRefinements = 2
+                    MaxAngleRefinements = 4
+                }
+                
+            }
+        }
+    }
+}
+
+<?
+
+import numpy as np
+from hexPlaneTools import getHexPlane
+
+planes = []
+for i in range(6):
+    planes.append( 
+        getHexPlane( keys['p'] * keys['uol'],
+                     (keys['h'] + keys['h_sub'] + keys['h_sup'])*keys['uol'],
+                     i,
+                     keys['NGridPointsX'],
+                     hexCenter = np.array([0., 0., keys['slab_z_center']]) ) )
+
+for i, keys['this_plane'] in enumerate(planes):
+    keys['tmp_fname'] = '"project_results/fields_vert_mirror_{0}.jcm"'.format(i+1)
+    ?>
+    
+    PostProcess {
+        ExportFields {
+            FieldBagPath = "project_results/fieldbag.jcm"
+            OutputFileName = %(tmp_fname)s
+            OutputQuantity = ElectricFieldStrength
+            PointList {
+                Points = %(this_plane)e
+            }
+        }
+    }
+<?
+?>
+    
+# PostProcess {
+#     ExportFields {
+#         FieldBagPath = "project_results/fieldbag.jcm"
+#         OutputFileName = "project_results/fields_x_mirror_plane.jcmp"
+#         OutputQuantity = ElectricFieldStrength
+#         Cartesian {
+#             GridPointsX=0.
+#             NGridPointsY=%(NGridPointsX)e
+#             NGridPointsZ=%(NGridPointsY)e
+#         }
+#     }
+# }
+# 
+# PostProcess {
+#     ExportFields {
+#         FieldBagPath = "project_results/fieldbag.jcm"
+#         OutputFileName = "project_results/fields_y_mirror_plane.jcmp"
+#         OutputQuantity = ElectricFieldStrength
+#         Cartesian {
+#             GridPointsY=0.
+#             NGridPointsX=%(NGridPointsX)e
+#             NGridPointsZ=%(NGridPointsY)e
+#         }
+#     }
+# }
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_z_mirror_plane.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsZ = %(slab_z_center)e
+            NGridPointsX = %(NGridPointsX)e
+            NGridPointsY = %(NGridPointsY)e
+        }
+    }
+}
+
+
+
+
+
+
+

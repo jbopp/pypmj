@@ -1,0 +1,38 @@
+<?
+# Imports
+from pointlist_im_to_re import pointlist_im_to_re
+import numpy as np
+
+# Generate a point-list
+points_cd = keys['p'] / 2. / np.cos(np.deg2rad(30)) * np.exp( 2.j * np.pi / 6. * np.arange(1,7) + 1.j*np.pi/6. )
+keys['pointlist_cd'] = pointlist_im_to_re(points_cd)
+?>
+Layout {
+  UnitOfLength = %(uol)e
+  MinimumMeshAngle = 15.
+  Polygon {
+    Name = "ComputationalDomain"
+    Points = %(pointlist_cd)10e
+    DomainId = 1
+    Priority = -1
+    SideLengthConstraint = %(slc_background)4f
+<?
+for i in range(1, len(points_cd)+1):
+    keys['index_'] = i
+    ?>
+    BoundarySegment {
+      Number = %(index_)i
+      BoundaryClass = Periodic
+    }
+<?
+?>
+  }
+  Circle {
+    Name = "Pore"
+    DomainId = 2
+    Priority = 2
+    Radius = %(radius_pore)10f
+    RefineAll = %(circle_refinement)i
+    SideLengthConstraint = %(slc_pore)4f
+  }
+}

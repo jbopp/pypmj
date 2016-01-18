@@ -1,0 +1,20 @@
+Material { 
+  DomainId = 1
+  RelPermittivity = %(permittivity_subspace)e
+  RelPermeability = 1.0
+}
+Material {
+  DomainId = 2
+  RelPermittivity = %(permittivity_background)e
+  RelPermeability = 1.0
+}
+Material {
+  DomainId = 3
+  RelPermittivity = %(permittivity_pore)e
+  RelPermeability = 1.0
+}
+Material { 
+  DomainId = 4
+  RelPermittivity = %(permittivity_superspace)e
+  RelPermeability = 1.0
+}

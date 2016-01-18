@@ -1,0 +1,57 @@
+Project {
+    InfoLevel = %(info_level)i
+    StorageFormat = %(storage_format)s
+    Electromagnetics {
+        TimeHarmonic {
+            ResonanceMode {
+                BlochVector = %(bloch_vector)e
+<?
+if keys['polarization'] == 'TE':
+    ?>
+                FieldComponents = MagneticZ
+<?
+elif keys['polarization'] == 'TM':
+    ?>
+                FieldComponents = ElectricZ
+<?
+?>
+                FiniteElementDegree = %(fem_degree)i
+                Refinement = {
+                    Adaptivity = yes
+                    MaxNumberSteps = %(max_n_refinement_steps)i
+                    PreRefinements = 0
+                    Termination = {
+                        PrecisionEigenvalues = %(precision_eigenvalues)e
+                    }
+                }
+                SelectionCriterion = {
+<?
+if keys['selection_criterion'] == 'NearGuess':
+    ?>
+                    NearGuess {
+                      Guess = %(guess)e
+                      NumberEigenvalues = %(n_eigenvalues)i
+                    }
+<?
+elif keys['selection_criterion'] == 'Fundamental':
+    ?>
+                    Fundamental {
+                       LowerBoundGuess = %(guess)e
+                       NumberEigenvalues = %(n_eigenvalues)i
+                    }
+<?
+?>
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+

@@ -1037,7 +1037,7 @@ class Bandstructure(object):
              polDecisionColumn = 'parity_6', clearSpurious = True, ylim = None,
              fromDimensionlessWithPitch = None, showLightCone = False, 
              lcTone=0.8, lcAlpha=0.4, llColor='k', llLW=3, llLS='--', 
-             lcKwargs = None, additionalBS = None):
+             lcKwargs = None, additionalBS = None, **kwargs):
         if ax is None:
             import matplotlib.pyplot as plt
             plt.figure(figsize=figsize)
@@ -1063,12 +1063,22 @@ class Bandstructure(object):
                 if fromDimensionlessWithPitch is not None:
                     freq = omegaFromDimensionless(freq, 
                                                   fromDimensionlessWithPitch)
+                if not 'markersize' in kwargs:
+                    kwargs['markersize'] = 20
+                if not 'edgecolors' in kwargs:
+                    kwargs['edgecolors'] = None
+                if not 'linewidths' in kwargs:
+                    kwargs['linewidths'] = None
+                
                 scatters.append(ax.scatter(xVal, 
                                            freq,
+                                           s = kwargs['markersize'],
                                            c=self.getBandData(bands=ib, 
                                                         cols=polDecisionColumn),
                                            cmap=cmap,
-                                           vmin=-1, vmax=1, antialiased=True))
+                                           vmin=-1, vmax=1, antialiased=True,
+                                           edgecolors = kwargs['edgecolors'],
+                                           linewidths = kwargs['linewidths']))
             
             # Add points from additionalBS
             for bs in additionalBS:
@@ -1115,6 +1125,10 @@ class Bandstructure(object):
             
             # Draw the light cone(s) and light line(s)
             if showLightCone:
+                
+                if not 'lc_zorder' in kwargs:
+                    kwargs['lc_zorder'] = np.inf
+                
                 if lcKwargs is None:
                     lcKwargs = {}
                 
@@ -1159,10 +1173,12 @@ class Bandstructure(object):
                     if len(lcs) == 2 and ilc == 0:
                         ax.fill_between(xVal, lc, lcs[1], 
                                         color=[lcTones[ilc]]*3, 
-                                        alpha=lcAlpha)
+                                        alpha=lcAlpha,
+                                        zorder = kwargs['lc_zorder'])
                     else:
                         ax.fill_between(xVal, lc, ymax, color=[lcTones[ilc]]*3, 
-                                        alpha=lcAlpha)
+                                        alpha=lcAlpha, 
+                                        zorder = kwargs['lc_zorder'])
                     ax.plot(xVal, lc, llLS, color=llColors[ilc], lw=llLW, 
                             label=llLabels[ilc])
                     ax.legend(loc='best')
@@ -2220,7 +2236,7 @@ class BandTracer(object):
 #         return firstNonsolvedK
     
 
-    def updateBandstructure(self, kIndex, iterator, targetAccuracy = 0.15):
+    def updateBandstructure(self, kIndex, iterator, targetAccuracy = 0.25):
         valid = False
         if iterator.nEigenvalues == 1:
             solution = iterator.getFinalResults(kIndex, self.bandIndex)
@@ -2276,7 +2292,7 @@ class BandTracer(object):
                         self.currentFEMdegree = self.initialFEMdegree
                         return
                 else:
-                    self.currentSearchNumber = 1
+                    self.currentSearchNumber /= self.searchIncrementFactor
                     self.getNextFEMdegree()
             print 'Searching again using nEigenvalues={0} and FEMdegree={1}'.\
                     format(self.currentSearchNumber,
@@ -2314,8 +2330,10 @@ class BandTracer(object):
                 # In this step, imaginary parts that are too small in comparison
                 # with the real part are treated as zero due to problematic
                 # convergence
-                if ri/re < pev*10.:
-                    print 'RETURNING imaginary part of zero'
+                if np.abs(ri/re) < pev*100.:
+                    print 'RETURNING imaginary part of zero for Re=' + \
+                            '{0}, Im={1}, abs(Im/Re)={2}, pev*100={3}'.format(
+                                                re, ri, np.abs(ri/re), pev*100.)
                     ri = 0.
                     del self.currentExtrapolationValues['omega_im']
                 return bloch, re + 1.j*ri
@@ -2356,8 +2374,8 @@ class BandTracer(object):
             
             self.currentBloch, self.currentGuess = \
                                         self.getNextSimulationProperties(self.k)
-            workingDir = os.path.join(self.workingDir, 
-                                      'iteration_at_k{0:04d}'.format(self.k))
+#             workingDir = os.path.join(self.workingDir, 
+#                                       'iteration_at_k{0:04d}'.format(self.k))
 #             initializeIterator = True
 #             if hasattr(self, 'iterator'):
 #                 initializeIterator = self.iterator.isFinished()
@@ -2368,6 +2386,15 @@ class BandTracer(object):
                 self.valid = False
                 if hasattr(self, 'currentFEMdegree'):
                     self.keys['fem_degree'] = self.currentFEMdegree
+                
+                # Create a unique working dir
+                workingDir = os.path.join(self.workingDir, 
+                                  'iteration_at_k{0:04d}'.format(self.k),
+                                  'p{0}_N{1}'.format(self.keys['fem_degree'],
+                                                     self.currentSearchNumber))
+                self.prepareWdir(workingDir)
+                
+                # Initialize the iterator
                 self.iterator = EigenvalueIterator(self.dim, self.currentBloch, 
                                            self.currentGuess, self.keys,
                                            self.materials, workingDir,
@@ -2514,6 +2541,7 @@ class BandstructureSolver(object):
             print 'STARTING new prescan+trace between high symmetry points '+\
                   '{0} and {1}'.format(HSP, HSP2)
             self.prescan()
+            return #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             
             # AHHHH: BandTraceWaiter initializes it's own pool!!!
             btWaiter = BandTraceWaiter(self.nBands, 
@@ -2810,10 +2838,18 @@ def dataFrameFromMPB(freqFilename, zparityFilename=None, yparityFilename=None,
 
 
 def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality, 
-                             pathNames = None, greek = None, convertFreqs = False,
-                             lattice = None, maxBands = np.inf,
+                             pathNames = None, greek = None, convertFreqs=False,
+                             lattice = None, maxBands = np.inf, 
+                             rotateVecsByAngle = None, # radians! 
+                             scaleVecsBy = 1.,
                              polNameTranslation = None, 
                              bsSaveName = 'bandstructureFromMPB'):
+    
+    def rotateVec(vector, angle=np.pi/6.):
+        rotMatrix = np.array([[np.cos(angle), -np.sin(angle), 0.], 
+                              [np.sin(angle),  np.cos(angle), 0.],
+                              [0., 0., 1.]])
+        return rotMatrix.dot(vector)
     
     pols = polFileDictionary.keys()
     if not polNameTranslation:
@@ -2853,7 +2889,11 @@ def loadBandstructureFromMPB(polFileDictionary, ctlFile, dimensionality,
         assert lattice.shape == (3,3)
         for i in range(NumKvals):
             kpointsFromF[i,:] = coordinateConversion( kpointsFromF[i,:], 
-                                                      lattice )
+                                                      lattice )*scaleVecsBy
+            if rotateVecsByAngle:
+                kpointsFromF[i,:] = rotateVec(kpointsFromF[i,:],
+                                              angle=rotateVecsByAngle)
+            
     
     logging.info('Found data for %s k-points and %s bands', NumKvals, 
                  nEigenvalues)

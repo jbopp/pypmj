@@ -667,11 +667,11 @@ class SimulationAdministration:
                                                     'results.dat')
         if self.verb:
             print 'Loading gathered results from', filename
-        self.gatheredResults = np.genfromtxt(filename, 
+        self.gatheredResults = np.genfromtxt(filename,
                                              delimiter = self.delim,  
                                              names = True)
          
- 
+    
     def analyzeResults(self):
         print 'Analyzing data...'
         pass

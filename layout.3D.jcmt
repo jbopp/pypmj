@@ -1,0 +1,129 @@
+<?
+# Imports
+import numpy as np
+import pointlist_im_to_re as pl
+from pprint import pprint
+pi = np.pi
+
+tanA = np.tan( np.deg2rad(keys['pore_angle']) )
+xHelp = keys['d']/2. - ( keys['h']/2. * tanA )
+keys['d_bot'] = 2 * xHelp # diameter pore at 0
+keys['d_top'] = 2 * ( keys['d'] - xHelp ) # diameter pore at h (top)
+
+
+# Generate a point list with the corner points of the hexagonal unit cell
+NpointsUC = 6
+points_cd = (keys['p'] / 2. / np.cos(np.pi/float(NpointsUC)) * 
+               np.exp( 2.j * pi / float(NpointsUC) * np.arange(1,NpointsUC+1)  + 1.j*np.pi/6. ))
+keys['pointlist_cd'] = pl.pointlist_im_to_re(points_cd)
+
+
+horizontal_shape = np.zeros((2, keys['n_points_circle']), dtype=np.complex128)
+angles = np.linspace(0., 2.*pi, keys['n_points_circle'] + 1)[:-1]
+points_circle_base = 1./2. * np.exp( 1j*angles )
+
+diameters = [keys['d_bot'], keys['d_top']]
+for i, d in enumerate(diameters):
+    # outer boundary of the frame
+    points_circle = d * points_circle_base
+    area = pl.polyarea(points_circle.real, points_circle.imag)
+    area_circle = pi * (d/2.)**2
+    area_scaling = np.sqrt( area_circle/area )
+    horizontal_shape[i,:] = area_scaling* points_circle
+
+
+# for all heights, all positions of the line shape polygons are written to 
+# strings gv
+gv_s = []
+for i, horizontal in enumerate(horizontal_shape):
+    gv = ''
+    for count, h in enumerate(horizontal):
+        gv += ' X_o_{0}:{1}, Y_o_{0}:{2} ,'.format(count+1, h.real, h.imag)
+    gv_s.append(gv)
+keys['gv_0'], keys['gv_1'] = gv_s
+?>
+Layout {
+    UnitOfLength = %(uol)e
+    MinimumMeshAngle = 20
+    Polygon {
+        Name = "ComputationalDomain"
+        Points = %(pointlist_cd)10e
+        DomainId = 101
+        Priority = -1
+        SideLengthConstraint = %(slc_1)4f
+<?
+for i in range(1,len(points_cd)+1):
+    keys['index_'] = i
+    ?>
+        BoundarySegment {
+            Number = %(index_)i
+            BoundaryClass = Periodic
+        }
+<?
+?>
+
+    }
+    Polygon {
+        Name = "Hole"
+        DomainId = 102
+        Priority = 1
+        Points = [
+<?
+for count in range(keys['n_points_circle']):
+    keys['str1'] = 'LayerInterface:X_o_{0}'.format(count+1)
+    keys['str2'] = 'LayerInterface:Y_o_{0}'.format(count+1)
+    ?>
+            %(str1)s
+            %(str2)s
+<?
+?>
+        ]
+        SideLengthConstraint = %(slc_2)4f
+    }
+
+    HeightProfile {
+        OffsetZ = 0
+
+        InfiniteLayer { # subspace
+            DomainIdMapping = [101 1 102 1]
+        }
+
+        LayerInterface {    
+            GeometryValues = [%(gv_0)s]
+        }     
+
+        Layer { # substrate
+            Thickness = %(h_sub)e
+            SidelengthConstraintZ = %(slc_2)4f
+            DomainIdMapping = [101 1 102 1]
+        }    
+
+        LayerInterface {
+            GeometryValues = [%(gv_0)s]
+        }
+
+        Layer {
+            Thickness = %(h)e
+            SidelengthConstraintZ = %(slc_1)4f
+            DomainIdMapping = [101 2 102 3]
+        }
+
+        LayerInterface {
+            GeometryValues = [%(gv_1)s]
+        }
+
+        Layer { # superspace
+            Thickness = %(h_sup)e
+            SidelengthConstraintZ = %(slc_2)4f
+            DomainIdMapping = [101 4 102 4]
+        }
+
+        LayerInterface {    
+            GeometryValues = [%(gv_1)s]
+        }
+
+        InfiniteLayer {
+            DomainIdMapping = [101 4 102 4]
+        }
+    }
+}
