@@ -6,6 +6,7 @@ from datetime import date
 import itertools
 from MaterialData import RefractiveIndexInfo
 from pprint import pformat#, pprint
+from scipy.interpolate import NearestNDInterpolator
 from shutil import rmtree, copyfile
 from warnings import warn
 
@@ -29,6 +30,19 @@ solution3DstandardDType = [  ('omega_im', float),
                              ('parity_5', float),
                              ('parity_6', float),
                              ('spurious', bool)  ]
+
+solution3DsymmetryDType = [('omega_im', float),
+                           ('omega_re', float),
+                           ('isTE', bool),
+                           ('2C_6', float),
+                           ('2C_3', float),
+                           ('C_2', float),
+                           ('3sigma_y', float),
+                           ('3sigma_x', float),
+                           ('parity_z', float),
+                           ('spurious', bool)]
+
+symmetryColumns = ['2C_6', '2C_3', 'C_2', '3sigma_y', '3sigma_x']
 
 # Default format for band columns in a pandas DataFrame
 bandColumnFormat = 'band{0:03d}'
@@ -135,6 +149,96 @@ def getMultiIndex(band = None, path = None):
 def getSingleKdFrame(k, band = None, path = None):
     return pd.DataFrame(index=[k], columns=getMultiIndex(band, path))
 
+def getRotMatrix2D(angle):
+    return np.array([[np.cos(angle), -np.sin(angle)], 
+                     [np.sin(angle),  np.cos(angle)]])
+
+def getReflMatrix2D(index):
+    return HexSymmetryPlane(index).reflectionMatrix[:2,:2]
+
+def isInsideHexagon(x, y, d=2., x0=0., y0=0.):
+    dx = np.abs(x - x0)/d
+    dy = np.abs(y - y0)/d
+    a = 0.25 * np.sqrt(3.0)
+    return np.logical_and(dx <= a, a*dy + 0.25*dx <= 0.5*a)
+
+def transformField(X, Y, field, angles, reflIndices=None, 
+                   returnCoordinates=False):
+    if not isinstance(angles, (list, tuple, np.ndarray)):
+        angles = [angles]
+    rotMatrices = [getRotMatrix2D(a) for a in angles]
+    
+    d = Y.max() - Y.min()
+    _X = X.flatten()
+    _Y = Y.flatten()
+    _F = field.flatten()
+    
+    # Restrict points to those inside the hexagon 
+    idxInHex = isInsideHexagon(_X, _Y, d=d)
+    XinHex = _X[idxInHex]
+    YinHex = _Y[idxInHex]
+    FinHex = _F[idxInHex]
+    
+    # Initialize the interpolater
+    interp = NearestNDInterpolator(np.array([XinHex, YinHex]).T, FinHex)
+    transformedFields = []
+    
+    # Perform rotations
+    for rm in rotMatrices:
+        Xnew, Ynew = rm.dot(np.array([XinHex, YinHex]))
+        transformedFields.append(interp((Xnew, Ynew)))
+    
+    # Perform reflections
+    if reflIndices is not None:
+        reflMatrices = [getReflMatrix2D(i) for i in reflIndices]
+        for rm in reflMatrices:
+            Xnew, Ynew = rm.dot(np.array([XinHex, YinHex]))
+            transformedFields.append(interp((Xnew, Ynew)))
+    
+    if len(transformedFields) == 1:
+        transformedFields = transformedFields[0]
+    if returnCoordinates:
+        return XinHex, YinHex, FinHex, transformedFields
+    return FinHex, transformedFields
+
+def roundCharacter(character, rtol):
+    if np.isclose(character, 1., rtol=rtol):
+        return 1
+    elif np.isclose(character, -1., rtol=rtol): 
+        return -1
+    else:
+        return np.NaN
+
+def calcCorrelationsC6v(X, Y, field, Cenumerators, reflIndices, 
+                        Cdenominator=6.):
+    angles = [C*2*np.pi/Cdenominator for C in Cenumerators]
+    field, rfields = transformField(X, Y, field, angles, reflIndices)
+    characters = []
+    for rf in rfields:
+        characters.append( np.corrcoef(np.array((field, rf)))[0, 1] )
+    return characters
+    
+def calcCharactersC6v(X, Y, field, rtol=1.e-1, exact=True):
+    Cenumerators = [1, 2, 3]
+    reflIndices = [0,1]
+    res = calcCorrelationsC6v(X, Y, field, Cenumerators, reflIndices)
+    if exact: 
+        return res
+    else:
+        return [roundCharacter(r, rtol) for r in res]
+
+def calcParityZ(field):
+    reflMat = np.array([[1., 0., 0.],
+                        [0., 1., 0.],
+                        [0., 0., -1.]])
+    shape = field.shape
+    N, M = shape[:2]
+    field2 = field.reshape((N*M,3))
+    reflField = reflMat.dot(field2.T).T.reshape(shape)
+    return np.corrcoef((field.flatten(), reflField.flatten()))[0, 1].real
+
+def compareFields(field1, field2):
+    return np.corrcoef(np.array((field1, field2)))[0, 1]
 
 
 # =============================================================================
@@ -499,6 +603,73 @@ class SingleSolution3D(object):
 # =============================================================================
 # =============================================================================
 # =============================================================================
+class SingleSolution3DSymmetry(object):
+    """
+    
+    """
+    
+    def __init__(self, freq, E3D, X, Y, E2D, H2D):
+        self.freq = freq
+        self.E3D = E3D.flatten()
+        self.X = X
+        self.Y = Y
+        self.E2D = E2D
+        self.H2D = H2D
+        
+        # Fill/calculate the data
+        self.data = np.zeros((1,), dtype = solution3DsymmetryDType)
+        self.data['omega_re'] = self.freq.real
+        self.data['omega_im'] = self.freq.imag
+        self.data['isTE'] = self.calcIsTE()
+        
+        # Symmetry checks
+        field = [self.E2D, self.H2D][int(self.data['isTE'])][:,:,2].real
+        characters = calcCharactersC6v(self.X, self.Y, field)
+        for i, sc in enumerate(symmetryColumns):
+            self.data[sc] = characters[i]
+        
+        # Parity
+        self.data['parity_z'] = calcParityZ(self.E2D)
+        
+        # Spuriosity
+        self.data['spurious'] = self.checkIfSpurious()
+        
+    
+    def calcParity(self, index):
+        field = self.fieldsOnSymmetryPlanes[index]
+        reflMat = self.symmetryPlanes[index].reflectionMatrix
+        
+        fieldc = np.conj(field)
+        norm = np.real( fieldc * field ).sum()
+        
+        shape = field.shape
+        if len(shape) == 3:
+            N, M = shape[:2]
+            field = field.reshape((N*M,3))
+            fieldc = fieldc.reshape((N*M,3))
+        
+        N = field.shape[0]
+        integrand = np.zeros( (N) )
+        
+        for i in range(N):
+            integrand[i] = np.real( np.dot( fieldc[i,:], np.dot(reflMat, 
+                                                                field[i,:]) ) )
+        return integrand.sum() / norm
+    
+    def calcIsTE(self):
+        """
+        Compares the z-component of electric and magnetic field to decide
+         whether the mode is TE or TM (Hz is much stronger than Ez for TE).
+        """
+        return np.abs(self.H2D[:,:,2].sum()) > np.abs(self.E2D[:,:,2].sum())
+    
+    def checkIfSpurious(self, rtol = 1.e-1):
+        return not np.isclose(np.abs(self.data['parity_z']), 1., rtol = rtol)
+
+
+# =============================================================================
+# =============================================================================
+# =============================================================================
 class MultipleSolutions3D(object):
     """
     
@@ -513,7 +684,12 @@ class MultipleSolutions3D(object):
         self.completeArray()
     
     def push(self, solution):
-        assert isinstance(solution, SingleSolution3D)
+        if self.count() == 0:
+            assert isinstance(solution, (SingleSolution3D, 
+                                         SingleSolution3DSymmetry))
+            self.singleClass_ = type(solution)
+            self.dtype_ = solution.data.dtype
+        assert isinstance(solution, self.singleClass_)
         self.solutions.append(solution)
         self.uptodate = False
     
@@ -526,7 +702,7 @@ class MultipleSolutions3D(object):
     def completeArray(self):
         N = self.count()
         if not self.up2date and N > 0:
-            self.array = np.empty( (N), dtype = solution3DstandardDType )
+            self.array = np.empty( (N), dtype = self.dtype_ )
             for i,s in enumerate(self.solutions):
                 self.array[i] = s.data
             self.uptodate = True
@@ -564,6 +740,9 @@ class MultipleSolutions3D(object):
         else:
             return self.array['omega_re']
     
+    def get3Dfields(self):
+        return [s.E3D for s in self.solutions]
+    
     def getSpurious(self):
         self.completeArray()
         if self.isEmpty():
@@ -575,7 +754,6 @@ class MultipleSolutions3D(object):
     
     def allValid(self):
         return np.all( self.getSpurious() == False )
-
 
 
 # =============================================================================
@@ -1526,36 +1704,71 @@ class JCMresultAnalyzer(object):
         # about the included PostProcesses
         self.parseProjectFile()
         
-        ppCount = 0
         nEigenvalues = self.computation.nEigenvalues
-        fieldsOnSymmetryPlanes = [[] for _ in range(nEigenvalues)]
-        for i, rtype in enumerate(self.assignment):
+        if len(self.assignment) > 5:
+            mode = 'ParityMode'
+        else:
+            mode = 'SymmetryMode'
         
-            # Get frequency (eigenvalue)
-            if rtype == 'eigenvalues':
-                freqs = self.data[i]['eigenvalues']['eigenmode']
-            
-            # Get fields
-            elif rtype == 'ExportFields':
-                gridtype = self.gridtypes[ppCount]
-                if gridtype == 'Cartesian':
-                    fieldKey = 'field'
-                elif gridtype == 'PointList':
-                    fieldKey = self.fieldKeys[ppCount]
-                else:
-                    raise Exception(
-                            'Unsupported grid type in PostProcess.')
+        if mode == 'ParityMode':
+            ppCount = 0
+            fieldsOnSymmetryPlanes = [[] for _ in range(nEigenvalues)]
+            for i, rtype in enumerate(self.assignment):
 
-                for j in range(nEigenvalues):
-                    thisField = self.data[i][fieldKey][j]
-                    fieldsOnSymmetryPlanes[j].append(
-                                                  thisField.copy())
-                ppCount += 1
+                # Get frequency (eigenvalue)
+                if rtype == 'eigenvalues':
+                    freqs = self.data[i]['eigenvalues']['eigenmode']
+
+                # Get fields
+                elif rtype == 'ExportFields':
+                    gridtype = self.gridtypes[ppCount]
+                    if gridtype == 'Cartesian':
+                        fieldKey = 'field'
+                    elif gridtype == 'PointList':
+                        fieldKey = self.fieldKeys[ppCount]
+                    else:
+                        raise Exception(
+                                'Unsupported grid type in PostProcess.')
+
+                    for j in range(nEigenvalues):
+                        thisField = self.data[i][fieldKey][j]
+                        fieldsOnSymmetryPlanes[j].append(
+                                                      thisField.copy())
+                    ppCount += 1
+            results = MultipleSolutions3D()
+            for j in range(nEigenvalues):
+                results.push( SingleSolution3D(freqs[j],
+                                        fieldsOnSymmetryPlanes[j]) )
         
-        results = MultipleSolutions3D()
-        for j in range(nEigenvalues):
-            results.push( SingleSolution3D(freqs[j],
-                                    fieldsOnSymmetryPlanes[j]) )
+        elif mode == 'SymmetryMode':
+            fields3D = []
+            fields2DX = []
+            fields2DY = []
+            fields2DE = []
+            fields2DH = []
+            
+            for i, rtype in enumerate(self.assignment):
+                
+                # Get frequency (eigenvalue)
+                if rtype == 'eigenvalues':
+                    freqs = self.data[i]['eigenvalues']['eigenmode']
+                
+                # Get fields
+                elif rtype == 'ExportFields':
+                    for j in range(nEigenvalues):
+                        fields3D.append( self.data[i]['field'][j] )
+                        fields2DX.append( self.data[i+1]['X'] )
+                        fields2DY.append( self.data[i+1]['Y'] )
+                        fields2DE.append( self.data[i+1]['field'][j] )
+                        fields2DH.append( self.data[i+2]['field'][j] )
+                    break
+            
+            results = MultipleSolutions3D()
+            for j in range(nEigenvalues):
+                results.push(SingleSolution3DSymmetry(
+                                      freqs[j], fields3D[j], 
+                                      fields2DX[j], fields2DY[j], 
+                                      fields2DE[j], fields2DH[j]))
         results.sort()
         self.computation.addProcessedResults(results)
 
@@ -2330,10 +2543,10 @@ class BandTracer(object):
                 # In this step, imaginary parts that are too small in comparison
                 # with the real part are treated as zero due to problematic
                 # convergence
-                if np.abs(ri/re) < pev*100.:
+                if np.abs(ri/re) < pev/100.:
                     print 'RETURNING imaginary part of zero for Re=' + \
                             '{0}, Im={1}, abs(Im/Re)={2}, pev*100={3}'.format(
-                                                re, ri, np.abs(ri/re), pev*100.)
+                                                re, ri, np.abs(ri/re), pev/100.)
                     ri = 0.
                     del self.currentExtrapolationValues['omega_im']
                 return bloch, re + 1.j*ri
@@ -2541,7 +2754,6 @@ class BandstructureSolver(object):
             print 'STARTING new prescan+trace between high symmetry points '+\
                   '{0} and {1}'.format(HSP, HSP2)
             self.prescan()
-            return #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             
             # AHHHH: BandTraceWaiter initializes it's own pool!!!
             btWaiter = BandTraceWaiter(self.nBands, 
