@@ -16,6 +16,7 @@
 # Imports
 # =============================================================================
 from JCMpython import * # <- magic :)
+from copy import deepcopy
 from datetime import date
 from itertools import product
 from shutil import copyfile as cp
@@ -43,7 +44,8 @@ class SimulationAdministration:
                  sureAboutDbase = False, viewGeometry = False, 
                  viewGeometryOnly = False, runOnLocalMachine = False,
                  writeLogsToFile = '', overrideDatabase = False, 
-                 JCMPattern = None, warningMode = True):
+                 JCMPattern = None, warningMode = True, 
+                 combinationMode='product'):
         self.PC = PC
         self.constants = constants
         self.parameters = parameters
@@ -74,6 +76,9 @@ class SimulationAdministration:
         self.overrideDatabase = overrideDatabase
         self.JCMPattern = JCMPattern
         self.warningMode = warningMode
+        self.combinationMode = combinationMode
+        assert combinationMode in ['product', 'list'], \
+                        'Only product and list are valid for combinationMode'
         self.logs = {}
         self.dateToday = date.today().strftime("%y%m%d")
         self.gatheredResultsFileName = 'results.dat'
@@ -93,7 +98,14 @@ class SimulationAdministration:
         self.planSimulations()
         if self.loadDataOnly:
             self.gatherResults()
-     
+    
+    def prepare4RunAfterError(self):
+        self.sureAboutDbase = True
+        self.warningMode = False
+        self.overrideDatabase = False
+        self.useSaveFilesIfAvailable = True
+        self.logs = {}
+        self.initializeSimulations()     
      
     def run(self):
         if self.loadFromResultsFile:
@@ -227,7 +239,17 @@ class SimulationAdministration:
          
         # itertools.product is used to find all combinations of parameters
         # for which a distinct simulation needs to be done
-        propertyCombinations = list( product(*loopList) )
+        if self.combinationMode == 'product':
+            propertyCombinations = list( product(*loopList) )
+        elif self.combinationMode == 'list':
+            Nsims = len(loopList[0])
+            for l in loopList:
+                assert len(l) == Nsims, \
+                'In list-mode all parameter-lists need to have the same length'
+            
+            propertyCombinations = []
+            for iSim in range(Nsims):
+                propertyCombinations.append(tuple([l[iSim] for l in loopList]))
         self.Nsimulations = len(propertyCombinations) # total # of simulations
         if self.verb:
             if self.Nsimulations == 1:
@@ -549,8 +571,8 @@ class SimulationAdministration:
                 sim.run(pattern = self.JCMPattern)
                 if hasattr(sim, 'jobID'):
                     if self.verb: 
-                        print 'Queued simulation {0} of {1}'.format(i+1, 
-                                                            self.Nsimulations)
+                        print 'Queued simulation {0} of {1} with jobID {2}'.\
+                                       format(i+1, self.Nsimulations, sim.jobID)
                     jobIDs.append(sim.jobID)
                     ID2simNumber[sim.jobID] = sim.number
                 else:
@@ -571,17 +593,20 @@ class SimulationAdministration:
         if self.verb: print 'Finished all simulations.'
          
          
-    def waitForSimulations(self, jobIDs, ID2simNumber):
+    def waitForSimulations(self, ids2waitFor, ID2simNumber):
         """
          
         """
         # Wait for all simulations using daemon.wait with break_condition='any'.
         # In each loop, the results are directly evaluated and saved
         nFinished = 0
-        ids2waitFor = jobIDs
-        while nFinished < len(jobIDs):
+        nTotal = len(ids2waitFor)
+        print 'waitForSimulations: Waiting for jobIDs:', ids2waitFor
+        while nFinished < nTotal:
             # wait till any simulations are finished
-            indices, thisResults, logs = daemon.wait(ids2waitFor, 
+            # deepcopy is needed to protect ids2waitFor from being modified
+            # by daemon.wait
+            indices, thisResults, logs = daemon.wait(deepcopy(ids2waitFor), 
                                                   break_condition = 'any')
              
             # Get lists for the IDs of the finished jobs and the corresponding
@@ -590,6 +615,7 @@ class SimulationAdministration:
             finishedSimNumbers = []
             for ind in indices:
                 ID = ids2waitFor[ind]
+                print 'waitForSimulations: Trying to convert jobID {0} to simNumber...'.format(ID)
                 iSim = ID2simNumber[ ID ]
                 if self.writeLogsToFile:
 #                     self.logs[iSim] = logs[i]['Log']['Out']
@@ -613,12 +639,14 @@ class SimulationAdministration:
             # Update the number of finished jobs and the list with ids2waitFor
             nFinished += len(indices)
             ids2waitFor = [ID for ID in ids2waitFor if ID not in finishedIDs]
+            print 'waitForSimulations: Finished', len(finishedIDs), 'in this',\
+                  'round, namely:', finishedIDs
+            print 'waitForSimulations: total number of finished IDs:', nFinished
      
      
     def saveResults(self, simNumbers):
         for n in simNumbers:
-            sim = self.simulations[n]
-            sim.results.save(self.db, self.cursor)
+            self.simulations[n].results.save(self.db, self.cursor)
              
              
     def gatherResults(self, ignoreMissingResults = False):

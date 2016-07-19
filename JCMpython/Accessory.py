@@ -71,15 +71,23 @@ def calcTransReflAbs(wvl, theta, nR, nT, Kr, Kt, Er, Et, EFieldEnergy,
     cosFac_t = cosd(thetas_t) / cosd(theta)
     
     for i in range(Nsources):
-        
-        refl[i] = np.sum( np.sum( np.abs(Er[i])**2, axis=1 ) * cosFac_r ) * nR
-        trans[i] = np.sum( np.sum( np.abs(Et[i])**2, axis=1 ) * cosFac_t ) * nT
+        refl[i] = np.sum( np.sum( np.square(np.abs(Er[i])).real, axis=1 ) * cosFac_r ) * nR
+        trans[i] = np.sum( np.sum( np.square(np.abs(Et[i])), axis=1 ) * cosFac_t ) * nT
         
         omega = c0*2*np.pi/wvl
         absorb[i] = 0.
         for ID in absorbingDomainIDs:
             absorb[i] += -2.*omega*np.imag(EFieldEnergy[i][ID])
     return refl, trans, absorb
+
+
+def dataFrameFromSimulationAdministrationResults(filename, ignoreString='# '):
+    import pandas as pd
+    with open(filename, 'r') as f:
+        content = StringIO(f.read().replace(ignoreString, ''))
+    return pd.read_table(content, 
+                         sep=',', 
+                         skipinitialspace=True)
 
 
 def tForm(t1):
@@ -161,7 +169,7 @@ def randomIntNotInList(l):
     return randInt
 
 
-def refineParameterList(array, refinement):
+def refineParameterList(array, refinement, refinedElementsOnly = False):
     List = False
     if isinstance(array, list):
         List = True
@@ -178,6 +186,9 @@ def refineParameterList(array, refinement):
                                                          refinement, 
                                                          endpoint=False)
     if List: refinedArray = refinedArray.tolist()
+    
+    if refinedElementsOnly:
+        return [x for x in refinedArray if not x in array]
     return refinedArray
 
 
@@ -237,7 +248,10 @@ def runSimusetsInSaveMode(simusets, doAnalyze = False,
         # Initialize the simulations
         while trials < Ntrials:
             tt0 = time.time()
+            daemon.shutdown()
             try:
+                if trials > 0:
+                    sset.prepare4RunAfterError()
                 sset.run()
                 if doAnalyze:
                     try:

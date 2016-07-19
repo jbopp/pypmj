@@ -11,8 +11,8 @@ class PC:
     """
     
     # Class constants
-    HZBPCs = ['nanosippe01', 'nanosippe03']
-    ZusePCs = ['num-pc37', 'htc024']
+    HZBPCs = ['nanosippe01', 'nanosippe03', 'dinux6', 'dinux7']
+    ZusePCs = ['num-pc37', 'htc024', 'htc027']
 
     
     def __init__(self, manualJCMimport, customDataFolderName = False):
@@ -95,6 +95,9 @@ class PC:
             if dataNumerikInstalDir == 'bzfherrm':
                 hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
                 jcmFolderName = 'JCMsuite{0}'.format(''.join(hzbJCMnoCAD))
+            elif dataNumerikInstalDir == 'bzfwohlf':
+                hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
+                jcmFolderName = 'JCMsuite_{0}'.format('_'.join(hzbJCMnoCAD))
             else:
                 hzbJCMnoCAD = [i for i in hzbJCMnoBeta if i != 'CAD']
                 jcmFolderName = 'JCMsuite.{0}'.format('.'.join(hzbJCMnoCAD))

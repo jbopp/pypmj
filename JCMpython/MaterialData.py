@@ -538,6 +538,7 @@ class RefractiveIndexInfo(object):
                  convert = False, plotKnownValues = False, show = True):
         self.checkIfSet()
         import matplotlib.pyplot as plt
+        plt.switch_backend('TkAgg')
         
         if self.fixedN:
             self.getAllInfo()

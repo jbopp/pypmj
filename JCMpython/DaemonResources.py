@@ -21,7 +21,7 @@ class Workstation:
     def add(self):
         print 'Registering workstation', self.name, 'using a multiplicity of',\
               self.Multiplicity, 'and', self.NThreads, 'threads'
-        for _ in range(100):
+        for _ in range(500):
             try:
                 self.resourceIDs = daemon.add_workstation(
                                    Hostname = self.Hostname,
@@ -35,7 +35,20 @@ class Workstation:
                 else:
                     print '... registration was successful.'
                     break
-            except:
+            except TypeError:
+                self.resourceIDs = daemon.add_workstation(
+                                   Hostname = self.Hostname,
+                                   JCMROOT = self.JCMROOT,
+                                   Login = self.Login,
+                                   Multiplicity = self.Multiplicity,
+                                   NThreads = self.NThreads)
+                if self.resourceIDs == 'Error':
+                    raise Exception('Error occurred while adding workstations.')
+                else:
+                    print '... registration was successful.'
+                    break
+            except Exception as err:
+                print err
                 print '... registration failed: waiting for 5 seconds ...'
                 time.sleep(5)
                 continue

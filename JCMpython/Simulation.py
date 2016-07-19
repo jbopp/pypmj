@@ -1,6 +1,7 @@
 from config import *
 from Results import Results
 from shutil import rmtree
+from warnings import warn
 
 # =============================================================================
 class Simulation:
@@ -32,4 +33,8 @@ class Simulation:
     def removeWorkingDirectory(self):
         if os.path.exists(self.workingDir):
             rmtree(self.workingDir)
+        else:
+            warn('Simulation: cannot remove working directory ' +\
+                  os.path.basename(self.workingDir) +\
+                 ' for simNumber ' + str(self.number))
 
