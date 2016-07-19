@@ -1,4 +1,4 @@
-from config import *
+from jcmpython.internals import *
 import warnings
 import sys
 

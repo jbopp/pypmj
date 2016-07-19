@@ -1,9 +1,24 @@
 # coding: utf8
 
-from config import *
+"""Utilities for setting material data or to read in and interpolate it from
+appropriate data bases.
+
+Authors : Carlo Barth
+
+"""
+
+from jcmpython.internals import _config
+import numpy as np
+import os
 from scipy.interpolate import pchip
 from scipy.interpolate import UnivariateSpline
 import refractiveIndexInfo as rii
+import logging
+logger = logging.getLogger(__name__)
+
+# Load values from configuration
+RI_DBASE = _config.get('Data', 'refractiveIndexDatabase')
+
 
 # =============================================================================
 class MaterialData:
@@ -59,7 +74,6 @@ class MaterialData:
             
     
     def averagedRefractiveIndex(self, wavelengths):
-        from scipy.interpolate import UnivariateSpline
         nSpline = UnivariateSpline(self.data[:,0], self.data[:,1], s=0)
         nVals = nSpline(wavelengths)
         return np.average(nVals)
@@ -274,7 +288,7 @@ class RefractiveIndexInfo(object):
 
     def getYML(self, shelf, book, fname):
         """ composes a valid YML-filename for RefractiveIndex.info database """
-        return os.path.join(thisPC.refractiveIndexDatabase,
+        return os.path.join(RI_DBASE,
                             shelf, book, fname)
 
 
@@ -288,8 +302,7 @@ class RefractiveIndexInfo(object):
         produces a numpy-structured array from the data provided in the
         Filemetrics-file
         """
-        self.fullName = os.path.join(thisPC.refractiveIndexDatabase,
-                                'filmetrics', filename)
+        self.fullName = os.path.join(RI_DBASE, 'filmetrics', filename)
         data = np.loadtxt(self.fullName)
         structuredData = np.zeros( (len(data[:,0])), self.dtype )
         cols = [c[0] for c in self.dtype]
@@ -468,8 +481,8 @@ class RefractiveIndexInfo(object):
             if extrapolation:
                 if not informedAboutExtrapolation:
                     if not suppressWarnings:
-                        print 'Found wavelengths for which no data is known.' +\
-                              ' Using extrapolation.'
+                        logger.info('Found wavelengths for which no data ' +
+                              'is known. Using extrapolation.')
                     informedAboutExtrapolation = True
             else:
                 raise Exception('Given wavelength is outside known ' +
@@ -542,7 +555,7 @@ class RefractiveIndexInfo(object):
         
         if self.fixedN:
             self.getAllInfo()
-            print '\t-> Nothing to plot.'
+            logger.debug('-> Nothing to plot.')
             return
         if wavelengths is not None:
             wvls = wavelengths
@@ -562,22 +575,22 @@ class RefractiveIndexInfo(object):
         knownDataWindow = self.knownData[windowIdx]
         
         plt.subplot(2, 1, 1)
-        plt.plot(wvls, interp.real, '-', color=HZBcolors[0], 
+        plt.plot(wvls, interp.real, '-', color='b', 
                  label='$n$ interpolated', lw=2)
         if plotKnownValues:
             plt.plot(knownDataWindow['wvl'], knownDataWindow['n'], 'o', 
-                     color=HZBcolors[0], label='$n$')
+                     color='b', label='$n$')
         plt.autoscale(enable = True, axis='x', tight=True)
         plt.ylabel(u'n')
         plt.legend(frameon=False, loc='best')
         
         plt.subplot(2, 1, 2)
-        plt.plot(wvls, interp.imag, '-', color=HZBcolors[1],
+        plt.plot(wvls, interp.imag, '-', color='g',
                  label='$k$ interpolated', lw=2)
         plt.autoscale(enable = True, axis='x', tight=True)
         if plotKnownValues:
             plt.plot(knownDataWindow['wvl'], knownDataWindow['k'], 'o', 
-                     color=HZBcolors[1], label='$k$')
+                     color='g', label='$k$')
         plt.xlabel(u'wavelength in µm')
         plt.ylabel(u'k')
         plt.autoscale(enable = True, axis='x', tight=True)
@@ -620,7 +633,7 @@ if __name__ == '__main__':
     mats = ['silver']
     for m in mats:
         try:
-            print m
+            logger.debug(m)
 #             data1 = RefractiveIndexInfo(material = m)
 #             data2 = RefractiveIndexInfo(database = 'filmetrics', material = m)
 #             data1.getAllInfo()

@@ -15,22 +15,296 @@
 
 # Imports
 # =============================================================================
-from JCMpython import * # <- magic :)
+import logging
+from jcmpython.internals import jcm, daemon, _config
 from copy import deepcopy
 from datetime import date
 from itertools import product
+import numpy as np
+from numpy.lib import recfunctions
 from shutil import copyfile as cp
+from shutil import rmtree
+import os
 import sqlite3 as sql
+import time
+from warnings import warn
+
+# Get a logger instance
+logger = logging.getLogger(__name__)
+
+# Load values from configuration
+DBASE_NAME = _config.get('DEFAULTS', 'database_name')
+DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
 
 
 
 # =============================================================================
-# =============================================================================
-# Class definitions
-# =============================================================================
-# =============================================================================
+class Simulation:
+    """
+    Class which describes a distinct simulation and provides a method to run it
+    and to remove the working directory afterwards.
+    """
+    def __init__(self, number, keys, props2record, workingDir, 
+                 projectFileName = 'project.jcmp', verb = True):
+        self.number = number
+        self.keys = keys
+        self.props2record = props2record
+        self.workingDir = workingDir
+        self.projectFileName = projectFileName
+        self.verb = verb
+        self.results = Results(self)
+        self.status = 'Pending'
+        
+        
+    def run(self, pattern = None):
+        if not self.results.done:
+            if not os.path.exists(self.workingDir):
+                os.makedirs(self.workingDir)
+            self.jobID = jcm.solve(self.projectFileName, keys=self.keys, 
+                                   working_dir = self.workingDir,
+                                   jcmt_pattern = pattern)
 
-class SimulationAdministration:
+    
+    def removeWorkingDirectory(self):
+        if os.path.exists(self.workingDir):
+            rmtree(self.workingDir)
+        else:
+            warn('Simulation: cannot remove working directory ' +\
+                  os.path.basename(self.workingDir) +\
+                 ' for simNumber ' + str(self.number))
+
+
+# =============================================================================
+class Results:
+    """
+    
+    """
+    def __init__(self, simulation):
+        self.simulation = simulation
+        self.keys = simulation.keys
+        self.props2record = simulation.props2record
+        self.results = { k: self.keys[k] for k in self.props2record }
+        self.npParams = self.dict2struct( 
+                            { k: self.results[k] for k in self.props2record } )
+        self.workingDir = simulation.workingDir
+        self.verb = simulation.verb
+        self.done = False
+        
+
+    def addResults(self, jcmResults):
+        if not jcmResults:
+            self.simulation.status = 'Failed'
+        else:
+            self.simulation.status = 'Finished'
+            self.jcmResults = jcmResults
+            self.computeResults()
+    
+    
+    def computeResults(self):
+        # PP: all post processes in order of how they appear in project.jcmp(t)
+        PP = self.jcmResults 
+        
+        try:
+            
+            ppAdd = 0 # 
+            FourierTransformsDone = False
+            ElectricFieldEnergyDone = False
+            VolumeIntegralDone = False
+            FieldExportDone = False
+            for i,pp in enumerate(PP):
+                ppKeys = pp.keys()
+                if 'computational_costs' in ppKeys:
+                    costs = pp['computational_costs']
+                    self.results['Unknowns'] = costs['Unknowns']
+                    self.results['CpuTime'] = costs['CpuTime']
+                    ppAdd = 1
+                elif 'title' in ppKeys:
+                    if pp['title'] == 'ElectricFieldStrength_PropagatingFourierCoefficients':
+                        FourierTransformsDone = True
+                    elif pp['title'] == 'ElectricFieldEnergy':
+                        ElectricFieldEnergyDone = True
+                    elif pp['title'] == 'VolumeIntegral':
+                        VolumeIntegralDone = True
+                        viIdx = i
+                elif 'field' in ppKeys:
+                    FieldExportDone = True
+            
+            wvl = self.keys['vacuum_wavelength']
+            nSub  = self.keys['mat_subspace'].getNKdata(wvl)
+            nPhC = self.keys['mat_phc'].getNKdata(wvl)
+            nSup  = self.keys['mat_superspace'].getNKdata(wvl)
+            for n in [['sub', nSub], ['phc', nPhC], ['sup', nSup]]:
+                nname = 'mat_{0}'.format(n[0])
+                self.results[nname+'_n'] = np.real(n[1])
+                self.results[nname+'_k'] = np.imag(n[1])
+            
+            if VolumeIntegralDone:
+                # Calculation of the plane wave energy in the air layer
+                V = PP[viIdx]['VolumeIntegral'][0][0]
+                self.results['volume_sup'] = V
+                Enorm = pwInVol(V, nSup**2)
+            
+            if FourierTransformsDone and ElectricFieldEnergyDone:
+                EFE = PP[2+ppAdd]['ElectricFieldEnergy']
+                sources = EFE.keys()
+    
+                refl, trans, absorb = calcTransReflAbs(
+                                   wvl = wvl, 
+                                   theta = self.keys['theta'], 
+                                   nR = nSup,
+                                   nT = nSub,
+                                   Kr = PP[0+ppAdd]['K'],
+                                   Kt = PP[1+ppAdd]['K'],
+                                   Er = PP[0+ppAdd]['ElectricFieldStrength'],
+                                   Et = PP[1+ppAdd]['ElectricFieldStrength'],
+                                   EFieldEnergy = EFE,
+                                   absorbingDomainIDs = 2)
+                
+                for i in sources:
+                    self.results['r_{0}'.format(i+1)] = refl[i]
+                    self.results['t_{0}'.format(i+1)] = trans[i]
+                 
+                
+                Nlayers = len(EFE[sources[0]])
+                for i in sources:
+                    for j in range(Nlayers):
+                        Ename = 'e_{0}{1}'.format(i+1,j+1)
+                        self.results[Ename] = np.real( EFE[i][j] )
+                 
+                # Calculate the absorption and energy conservation
+                pitch = self.keys['p'] * self.keys['uol']
+                area_cd = pitch**2
+                n_superstrate = nSup
+                p_in = cosd(self.keys['theta']) * (1./np.sqrt(2.))**2 / Z0 * \
+                       n_superstrate * area_cd
+                
+                for i in sources:    
+                    self.results['a{0}/p_in'.format(i+1)] = absorb[i]/p_in
+                    self.results['conservation{0}'.format(i+1)] = \
+                            self.results['r_{0}'.format(i+1)] + \
+                            self.results['t_{0}'.format(i+1)] + \
+                            self.results['a{0}/p_in'.format(i+1)]
+         
+                    # Calculate the field energy enhancement factors
+                    if VolumeIntegralDone:
+                        self.results['E_{0}'.format(i+1)] = \
+                            np.log10( self.results['e_{0}1'.format(i+1)] /Enorm)
+                    else:
+                        # Calculate the energy normalization factor
+                        self.calcEnergyNormalization()
+                        self.results['E_{0}'.format(i+1)] = \
+                            np.log10( (self.results['e_13'] + \
+                            self.results['e_{0}1'.format(i+1)]) / self.norm  )
+            
+            # Get all result keys which do not belong to the input parameters
+            self.resultKeys = \
+                [ k for k in self.results.keys() if not k in self.props2record ]
+         
+        except KeyError, e:
+            self.simulation.status = 'Failed'
+            if self.verb: 
+                print "Simulation", self.simulation.number, \
+                       "failed because of missing fields in results or keys..."
+                print 'Missing key:', e
+                print 'Traceback:\n', traceback.format_exc()
+        except Exception, e:
+            self.simulation.status = 'Failed'
+            if self.verb: 
+                print "Simulation", self.simulation.number, \
+                       "failed because of Exception..."
+                print traceback.format_exc()
+        
+#         if FieldExportDone:
+#             self.plotEdensity()
+
+
+    def calcEnergyNormalization(self):
+        """
+        Calculate the energy normalization from the case of a plane wave.
+        """
+        keys = self.keys
+        r1 = keys['d']*keys['uol']/2. + keys['h']*keys['uol']/2. * \
+             tand( keys['pore_angle'] )
+        r2 = keys['d']*keys['uol']/2. - keys['h']*keys['uol']/2. * \
+             tand( keys['pore_angle'] )
+        V1 = np.pi*keys['h']*keys['uol'] / 3. * ( r1**2 + r1*r2 + r2**2 )
+        V2 = 6*(keys['p']*keys['uol'])**2 / 4 * keys['h_sup'] * \
+             keys['uol'] * tand(30.)
+        V = V1+V2
+        wvl = self.keys['vacuum_wavelength']
+        self.norm = self.keys['mat_superspace'].getPermittivity(wvl) * \
+                                                                eps0 * V / 4.
+    
+    
+    def dict2struct(self, d):
+        """
+        Generates a numpy structured array from a dictionary.
+        """
+        keys = d.keys()
+        keys.sort(key=lambda v: v.upper())
+        formats = ['f8']*len(keys)
+        for i, k in enumerate(keys):
+            if np.iscomplex(d[k]):
+                print k, d[k]
+                formats[i] = 'c16'
+            else:
+                d[k] = np.real(d[k])
+        dtype = dict(names = keys, formats=formats)
+        arr = np.array(np.zeros((1)), dtype=dtype)
+        for k in keys:
+            if np.iscomplex(d[k]):
+                print '!Complex value for key', k
+            arr[k] = d[k]
+        return arr
+    
+    
+    def save(self, database, cursor):
+        if self.simulation.status == 'Finished':
+            
+            npResults = self.dict2struct( 
+                            { k: self.results[k] for k in self.resultKeys } )
+            execStr = 'insert into {0} VALUES (?,?,?)'.format(DBASE_TAB)
+            cursor.execute(execStr, (self.simulation.number,
+                                     self.npParams,
+                                     npResults))
+            database.commit()
+            self.done = True
+        else:
+            if self.verb: 
+                print 'Nothing to save for simulation', self.simulation.number
+            pass
+        
+    
+    def load(self, cursor):
+        if not hasattr(self, 'npResults'):
+            estr = "select * from data where number=?"
+            cursor.execute(estr, (self.simulation.number, ))
+            res = cursor.fetchone()
+            self.npResults = recfunctions.merge_arrays((res[1], res[2]), 
+                                                       flatten=True)
+
+
+    def checkIfAlreadyDone(self, cursor, exclusionList):
+        
+        estr = "select * from data where params=?"
+        cursor.execute(estr, (self.npParams, ))
+        res = cursor.fetchone()
+        if isinstance(res, sql.Row):
+            if isinstance(res[0], int):
+                while res[0] in exclusionList:
+                    res = cursor.fetchone()
+                    if not res: 
+                        self.done = False
+                        return -1
+                self.done = True
+                return res[0]
+            else:
+                self.done = False
+                return -1
+
+
+# =============================================================================
+class SimulationSet:
     """
      
     """
@@ -150,7 +424,7 @@ class SimulationAdministration:
                                            self.customFolder)
         if not os.path.exists(self.workingBaseDir):
             os.makedirs(self.workingBaseDir)
-        self.dbFileName = os.path.join(self.workingBaseDir, databaseName)
+        self.dbFileName = os.path.join(self.workingBaseDir, DBASE_NAME)
         if self.verb:
             print 'Using folder', self.workingBaseDir, 'for data storage.'
      
@@ -180,13 +454,13 @@ class SimulationAdministration:
         if not tables:
             createStr = 'create table {0} {1}'
             typeStr = '(number integer, params array, results array)'
-            self.cursor.execute(createStr.format(tabName, typeStr))
+            self.cursor.execute(createStr.format(DBASE_TAB, typeStr))
             self.cursor.execute("create unique index idx on {0}(number)".format(
-                           tabName))
+                           DBASE_TAB))
      
      
     def getDBinds(self):
-        self.cursor.execute("select number from {0}".format(tabName))
+        self.cursor.execute("select number from {0}".format(DBASE_TAB))
         return [i[0] for i in self.cursor.fetchall()]
      
      
@@ -286,7 +560,7 @@ class SimulationAdministration:
             if self.verb: print 'Beginning data comparison...'
              
             # Get a list of all indices which are in the current database
-            self.cursor.execute("select number from {0}".format(tabName))
+            self.cursor.execute("select number from {0}".format(DBASE_TAB))
             indexes = [i[0] for i in self.cursor.fetchall()]
              
             # If the user is completely sure about the correctness of the
@@ -370,7 +644,7 @@ class SimulationAdministration:
                         if num == sim.number:
                             self.doneSimulations.append(num)
                         else:
-                            execStr = ("update {0} ".format(tabName) +
+                            execStr = ("update {0} ".format(DBASE_TAB) +
                                        "set number=? where number=?")
                             if sim.number in indexes:
                                 newSimNumber = randomIntNotInList(indexes)
@@ -395,7 +669,7 @@ class SimulationAdministration:
             # sim-numbers. These have to be set to random negative sim numbers
             simsToDo = [i for i in self.sortIndices \
                         if not i in self.doneSimulations]
-            execStr = "update {0} ".format(tabName) + \
+            execStr = "update {0} ".format(DBASE_TAB) + \
                       "set number=? where number=?"
             for sN in simsToDo:
                 if sN in indexes:

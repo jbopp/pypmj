@@ -1,4 +1,4 @@
-from config import *
+from jcmpython.internals import *
 from cStringIO import StringIO
 from datetime import timedelta
 import io
