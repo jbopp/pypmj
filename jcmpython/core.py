@@ -19,39 +19,151 @@ import logging
 from jcmpython.internals import jcm, daemon, _config
 from copy import deepcopy
 from datetime import date
+from glob import glob
 from itertools import product
 import numpy as np
 from numpy.lib import recfunctions
-from shutil import copyfile as cp
-from shutil import rmtree
+from shutil import copyfile as cp, copytree, rmtree
 import os
+# from parallelization import Queue, Workstation
 import sqlite3 as sql
 import time
-from warnings import warn
+from utils import (adapt_array, convert_array, query_yes_no, randomIntNotInList,
+                   tForm)
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
 
 # Load values from configuration
+PROJECT_BASE = _config.get('Data', 'projects')
 DBASE_NAME = _config.get('DEFAULTS', 'database_name')
 DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
 
 
+# =============================================================================
+class JCMProject(object):
+    """Class that finds a JCMsuite project using a path specifier (relative to
+    the `projects` path specified in the configuration), checks its validity
+    and provides functions to copy its content to a working directory, remove
+    it afterwards etc.
+    
+    Parameters
+    ----------
+    specifier : str or list
+        Can be
+          * a path relative to the `projects` path specified in the
+            configuration, given as complete str to append or sequence of
+            strings which are .joined by os.path.join(),
+          * or an absolute path to the project directory.
+    working_dir : str
+        The path to which the files in the project directory are copied. If 
+        None, a folder called `current_run` is created in the current working
+        directory
+    job_name : str
+        Name to use for queuing system such as slurm. If None, a name is
+        composed using the specifier.
+    
+    """
+    def __init__(self, specifier, working_dir=None, job_name=None):
+        self.source = self._find_path(specifier)
+        self._check_project()
+        self._check_working_dir(working_dir)
+        if job_name is None:
+            job_name = 'JCMProject_{}'.format(os.path.basename(self.source))
+        self.job_name = job_name
+        
+    def _find_path(self, specifier):
+        """Finds a JCMsuite project using a path specifier relative to
+        the `projects` path specified in the configuration or an absolute path.
+        """
+        # Check whether the path is absolute
+        if isinstance(specifier, (str, unicode)):
+            if os.path.isabs(specifier):
+                if not os.path.exists(specifier):
+                    raise OSError('The absolute path {} does not exist.'.format(
+                                                                    specifier))
+                else:
+                    return specifier
+        
+        # Treat the relative path
+        err_msg = 'Unable to find the project source folder specified' +\
+                  ' by {} (using project root: {})'.format(specifier, 
+                                                           PROJECT_BASE)
+        try:
+            if isinstance(specifier, (list,tuple)):
+                source_folder = os.path.join(PROJECT_BASE, *specifier)
+            else:
+                source_folder = os.path.join(PROJECT_BASE, specifier)
+        except:
+            raise OSError(err_msg)
+        if not os.path.isdir(source_folder):
+            print source_folder
+            raise OSError(err_msg)
+        return source_folder
+    
+    def __repr__(self):
+        return 'JCMProject({})'.format(self.source)
+    
+    def _check_project(self):
+        """Checks if files of signature *.jcm* are inside the project directory.
+        """
+        files = glob(os.path.join(self.source, '*.jcm*'))
+        if len(files) == 0:
+            raise Exception('Unable to find files of signature *.jcm* in the '+
+                            'specified project folder {}'.format(self.source))
+            
+    def _check_working_dir(self, working_dir):
+        """Checks if the given working directory exists and creates it if not.
+        If no `working_dir` is None, a default directory called `current_run` is
+        is created in the current working directory.
+        """
+        if working_dir is None:
+            working_dir = os.path.abspath('current_run')
+            logging.debug('JCMProject: No working_dir specified, using {}'.\
+                                                            format(working_dir))
+        else:
+            if not os.path.isdir(working_dir):
+                logging.debug('JCMProject: Creating working directory {}'.\
+                                                            format(working_dir))
+                os.makedirs(working_dir)
+        self.working_dir = working_dir
+    
+    def copy_to(self, path=None, overwrite=False):
+        """Copies all files inside the project directory to path, overwriting it
+        if  overwrite=True, raising an Error otherwise if it already exists.
+        """
+        if path is None:
+            path = self.working_dir
+        if os.path.exists(path):
+            if overwrite:
+                logging.debug('Removing existing folder {}'.format(path))
+                rmtree(path)
+            else:
+                raise OSError('Path {} already exists! If you '.format(path)+
+                              'wish copy anyway set `overwrite` to True.')
+        copytree(self.source, path)
+    
+    def remove_working_dir(self):
+        """Removes the working directory.
+        """
+        logging.debug('Removing working directory: {}'.format(self.working_dir))
+        if os.path.exists(self.working_dir):
+            rmtree(self.working_dir)
+
 
 # =============================================================================
-class Simulation:
+class Simulation(object):
     """
     Class which describes a distinct simulation and provides a method to run it
     and to remove the working directory afterwards.
     """
     def __init__(self, number, keys, props2record, workingDir, 
-                 projectFileName = 'project.jcmp', verb = True):
+                 projectFileName = 'project.jcmp'):
         self.number = number
         self.keys = keys
         self.props2record = props2record
         self.workingDir = workingDir
         self.projectFileName = projectFileName
-        self.verb = verb
         self.results = Results(self)
         self.status = 'Pending'
         
@@ -69,13 +181,13 @@ class Simulation:
         if os.path.exists(self.workingDir):
             rmtree(self.workingDir)
         else:
-            warn('Simulation: cannot remove working directory ' +\
-                  os.path.basename(self.workingDir) +\
-                 ' for simNumber ' + str(self.number))
+            logging.warn('Simulation: cannot remove working directory ' +\
+                         os.path.basename(self.workingDir) +\
+                         ' for simNumber ' + str(self.number))
 
 
 # =============================================================================
-class Results:
+class Results(object):
     """
     
     """
@@ -87,10 +199,8 @@ class Results:
         self.npParams = self.dict2struct( 
                             { k: self.results[k] for k in self.props2record } )
         self.workingDir = simulation.workingDir
-        self.verb = simulation.verb
         self.done = False
         
-
     def addResults(self, jcmResults):
         if not jcmResults:
             self.simulation.status = 'Failed'
@@ -100,140 +210,140 @@ class Results:
             self.computeResults()
     
     
-    def computeResults(self):
-        # PP: all post processes in order of how they appear in project.jcmp(t)
-        PP = self.jcmResults 
-        
-        try:
-            
-            ppAdd = 0 # 
-            FourierTransformsDone = False
-            ElectricFieldEnergyDone = False
-            VolumeIntegralDone = False
-            FieldExportDone = False
-            for i,pp in enumerate(PP):
-                ppKeys = pp.keys()
-                if 'computational_costs' in ppKeys:
-                    costs = pp['computational_costs']
-                    self.results['Unknowns'] = costs['Unknowns']
-                    self.results['CpuTime'] = costs['CpuTime']
-                    ppAdd = 1
-                elif 'title' in ppKeys:
-                    if pp['title'] == 'ElectricFieldStrength_PropagatingFourierCoefficients':
-                        FourierTransformsDone = True
-                    elif pp['title'] == 'ElectricFieldEnergy':
-                        ElectricFieldEnergyDone = True
-                    elif pp['title'] == 'VolumeIntegral':
-                        VolumeIntegralDone = True
-                        viIdx = i
-                elif 'field' in ppKeys:
-                    FieldExportDone = True
-            
-            wvl = self.keys['vacuum_wavelength']
-            nSub  = self.keys['mat_subspace'].getNKdata(wvl)
-            nPhC = self.keys['mat_phc'].getNKdata(wvl)
-            nSup  = self.keys['mat_superspace'].getNKdata(wvl)
-            for n in [['sub', nSub], ['phc', nPhC], ['sup', nSup]]:
-                nname = 'mat_{0}'.format(n[0])
-                self.results[nname+'_n'] = np.real(n[1])
-                self.results[nname+'_k'] = np.imag(n[1])
-            
-            if VolumeIntegralDone:
-                # Calculation of the plane wave energy in the air layer
-                V = PP[viIdx]['VolumeIntegral'][0][0]
-                self.results['volume_sup'] = V
-                Enorm = pwInVol(V, nSup**2)
-            
-            if FourierTransformsDone and ElectricFieldEnergyDone:
-                EFE = PP[2+ppAdd]['ElectricFieldEnergy']
-                sources = EFE.keys()
-    
-                refl, trans, absorb = calcTransReflAbs(
-                                   wvl = wvl, 
-                                   theta = self.keys['theta'], 
-                                   nR = nSup,
-                                   nT = nSub,
-                                   Kr = PP[0+ppAdd]['K'],
-                                   Kt = PP[1+ppAdd]['K'],
-                                   Er = PP[0+ppAdd]['ElectricFieldStrength'],
-                                   Et = PP[1+ppAdd]['ElectricFieldStrength'],
-                                   EFieldEnergy = EFE,
-                                   absorbingDomainIDs = 2)
-                
-                for i in sources:
-                    self.results['r_{0}'.format(i+1)] = refl[i]
-                    self.results['t_{0}'.format(i+1)] = trans[i]
-                 
-                
-                Nlayers = len(EFE[sources[0]])
-                for i in sources:
-                    for j in range(Nlayers):
-                        Ename = 'e_{0}{1}'.format(i+1,j+1)
-                        self.results[Ename] = np.real( EFE[i][j] )
-                 
-                # Calculate the absorption and energy conservation
-                pitch = self.keys['p'] * self.keys['uol']
-                area_cd = pitch**2
-                n_superstrate = nSup
-                p_in = cosd(self.keys['theta']) * (1./np.sqrt(2.))**2 / Z0 * \
-                       n_superstrate * area_cd
-                
-                for i in sources:    
-                    self.results['a{0}/p_in'.format(i+1)] = absorb[i]/p_in
-                    self.results['conservation{0}'.format(i+1)] = \
-                            self.results['r_{0}'.format(i+1)] + \
-                            self.results['t_{0}'.format(i+1)] + \
-                            self.results['a{0}/p_in'.format(i+1)]
-         
-                    # Calculate the field energy enhancement factors
-                    if VolumeIntegralDone:
-                        self.results['E_{0}'.format(i+1)] = \
-                            np.log10( self.results['e_{0}1'.format(i+1)] /Enorm)
-                    else:
-                        # Calculate the energy normalization factor
-                        self.calcEnergyNormalization()
-                        self.results['E_{0}'.format(i+1)] = \
-                            np.log10( (self.results['e_13'] + \
-                            self.results['e_{0}1'.format(i+1)]) / self.norm  )
-            
-            # Get all result keys which do not belong to the input parameters
-            self.resultKeys = \
-                [ k for k in self.results.keys() if not k in self.props2record ]
-         
-        except KeyError, e:
-            self.simulation.status = 'Failed'
-            if self.verb: 
-                print "Simulation", self.simulation.number, \
-                       "failed because of missing fields in results or keys..."
-                print 'Missing key:', e
-                print 'Traceback:\n', traceback.format_exc()
-        except Exception, e:
-            self.simulation.status = 'Failed'
-            if self.verb: 
-                print "Simulation", self.simulation.number, \
-                       "failed because of Exception..."
-                print traceback.format_exc()
-        
-#         if FieldExportDone:
-#             self.plotEdensity()
-
-
-    def calcEnergyNormalization(self):
-        """
-        Calculate the energy normalization from the case of a plane wave.
-        """
-        keys = self.keys
-        r1 = keys['d']*keys['uol']/2. + keys['h']*keys['uol']/2. * \
-             tand( keys['pore_angle'] )
-        r2 = keys['d']*keys['uol']/2. - keys['h']*keys['uol']/2. * \
-             tand( keys['pore_angle'] )
-        V1 = np.pi*keys['h']*keys['uol'] / 3. * ( r1**2 + r1*r2 + r2**2 )
-        V2 = 6*(keys['p']*keys['uol'])**2 / 4 * keys['h_sup'] * \
-             keys['uol'] * tand(30.)
-        V = V1+V2
-        wvl = self.keys['vacuum_wavelength']
-        self.norm = self.keys['mat_superspace'].getPermittivity(wvl) * \
-                                                                eps0 * V / 4.
+#     def computeResults(self):
+#         # PP: all post processes in order of how they appear in project.jcmp(t)
+#         PP = self.jcmResults 
+#         
+#         try:
+#             
+#             ppAdd = 0 # 
+#             FourierTransformsDone = False
+#             ElectricFieldEnergyDone = False
+#             VolumeIntegralDone = False
+#             FieldExportDone = False
+#             for i,pp in enumerate(PP):
+#                 ppKeys = pp.keys()
+#                 if 'computational_costs' in ppKeys:
+#                     costs = pp['computational_costs']
+#                     self.results['Unknowns'] = costs['Unknowns']
+#                     self.results['CpuTime'] = costs['CpuTime']
+#                     ppAdd = 1
+#                 elif 'title' in ppKeys:
+#                     if pp['title'] == 'ElectricFieldStrength_PropagatingFourierCoefficients':
+#                         FourierTransformsDone = True
+#                     elif pp['title'] == 'ElectricFieldEnergy':
+#                         ElectricFieldEnergyDone = True
+#                     elif pp['title'] == 'VolumeIntegral':
+#                         VolumeIntegralDone = True
+#                         viIdx = i
+#                 elif 'field' in ppKeys:
+#                     FieldExportDone = True
+#             
+#             wvl = self.keys['vacuum_wavelength']
+#             nSub  = self.keys['mat_subspace'].getNKdata(wvl)
+#             nPhC = self.keys['mat_phc'].getNKdata(wvl)
+#             nSup  = self.keys['mat_superspace'].getNKdata(wvl)
+#             for n in [['sub', nSub], ['phc', nPhC], ['sup', nSup]]:
+#                 nname = 'mat_{0}'.format(n[0])
+#                 self.results[nname+'_n'] = np.real(n[1])
+#                 self.results[nname+'_k'] = np.imag(n[1])
+#             
+#             if VolumeIntegralDone:
+#                 # Calculation of the plane wave energy in the air layer
+#                 V = PP[viIdx]['VolumeIntegral'][0][0]
+#                 self.results['volume_sup'] = V
+#                 Enorm = pwInVol(V, nSup**2)
+#             
+#             if FourierTransformsDone and ElectricFieldEnergyDone:
+#                 EFE = PP[2+ppAdd]['ElectricFieldEnergy']
+#                 sources = EFE.keys()
+#     
+#                 refl, trans, absorb = calcTransReflAbs(
+#                                    wvl = wvl, 
+#                                    theta = self.keys['theta'], 
+#                                    nR = nSup,
+#                                    nT = nSub,
+#                                    Kr = PP[0+ppAdd]['K'],
+#                                    Kt = PP[1+ppAdd]['K'],
+#                                    Er = PP[0+ppAdd]['ElectricFieldStrength'],
+#                                    Et = PP[1+ppAdd]['ElectricFieldStrength'],
+#                                    EFieldEnergy = EFE,
+#                                    absorbingDomainIDs = 2)
+#                 
+#                 for i in sources:
+#                     self.results['r_{0}'.format(i+1)] = refl[i]
+#                     self.results['t_{0}'.format(i+1)] = trans[i]
+#                  
+#                 
+#                 Nlayers = len(EFE[sources[0]])
+#                 for i in sources:
+#                     for j in range(Nlayers):
+#                         Ename = 'e_{0}{1}'.format(i+1,j+1)
+#                         self.results[Ename] = np.real( EFE[i][j] )
+#                  
+#                 # Calculate the absorption and energy conservation
+#                 pitch = self.keys['p'] * self.keys['uol']
+#                 area_cd = pitch**2
+#                 n_superstrate = nSup
+#                 p_in = cosd(self.keys['theta']) * (1./np.sqrt(2.))**2 / Z0 * \
+#                        n_superstrate * area_cd
+#                 
+#                 for i in sources:    
+#                     self.results['a{0}/p_in'.format(i+1)] = absorb[i]/p_in
+#                     self.results['conservation{0}'.format(i+1)] = \
+#                             self.results['r_{0}'.format(i+1)] + \
+#                             self.results['t_{0}'.format(i+1)] + \
+#                             self.results['a{0}/p_in'.format(i+1)]
+#          
+#                     # Calculate the field energy enhancement factors
+#                     if VolumeIntegralDone:
+#                         self.results['E_{0}'.format(i+1)] = \
+#                             np.log10( self.results['e_{0}1'.format(i+1)] /Enorm)
+#                     else:
+#                         # Calculate the energy normalization factor
+#                         self.calcEnergyNormalization()
+#                         self.results['E_{0}'.format(i+1)] = \
+#                             np.log10( (self.results['e_13'] + \
+#                             self.results['e_{0}1'.format(i+1)]) / self.norm  )
+#             
+#             # Get all result keys which do not belong to the input parameters
+#             self.resultKeys = \
+#                 [ k for k in self.results.keys() if not k in self.props2record ]
+#          
+#         except KeyError, e:
+#             self.simulation.status = 'Failed'
+#             if self.verb: 
+#                 print "Simulation", self.simulation.number, \
+#                        "failed because of missing fields in results or keys..."
+#                 print 'Missing key:', e
+#                 print 'Traceback:\n', traceback.format_exc()
+#         except Exception, e:
+#             self.simulation.status = 'Failed'
+#             if self.verb: 
+#                 print "Simulation", self.simulation.number, \
+#                        "failed because of Exception..."
+#                 print traceback.format_exc()
+#         
+# #         if FieldExportDone:
+# #             self.plotEdensity()
+# 
+# 
+#     def calcEnergyNormalization(self):
+#         """
+#         Calculate the energy normalization from the case of a plane wave.
+#         """
+#         keys = self.keys
+#         r1 = keys['d']*keys['uol']/2. + keys['h']*keys['uol']/2. * \
+#              tand( keys['pore_angle'] )
+#         r2 = keys['d']*keys['uol']/2. - keys['h']*keys['uol']/2. * \
+#              tand( keys['pore_angle'] )
+#         V1 = np.pi*keys['h']*keys['uol'] / 3. * ( r1**2 + r1*r2 + r2**2 )
+#         V2 = 6*(keys['p']*keys['uol'])**2 / 4 * keys['h_sup'] * \
+#              keys['uol'] * tand(30.)
+#         V = V1+V2
+#         wvl = self.keys['vacuum_wavelength']
+#         self.norm = self.keys['mat_superspace'].getPermittivity(wvl) * \
+#                                                                 eps0 * V / 4.
     
     
     def dict2struct(self, d):
@@ -271,9 +381,8 @@ class Results:
             self.done = True
         else:
             if self.verb: 
-                print 'Nothing to save for simulation', self.simulation.number
-            pass
-        
+                logging.info('Nothing to save for simulation {}'.format(
+                                                        self.simulation.number))
     
     def load(self, cursor):
         if not hasattr(self, 'npResults'):
@@ -282,7 +391,6 @@ class Results:
             res = cursor.fetchone()
             self.npResults = recfunctions.merge_arrays((res[1], res[2]), 
                                                        flatten=True)
-
 
     def checkIfAlreadyDone(self, cursor, exclusionList):
         
@@ -304,71 +412,241 @@ class Results:
 
 
 # =============================================================================
-class SimulationSet:
+class SimulationSet(object):
+    """Class for initializing, planning, running and evaluating multiple 
+    simulations.
+    
+    Parameters
+    ----------
+    project : JCMProject, str or tuple/list of the form (specifier, working_dir)
+        JCMProject to use for the simulations. If no JCMProject-instance is 
+        provided, it is created using the given specifier or, if project is of 
+        type tuple, using (specifier, working_dir) (i.e. JCMProject(project[0], 
+        project[1])).
+    keys : dict
+        There are two possible use cases:
+          1. The keys are the normal keys as defined by JCMsuite, containing
+             all the values that need to passed to parse the JCM-template files.
+             In this case, a single computation is performed using these keys.
+          2. The keys-dict contains at least one of the keys [`constants`,
+             `geometry`, `parameters`] and no additional keys. The values of
+             each of these keys must be of type dict again and contain the keys
+             necessary to parse the JCM-template files. Depending on the 
+             `combination_mode`, loops are performed over any parameter-sequences
+             provided in `geometry` or `parameters`. JCMgeo is only called if
+             the keys in `geometry` change between consecutive runs.
+    duplicate_path_levels : int, default 0
+        For clearly arranged data storage, the folder structure of the current
+        working directory can be replicated up to the level given here. I.e., if
+        the current dir is /path/to/your/jcmpython/ and duplicate_path_levels=2,
+        the subfolders your/jcmpython will be created in the storage base dir
+        (which is controlled using the configuration file). This is not done if
+        duplicate_path_levels=0.
+    storage_folder : str, default 'from_date'
+        Name of the subfolder inside the storage folder in which the final data
+        is stored. If 'from_date' (default), the current date (%y%m%d) is used.
+    ignore_existing_dbase : bool
+        If True, any existing SQL database is ignored.
+    combination_mode : {'product', 'list'}
+        Controls the way in which sequences in the `geometry` or `parameters`
+        keys are treated.
+          * If `product`, all possible combinations of the provided keys are
+            used.
+          * If `list`, all provided sequences need to be of the same length N, 
+            so that N simulations are performed, using the value of the i-th 
+            element of each sequence in simulation i.
     """
-     
-    """
-    def __init__(self, PC, constants, parameters, geometry, jobName, 
-                 geometryFolder = 'geometry', resultFolder = 'results', 
-                 tag_ = '_01', customFolder = '', wSpec = {}, qSpec = {},
-                 resourceInfo = False, cleanMode = True, delim = ', ',
-                 useSaveFilesIfAvailable = True, silentLoad = True,
-                 loadDataOnly = False, maxNumberParallelSims = 'all', 
-                 verb = True, loadFromResultsFile = False, 
-                 sureAboutDbase = False, viewGeometry = False, 
-                 viewGeometryOnly = False, runOnLocalMachine = False,
-                 writeLogsToFile = '', overrideDatabase = False, 
-                 JCMPattern = None, warningMode = True, 
-                 combinationMode='product'):
-        self.PC = PC
-        self.constants = constants
-        self.parameters = parameters
-        self.geometry = geometry
-        self.jobName = jobName
-        self.geometryFolder = geometryFolder
-        self.resultFolder = resultFolder
-        self.tag_ = tag_
-        self.customFolder = customFolder
-        self.wSpec = wSpec
-        self.qSpec = qSpec
-        self.resourceInfo = resourceInfo
-        self.cleanMode = cleanMode
-        self.delim = delim
-        self.useSaveFilesIfAvailable = useSaveFilesIfAvailable
-        self.silentLoad = silentLoad
-        self.loadDataOnly = loadDataOnly
-        self.maxNumberParallelSims = maxNumberParallelSims
-        self.verb = verb
-        self.loadFromResultsFile = loadFromResultsFile
-        self.sureAboutDbase = sureAboutDbase
-        self.viewGeometry = viewGeometry
-        self.viewGeometryOnly = viewGeometryOnly
-        if viewGeometryOnly:
-            self.viewGeometry = True
-        self.runOnLocalMachine = runOnLocalMachine
-        self.writeLogsToFile = writeLogsToFile
-        self.overrideDatabase = overrideDatabase
-        self.JCMPattern = JCMPattern
-        self.warningMode = warningMode
-        self.combinationMode = combinationMode
-        assert combinationMode in ['product', 'list'], \
-                        'Only product and list are valid for combinationMode'
-        self.logs = {}
-        self.dateToday = date.today().strftime("%y%m%d")
-        self.gatheredResultsFileName = 'results.dat'
+    
+    def __init__(self, project, keys, duplicate_path_levels=3, 
+                 storage_folder='from_date', ignore_existing_dbase=False,
+                 combination_mode='product' ):
+#                  wSpec = {}, qSpec = {},
+#                  resourceInfo = False, cleanMode = True, delim = ', ',
+#                  useSaveFilesIfAvailable = True, silentLoad = True,
+#                  loadDataOnly = False, maxNumberParallelSims = 'all', 
+#                  verb = True, loadFromResultsFile = False, 
+#                  sureAboutDbase = False, viewGeometry = False, 
+#                  viewGeometryOnly = False, runOnLocalMachine = False,
+#                  writeLogsToFile = '', 
+#                  JCMPattern = None, warningMode = True,):
+                
+        # Save initialization arguments into namespace
+        self.combination_mode = combination_mode
+        
+        # Analyze the provided keys
+        self._check_keys(keys)
+        self.keys = keys
+        
+        # Set up folders
+        self._set_up_folders(duplicate_path_levels, storage_folder)
+        
+        # Connect to the SQL database
+        self._connect2database()
+        
+#         self.wSpec = wSpec
+#         self.qSpec = qSpec
+#         self.resourceInfo = resourceInfo
+#         self.cleanMode = cleanMode
+#         self.delim = delim
+#         self.useSaveFilesIfAvailable = useSaveFilesIfAvailable
+#         self.silentLoad = silentLoad
+#         self.loadDataOnly = loadDataOnly
+#         self.maxNumberParallelSims = maxNumberParallelSims
+#         self.verb = verb
+#         self.loadFromResultsFile = loadFromResultsFile
+#         self.sureAboutDbase = sureAboutDbase
+#         self.viewGeometry = viewGeometry
+#         self.viewGeometryOnly = viewGeometryOnly
+#         if viewGeometryOnly:
+#             self.viewGeometry = True
+#         self.runOnLocalMachine = runOnLocalMachine
+#         self.writeLogsToFile = writeLogsToFile
+#         self.overrideDatabase = overrideDatabase
+#         self.JCMPattern = JCMPattern
+#         self.warningMode = warningMode
+#         allowedCombModes = ['product', 'list']
+#         if not combination_mode in allowedCombModes:
+#             raise ValueError('The specified `combination_mode` of {} is '+
+#                              'unknown. Allowed values are: {}'.format(
+#                                             combination_mode, allowedCombModes))
+#         self.combination_mode = combination_mode
+#         assert combination_mode in ['product', 'list'], \
+#                         'Only product and list are valid for combination_mode'
+#         self.logs = {}
+#         self.gatheredResultsFileName = 'results.dat'
          
-        # initialize
-        if self.loadFromResultsFile:
-            self.setFolders()
-            self.loadGatheredResultsFromFile()
-        else:
-            self.initializeSimulations()
+#         # initialize
+#         if self.loadFromResultsFile:
+#             self.setFolders()
+#             self.loadGatheredResultsFromFile()
+#         else:
+#             self.initializeSimulations()
      
-     
+    def _check_keys(self, keys):
+        """Checks if the provided keys are valid and if they contain values for
+        loops.
+        
+        See the description of the parameter `keys` in the SimulationSet 
+        documentation for further reference.
+        """
+        
+        # Check proper type
+        if not isinstance(keys, dict):
+            raise ValueError('`keys` must be of type dict.')
+        
+        loop_indication = ['constants', 'geometry', 'parameters']
+        
+        # If none of the `loop_indication` keys is in the dict, case 1 is 
+        # assumed
+        keys_rest = [_k for _k in keys.keys() if not _k in loop_indication]
+        if len(keys_rest) > 0:
+            self.constants = keys
+            self.geometry = []
+            self.parameters = []
+            return
+        
+        # Otherwise, case 2 is assumed
+#         if (not set(loop_indication).isdisjoint(keys.keys()) 
+#                                                     or len(keys.keys())==0):
+        if set(loop_indication).isdisjoint(set(keys.keys())):
+            raise ValueError('`keys` must contain at least one of the keys .'+
+                             ' {} or all the keys '.format(loop_indication) +
+                             'necessary to compile the JCM-template files.')
+        for _k in loop_indication:
+            if _k in keys.keys():
+                if not isinstance(keys[_k], dict):
+                    raise ValueError('The values for the keys {}'.format(
+                                     loop_indication) + ' must be of type '+
+                                     '`dict`')
+                setattr(self, _k, keys[_k])
+            else:
+                setattr(self, _k, {})
+    
+    def _load_project(self, project):
+        """Loads the specified project as a JCMProject-instance."""
+        if isinstance(project, JCMProject):
+            self.project = project
+        elif isinstance(project, (str,unicode)):
+            self.project = JCMProject(project)
+        elif isinstance(project, (tuple, list)):
+            if not len(project) == 2:
+                raise ValueError('`project` must be of length 2 if it is a '+
+                                 'sequence')
+            self.project = JCMProject(*project)
+
+    def _set_up_folders(self, duplicate_path_levels, storage_folder):
+        """Reads storage specific parameters from the configuration and prepares
+        the folder used for storage as desired.
+        
+        See the description of the parameters `` and `` in the SimulationSet 
+        documentation for further reference.
+        
+        """
+        # Read storage base from configuration
+        base = _config.get('Storage', 'base')
+        if base == 'CWD':
+            base = os.getcwd()
+        
+        if duplicate_path_levels > 0:
+            # get a list folders that build the current path and use the number
+            # of subdirectories as specified by duplicate_path_levels
+            cfolders = os.path.normpath(os.getcwd()).split(os.sep)
+            base = os.path.join(base, *cfolders[-duplicate_path_levels:])
+        
+        if storage_folder == 'from_date':
+            # Generate a directory name from date
+            storage_folder = date.today().strftime("%y%m%d")
+        self.storage_dir = os.path.join(base, storage_folder)
+        
+        # Create the necessary directories
+        if not os.path.exists(self.storage_dir):
+            logging.debug('Creating non-existent storage folder {}'.format(
+                                                            self.storage_dir))
+            os.makedirs(self.storage_dir)
+        
+        logging.info('Using folder {} for '.format(self.storage_dir)+ 
+                     'data storage.')
+
+    def _connect2database(self, ignore_existing_dbase=False):
+        """Connects to the SQL database used for result storage and sets the
+        `_cursor` attribute for communication with the database. 
+        
+        """
+        logging.debug('Connecting to database')
+        
+        self._database_file = os.path.join(self.storage_dir, DBASE_NAME)
+        
+        # Register the adapter/converter for numpy arrays
+        sql.register_adapter(np.ndarray, adapt_array)
+        sql.register_converter('array', convert_array)
+ 
+        # Connect to the database
+        if ignore_existing_dbase and os.path.isfile(self._database_file): 
+            os.remove(self._database_file)
+        self.db = sql.connect(self._database_file, 
+                              detect_types=sql.PARSE_DECLTYPES)
+        self.db.row_factory = sql.Row
+        
+        # Get a cursor for communication
+        self._cursor = self.db.cursor()
+         
+        # Initialize the `data` table and the unique index `number` if they do 
+        # not already exist
+        statement = "SELECT name FROM sqlite_master WHERE type='table'"
+        tables = self._cursor.execute(statement).fetchall()
+        if not tables:
+            createStr = 'create table {0} {1}'
+            typeStr = '(number integer, params array, results array)'
+            self._cursor.execute(createStr.format(DBASE_TAB, typeStr))
+            self._cursor.execute("create unique index idx on {0}(number)".\
+                                                             format(DBASE_TAB))
+    
+    
+    
     def initializeSimulations(self):
-        if self.verb: print 'Initializing the simulations...'
-        self.setFolders()
-        self.connect2database()
+#         if self.verb: print 'Initializing the simulations...'
+#         self.setFolders()
+#         self.connect2database()
         self.planSimulations()
         if self.loadDataOnly:
             self.gatherResults()
@@ -416,60 +694,23 @@ class SimulationSet:
         t1 = time.time() - t0
         if self.verb: print 'Total time for all simulations:', tForm(t1)
      
-     
-    def setFolders(self):
-        if not self.customFolder:
-            self.customFolder = self.dateToday
-        self.workingBaseDir = os.path.join(self.PC.storageDir, 
-                                           self.customFolder)
-        if not os.path.exists(self.workingBaseDir):
-            os.makedirs(self.workingBaseDir)
-        self.dbFileName = os.path.join(self.workingBaseDir, DBASE_NAME)
-        if self.verb:
-            print 'Using folder', self.workingBaseDir, 'for data storage.'
-     
-     
-    def connect2database(self):
-         
-        if self.verb: print 'Connecting to database...'
-         
-        # Register the conversion for numpy arrays
-        sql.register_adapter(np.ndarray, adapt_array)
-        sql.register_converter('array', convert_array)
- 
-        # Connect to the database
-        if self.overrideDatabase: 
-            if os.path.isfile( self.dbFileName ):
-                os.remove( self.dbFileName )
-        self.db = sql.connect(self.dbFileName, detect_types=sql.PARSE_DECLTYPES)
-        self.db.row_factory = sql.Row
-         
-        # Get a cursor for communication
-        self.cursor = self.db.cursor()
-         
-        # Initialize the "data" table and the unique index "number" if they do 
-        # not already exist
-        statement = "SELECT name FROM sqlite_master WHERE type='table'"
-        tables = self.cursor.execute(statement).fetchall()
-        if not tables:
-            createStr = 'create table {0} {1}'
-            typeStr = '(number integer, params array, results array)'
-            self.cursor.execute(createStr.format(DBASE_TAB, typeStr))
-            self.cursor.execute("create unique index idx on {0}(number)".format(
-                           DBASE_TAB))
-     
-     
     def getDBinds(self):
-        self.cursor.execute("select number from {0}".format(DBASE_TAB))
-        return [i[0] for i in self.cursor.fetchall()]
+        self._cursor.execute("select number from {0}".format(DBASE_TAB))
+        return [i[0] for i in self._cursor.fetchall()]
+    
+    
+    
+    
+    def make_simulation_schedule(self):
+        self._get_simulation_list()
+        self._sortSimulations()
      
-     
-    def planSimulations(self):
+    def _get_simulation_list(self):
+        """Check the `parameters`- and `geometry`-dictionaries for sequences and 
+        generate a list which has a keys-dictionary for each distinct
+        simulation by using the .
         """
-        Check the parameters- and geometry-dictionaries for numpy-arrays (over
-        which a loop should be performed) and generate a list which has a
-        keys-dictionary for each distinct simulation.
-        """
+        logging.debug('Analyzing loop properties.')
         self.simulations = []
          
         # Convert lists in the parameters- and geometry-dictionaries to numpy
@@ -511,33 +752,40 @@ class SimulationSet:
         # used.
         props2record = self.parameters.keys() + self.geometry.keys()
          
-        # itertools.product is used to find all combinations of parameters
-        # for which a distinct simulation needs to be done
-        if self.combinationMode == 'product':
+        # Depending on the combination mode, a list of all key-combinations is
+        # generated, so that all simulations can be executed in a single loop.
+        if self.combination_mode == 'product':
+            # itertools.product is used to find all combinations of parameters
+            # for which a distinct simulation needs to be done
             propertyCombinations = list( product(*loopList) )
-        elif self.combinationMode == 'list':
+        elif self.combination_mode == 'list':
+            # In `list`-mode, all sequences need to be of the same length,
+            # assuming that a loop has to be done over their indices 
             Nsims = len(loopList[0])
             for l in loopList:
-                assert len(l) == Nsims, \
-                'In list-mode all parameter-lists need to have the same length'
+                if not len(l) == Nsims:
+                    raise ValueError('In list-mode all parameter-lists need '+
+                                     'to have the same length')
             
             propertyCombinations = []
             for iSim in range(Nsims):
                 propertyCombinations.append(tuple([l[iSim] for l in loopList]))
-        self.Nsimulations = len(propertyCombinations) # total # of simulations
-        if self.verb:
-            if self.Nsimulations == 1:
-                print 'Performing a single simulation...'
-            else:
-                print 'Loops will be done over the following parameter(s):',\
-                       loopProperties
-                print 'Total number of simulations:', self.Nsimulations
+
+        self.Nsimulations = len(propertyCombinations) # total num of simulations
+        if self.Nsimulations == 1:
+            logging.info('Performing a single simulation')
+        else:
+            logging.info('Loops will be done over the following parameter(s):'+
+                         '{}'.format(loopProperties))
+            logging.info('Total number of simulations: {}'.format(
+                                                            self.Nsimulations))
          
         # Finally, a list with an individual Simulation-instance for each
-        # simulation is saved, over which one simple loop can be performed
+        # simulation is saved, over which a simple loop can be performed
+        logging.debug('Generating the simulation list.')
         for i, keySet in enumerate(propertyCombinations):
             keys = {}
-            workingDir = os.path.join( self.workingBaseDir, 
+            workingDir = os.path.join( self.storage_dir, 
                                        'simulation{0:06d}'.format(i) )
             for k in keySet:
                 keys[ k[0] ] = k[1]
@@ -546,11 +794,56 @@ class SimulationSet:
             self.simulations.append( Simulation(number = i, 
                                                 keys = keys,
                                                 props2record = props2record,
-                                                workingDir = workingDir,
-                                                verb = self.verb) )
+                                                workingDir = workingDir) )
+
+    def _sortSimulations(self):
+        """Sorts the list of simulations in a way that all simulations with 
+        identical geometry are performed consecutively. That way, jcmwave.geo()
+        only needs to be called if the geometry changes.
+        """
+        logging.debug('Sorting the simulations.')
+        # Get a list of dictionaries, each dictionary containing the keys and
+        # values which correspond to geometry information of a single 
+        # simulation
+        allGeoKeys = []
+        geometryTypes = np.zeros((self.Nsimulations), dtype=int)
+        for s in self.simulations:
+            allGeoKeys.append({k: s.keys[k] for k in self.geometry.keys()})
          
-        # Sort the simulations
-        self.sortSimulations()
+        # Find the number of different geometries and a list where each entry
+        # corresponds to the geometry-type of the simulation. The types are
+        # simply numbered, so that the first simulation is of type 1, as well
+        # as all simulations with the same geometry and so on...
+        pos = 0
+        nextPos = 0
+        t = 1
+        while 0 in geometryTypes:
+            geometryTypes[pos] = t
+            foundDiscrepancy = False
+            for i in range(pos+1, self.Nsimulations):
+                if cmp( allGeoKeys[pos], allGeoKeys[i] ) == 0:
+                    if geometryTypes[i] == 0:
+                        geometryTypes[i] = t
+                else:
+                    if not foundDiscrepancy:
+                        nextPos = i
+                        foundDiscrepancy = True
+            pos = nextPos
+            t += 1
+         
+        # From this list of types, a new sort order is derived and saved in
+        # self.sortIndices. To run the simulations in correct order, one now
+        # needs to loop over these indices. self.rerunJCMgeo gives you the
+        # numbers of the simulations before which the geometry needs to be
+        # calculated again (in the new order).
+        self.NdifferentGeometries = t-1
+        self.rerunJCMgeo = np.zeros((self.NdifferentGeometries), dtype=int)
+        sortedGeometryTypes = np.sort(geometryTypes)
+        self.sortIndices = np.argsort(geometryTypes)
+        for i in range(self.NdifferentGeometries):
+            self.rerunJCMgeo[i] = np.where(sortedGeometryTypes == (i+1))[0][0]
+
+    def _compare2database(self):
          
         # Check which simulations are already done
         self.doneSimulations = 0
@@ -560,8 +853,8 @@ class SimulationSet:
             if self.verb: print 'Beginning data comparison...'
              
             # Get a list of all indices which are in the current database
-            self.cursor.execute("select number from {0}".format(DBASE_TAB))
-            indexes = [i[0] for i in self.cursor.fetchall()]
+            self._cursor.execute("select number from {0}".format(DBASE_TAB))
+            indexes = [i[0] for i in self._cursor.fetchall()]
              
             # If the user is completely sure about the correctness of the
             # database, this mode can be used for very fast comparison. This
@@ -611,7 +904,7 @@ class SimulationSet:
                     sim = self.simulations[ind]
                     if self.silentLoad:
                         sim.results.verb = False
-                    num = sim.results.checkIfAlreadyDone(self.cursor,
+                    num = sim.results.checkIfAlreadyDone(self._cursor,
                                                          self.doneSimulations)
                     if sim.results.done:
                         if num == sim.number:
@@ -638,7 +931,7 @@ class SimulationSet:
                     sim = self.simulations[ind]
                     if self.silentLoad:
                         sim.results.verb = False
-                    num = sim.results.checkIfAlreadyDone(self.cursor, 
+                    num = sim.results.checkIfAlreadyDone(self._cursor, 
                                                          self.doneSimulations)
                     if sim.results.done:
                         if num == sim.number:
@@ -648,13 +941,13 @@ class SimulationSet:
                                        "set number=? where number=?")
                             if sim.number in indexes:
                                 newSimNumber = randomIntNotInList(indexes)
-                                self.cursor.execute(execStr,
+                                self._cursor.execute(execStr,
                                                     (newSimNumber, sim.number))
                                 self.db.commit()
                                 # update indexes
                                 indexes[indexes.index(sim.number)] = \
                                     newSimNumber
-                            self.cursor.execute(execStr,
+                            self._cursor.execute(execStr,
                                                 (sim.number, num))
                             self.db.commit()
                             # update indexes
@@ -674,7 +967,7 @@ class SimulationSet:
             for sN in simsToDo:
                 if sN in indexes:
                     newSimNumber = randomIntNotInList(indexes)
-                    self.cursor.execute(execStr, (newSimNumber, int(sN)))
+                    self._cursor.execute(execStr, (newSimNumber, int(sN)))
                     self.db.commit()
                     # update indexes
                     indexes[indexes.index(sN)] = newSimNumber
@@ -689,55 +982,7 @@ class SimulationSet:
                 if ttotal > 60: time.sleep(5)
      
      
-    def sortSimulations(self):
-        """
-        Sorts the list of simulations in a way that all simulations with 
-        identical geometry are performed after another, then the next set and
-        so on. This way, jcmwave.geo() needs only be called if the geometry
-        changes.
-        """
-        if self.verb: print 'Sorting the simulations...'
-        # Get a list of dictionaries, each dictionary containing the keys and
-        # values which correspond to geometry information of a single 
-        # simulation
-        allGeoKeys = []
-        geomtetryTypes = np.zeros((self.Nsimulations), dtype=int)
-        for s in self.simulations:
-            keys = s.keys
-            allGeoKeys.append({k: keys[k] for k in self.geometry.keys()})
-         
-        # Find the number of different geometries and a list where each entry
-        # corresponds to the geometry-type of the simulation. The types are
-        # simply numbered, so that the first simulation is of type 1, as well
-        # as all simulations with the same geometry and so on...
-        pos = 0
-        nextPos = 0
-        t = 1
-        while 0 in geomtetryTypes:
-            geomtetryTypes[pos] = t
-            foundDiscrepancy = False
-            for i in range(pos+1, self.Nsimulations):
-                if cmp( allGeoKeys[pos], allGeoKeys[i] ) == 0:
-                    if geomtetryTypes[i] == 0:
-                        geomtetryTypes[i] = t
-                else:
-                    if not foundDiscrepancy:
-                        nextPos = i
-                        foundDiscrepancy = True
-            pos = nextPos
-            t += 1
-         
-        # From this list of types, a new sort order is derived and saved in
-        # self.sortIndices. To run the simulations in correct order, one now
-        # needs to loop over these indices. self.rerunJCMgeo gives you the
-        # numbers of the simulations before which the geometry needs to be
-        # calculated again (in the new order).
-        self.NdifferentGeometries = t-1
-        self.rerunJCMgeo = np.zeros((self.NdifferentGeometries), dtype=int)
-        sortedGeometryTypes = np.sort(geomtetryTypes)
-        self.sortIndices = np.argsort(geomtetryTypes)
-        for i in range(self.NdifferentGeometries):
-            self.rerunJCMgeo[i] = np.where(sortedGeometryTypes == (i+1))[0][0]
+
  
          
     def runJCMgeo(self, simulation, backup = False):
@@ -770,56 +1015,56 @@ class SimulationSet:
             jcm.view(os.path.join(self.geometryFolder, 'grid.jcm'))
  
  
-    def registerResources(self):
-        """
-         
-        """
-        if self.viewGeometryOnly: return
-        # Define the different resources according to their specification and
-        # the PC.institution
-        self.resources = []
-        if self.runOnLocalMachine:
-            w = 'localhost'
-            if not w in self.wSpec:
-                raise Exception('When using runOnLocalMachine, you need to '+
-                                'specify localhost in the wSpec-dictionary.')
-            spec = self.wSpec[w]
-            self.resources.append(
-                Workstation(name = w,
-                            Hostname = w,
-                            JCMROOT = self.PC.jcmBaseFolder,
-                            Multiplicity = spec['M'],
-                            NThreads = spec['N']))
-        else:
-            if self.PC.institution == 'HZB':
-                for w in self.wSpec.keys():
-                    spec = self.wSpec[w]
-                    if spec['use']:
-                        self.resources.append(
-                            Workstation(name = w,
-                                        JCMROOT = self.PC.hmiBaseFolder,
-                                        Hostname = w,
-                                        Multiplicity = spec['M'],
-                                        NThreads = spec['N']))
-            if self.PC.institution == 'ZIB':
-                for q in self.qSpec.keys():
-                    spec = self.qSpec[q]
-                    if spec['use']:
-                        self.resources.append(
-                            Queue(name = q,
-                                  JCMROOT = self.PC.jcmBaseFolder,
-                                  PartitionName = q,
-                                  JobName = self.jobName,
-                                  Multiplicity = spec['M'],
-                                  NThreads = spec['N']))
-         
-        # Add all resources
-        self.resourceIDs = []
-        for resource in self.resources:
-            resource.add()
-            self.resourceIDs += resource.resourceIDs
-        if self.resourceInfo:
-            daemon.resource_info(self.resourceIDs)
+#     def registerResources(self):
+#         """
+#          
+#         """
+#         if self.viewGeometryOnly: return
+#         # Define the different resources according to their specification and
+#         # the PC.institution
+#         self.resources = []
+#         if self.runOnLocalMachine:
+#             w = 'localhost'
+#             if not w in self.wSpec:
+#                 raise Exception('When using runOnLocalMachine, you need to '+
+#                                 'specify localhost in the wSpec-dictionary.')
+#             spec = self.wSpec[w]
+#             self.resources.append(
+#                 Workstation(name = w,
+#                             Hostname = w,
+#                             JCMROOT = self.PC.jcmBaseFolder,
+#                             Multiplicity = spec['M'],
+#                             NThreads = spec['N']))
+#         else:
+#             if self.PC.institution == 'HZB':
+#                 for w in self.wSpec.keys():
+#                     spec = self.wSpec[w]
+#                     if spec['use']:
+#                         self.resources.append(
+#                             Workstation(name = w,
+#                                         JCMROOT = self.PC.hmiBaseFolder,
+#                                         Hostname = w,
+#                                         Multiplicity = spec['M'],
+#                                         NThreads = spec['N']))
+#             if self.PC.institution == 'ZIB':
+#                 for q in self.qSpec.keys():
+#                     spec = self.qSpec[q]
+#                     if spec['use']:
+#                         self.resources.append(
+#                             Queue(name = q,
+#                                   JCMROOT = self.PC.jcmBaseFolder,
+#                                   PartitionName = q,
+#                                   JobName = self.jobName,
+#                                   Multiplicity = spec['M'],
+#                                   NThreads = spec['N']))
+#          
+#         # Add all resources
+#         self.resourceIDs = []
+#         for resource in self.resources:
+#             resource.add()
+#             self.resourceIDs += resource.resourceIDs
+#         if self.resourceInfo:
+#             daemon.resource_info(self.resourceIDs)
  
  
     def launchSimulations(self, N = 'all'):
@@ -920,7 +1165,7 @@ class SimulationSet:
      
     def saveResults(self, simNumbers):
         for n in simNumbers:
-            self.simulations[n].results.save(self.db, self.cursor)
+            self.simulations[n].results.save(self.db, self._cursor)
              
              
     def gatherResults(self, ignoreMissingResults = False):
@@ -928,7 +1173,7 @@ class SimulationSet:
         for i, sim in enumerate(self.simulations):
             if not sim.status == 'Failed':
                 if not ignoreMissingResults:
-                    sim.results.load(self.cursor)
+                    sim.results.load(self._cursor)
                     results =  sim.results.npResults
                     if i == 0:
                         self.gatheredResults = results
@@ -937,7 +1182,7 @@ class SimulationSet:
                                                          results)
                 else:
                     try:
-                        sim.results.load(self.cursor)
+                        sim.results.load(self._cursor)
                         results =  sim.results.npResults
                         if i == 0:
                             self.gatheredResults = results
@@ -952,7 +1197,7 @@ class SimulationSet:
         if not hasattr(self, 'gatheredResults'):
             if self.verb: print 'No results to save... Leaving.'
             return
-        self.gatheredResultsSaveFile = os.path.join(self.workingBaseDir, 
+        self.gatheredResultsSaveFile = os.path.join(self.storage_dir, 
                                                     'results.dat')
         if self.verb: 
             print 'Saving gathered results to:', self.gatheredResultsSaveFile
@@ -965,7 +1210,7 @@ class SimulationSet:
      
     def loadGatheredResultsFromFile(self, filename = 'auto'):
         if filename == 'auto':
-            filename = os.path.join(self.workingBaseDir, 
+            filename = os.path.join(self.storage_dir, 
                                                     'results.dat')
         if self.verb:
             print 'Loading gathered results from', filename

@@ -1,12 +1,22 @@
-from jcmpython.internals import *
+from jcmpython.internals import _config, daemon, jcm
 from cStringIO import StringIO
 from datetime import timedelta
 import io
 import matplotlib.colors as mcolors
+import numpy as np
 from numpy.linalg import norm
-from pyparsing import *
+import os
+import pyparsing as pyp
+from scipy import constants
 import sys
 import time
+import traceback
+
+
+# Load values from configuration
+CMAP = _config.get('Preferences', 'colormap')
+SEND_MAIL = _config.get('Logging', 'send_mail')
+EMAIL_ADDRESS = _config.get('User', 'email')
 
 
 # =============================================================================
@@ -47,7 +57,7 @@ def pwInVol(V, epsR):
     """
     Energy of a plane wave in volume V of material with permittivity epsR
     """
-    return epsR*eps0*V/4.
+    return epsR*constants.epsilon_0*V/4.
 
 
 def calcTransReflAbs(wvl, theta, nR, nT, Kr, Kt, Er, Et, EFieldEnergy,
@@ -74,7 +84,7 @@ def calcTransReflAbs(wvl, theta, nR, nT, Kr, Kt, Er, Et, EFieldEnergy,
         refl[i] = np.sum( np.sum( np.square(np.abs(Er[i])).real, axis=1 ) * cosFac_r ) * nR
         trans[i] = np.sum( np.sum( np.square(np.abs(Et[i])), axis=1 ) * cosFac_t ) * nT
         
-        omega = c0*2*np.pi/wvl
+        omega = constants.c*2*np.pi/wvl
         absorb[i] = 0.
         for ID in absorbingDomainIDs:
             absorb[i] += -2.*omega*np.imag(EFieldEnergy[i][ID])
@@ -159,7 +169,7 @@ class Indentation(object):
 
 
 def getCmap():
-        cmapData = np.loadtxt(thisPC.colorMap, delimiter = ', ')
+        cmapData = np.loadtxt(CMAP, delimiter = ', ')
         return mcolors.ListedColormap(cmapData, name='CostumColorMap')
 
 def randomIntNotInList(l):
@@ -206,8 +216,9 @@ def addValuesToSortedArray(array, newVals):
 
 
 def sendStatusEmail(pc, text):
+    # TODO: generalize this function by using the _config
     
-    if mail:
+    if SEND_MAIL:
         try:
             import smtplib
             from email.mime.text import MIMEText
@@ -220,7 +231,7 @@ def sendStatusEmail(pc, text):
             me = 'noreply@jcmsuite.automail.de'
             msg['Subject'] = '{0}: JCMwave Simulation Information'.format(pc)
             msg['From'] = me
-            msg['To'] = mailAdress # <- config.py
+            msg['To'] = EMAIL_ADDRESS # <- config.py
         
             # Send the message via our own SMTP server, but don't include the
             # envelope header.
@@ -228,7 +239,7 @@ def sendStatusEmail(pc, text):
                 s = smtplib.SMTP('mailsrv2.zib.de')
             else:
                 s = smtplib.SMTP('localhost')
-            s.sendmail(me, [mailAdress], msg.as_string())
+            s.sendmail(me, [EMAIL_ADDRESS], msg.as_string())
             s.quit()
         except: return
         
@@ -337,7 +348,7 @@ def uniformPathLengthLorentzSampling(xi, xf, Npoints, lorentzXc, lorentzYc,
         return  pathLength(xi, x) - stepLength
     
     
-    from scipy.optimize import newton
+#     from scipy.optimize import newton
     from scipy.optimize import brentq
     
     for i in range(Npoints):
@@ -394,29 +405,29 @@ class ProjectFile:
         # --
         
         # Float
-        point = Literal('.')
-        e = CaselessLiteral('E')
-        plusorminus = Literal('+') | Literal('-')
-        number = Word(nums) 
-        integer = Combine( Optional(plusorminus) + number )
-        floatNumber = Combine( integer +
-                               Optional( point + Optional(number) ) +
-                               Optional( e + integer ) )
+        point = pyp.Literal('.')
+        e = pyp.CaselessLiteral('E')
+        plusorminus = pyp.Literal('+') | pyp.Literal('-')
+        number = pyp.Word(pyp.nums) 
+        integer = pyp.Combine( pyp.Optional(plusorminus) + number )
+        floatNumber = pyp.Combine( integer +
+                               pyp.Optional( point + pyp.Optional(number) ) +
+                               pyp.Optional( e + integer ) )
         
         # Equal sign and comment
-        equal = Suppress(Literal('='))
-        comment = Optional(Literal('#'))
+        equal = pyp.Suppress(pyp.Literal('='))
+        comment = pyp.Optional(pyp.Literal('#'))
         
         # Key and value of an equation
-        field_name = Word(alphanums)
-        field_val = ( floatNumber | nestedExpr('[', ']') | \
-                      Word(alphanums ) | quotedString  )
+        field_name = pyp.Word(pyp.alphanums)
+        field_val = ( floatNumber | pyp.nestedExpr('[', ']') | \
+                      pyp.Word(pyp.alphanums ) | pyp.quotedString  )
         
         # Define the recursive grammar
-        grammar = Forward() # <- recursivity
-        nestedBrackets = Dict(Group( field_name + Optional(equal) + \
-                                     nestedExpr('{', '}', content=grammar) ))
-        lastChild = Dict(Group(comment + field_name + equal + field_val))
+        grammar = pyp.Forward() # <- recursivity
+        nestedBrackets = pyp.Dict(pyp.Group( field_name + pyp.Optional(equal) +\
+                                  pyp.nestedExpr('{', '}', content=grammar) ))
+        lastChild = pyp.Dict(pyp.Group(comment+field_name+equal+field_val))
         grammar << ( lastChild | nestedBrackets  )
         
         self.fields = []
@@ -430,7 +441,7 @@ class ProjectFile:
         if not self.parsed:
             return None
         try:
-            return self.fields[0].Project.Electromagnetics.TimeHarmonic.keys()[0]
+            return self.fields[0].JCMProject.Electromagnetics.TimeHarmonic.keys()[0]
         except:
             return None
     

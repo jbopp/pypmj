@@ -1,0 +1,148 @@
+Project {
+  InfoLevel = %(info_level)i
+  #DerivativeOrder = %(derivative_order)i
+  StorageFormat = %(storage_format)s
+  Electromagnetics {
+    TimeHarmonic {
+      Scattering {
+        FieldComponents = Electric 
+        Accuracy{
+	  FiniteElementDegree{
+	    Adaptive{
+          MinimumDegree= 2
+	      MaximumDegree= %(fem_degree)i
+	    }
+	  }
+	}
+        Refinement {
+          Adaptivity = yes
+          MaxNumberSteps = %(n_refinement_steps)i
+          Termination {
+            PrecisionFieldEnergy = %(precision_field_energy)e
+          }
+        }
+        PML {
+          AnglePreRefinements = 0
+        }
+      }
+    }
+  }
+}
+
+<?
+wvl = keys['vacuum_wavelength']
+keys['na_sub'] = keys['mat_subspace'].getNKdata(wvl)
+keys['na_super'] = keys['mat_superspace'].getNKdata(wvl)
+?>
+PostProcess {
+  FourierTransform {
+    FieldBagPath = "./project_results/fieldbag.jcm"
+    OutputFileName = "./project_results/reflected_diffraction_orders.jcm"
+    NormalDirection = Z
+    Format = JCM-ASCII
+    NumericalAperture = %(na_super)e
+  }
+}
+PostProcess {
+  FourierTransform {
+    FieldBagPath = "./project_results/fieldbag.jcm"
+    OutputFileName = "./project_results/transmitted_diffraction_orders.jcm"
+    NormalDirection = -Z
+    NumericalAperture = %(na_sub)e
+    Format = JCM-ASCII
+  }
+}
+PostProcess {
+  DensityIntegration {
+    FieldBagPath = "./project_results/fieldbag.jcm"
+    OutputFileName = "./project_results/electric_field_energy.jcm"
+    OutputQuantity = ElectricFieldEnergy
+  }
+}
+
+<?
+if 'field_output' in keys:
+    if keys['field_output']:
+        ?>
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_x_electric.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsX = 0.
+            NGridPointsY = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_x_magnetic.jcm"
+        OutputQuantity = MagneticFieldStrength
+        Cartesian {
+            GridPointsX = 0.
+            NGridPointsY = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_y_electric.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsY = 0.
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_y_magnetic.jcm"
+        OutputQuantity = MagneticFieldStrength
+        Cartesian {
+            GridPointsY = 0.
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_z_electric.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsZ = 4.05e-07
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsY = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_z_magnetic.jcm"
+        OutputQuantity = MagneticFieldStrength
+        Cartesian {
+            GridPointsZ = 4.05e-07
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsY = %(field_output_Npoints)i
+        }
+    }
+}
+
+<?
+?>
+

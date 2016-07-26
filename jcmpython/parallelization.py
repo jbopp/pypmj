@@ -5,107 +5,170 @@ Authors : Carlo Barth
 
 """
 
-from jcmpython.internals import JCM_KERNEL, daemon
+from jcmpython.internals import _config, daemon, JCM_KERNEL, ConfigurationError
 import logging
+import os
 import time
 logger = logging.getLogger(__name__)
 
+KNOWN_SERVER_OPTIONS = ['hostname', 'JCM_root', 'login', 'multiplicity_default',
+                        'n_threads_default', 'stype']
+
+def savely_convert_config_value(value):
+    exc_msg = 'Unable to convert configuration value: {}.'.format(value)
+    if not isinstance(value, (str,unicode)):
+        raise ConfigurationError(exc_msg)
+        return
+    if value.isdigit():
+        try:
+            value = int(value)
+        except ValueError:
+            raise ConfigurationError(exc_msg)
+            return
+    return value
+
+def read_resources_from_config():
+    """Reads all server configurations from the configuration file. It is 
+    assumed that each server is in a section starting with `Server:`. For
+    convenience, use the function `addServer` provided in 
+    `write_config_file.py`.
+    """
+    sections = _config.sections()
+    server_sections = [sec for sec in sections if sec.startswith('Server:')]
+    if len(server_sections) == 0:
+        raise ConfigurationError('No servers were found in the configuration.')
+        return
+    resources = {}
+    for ssec in server_sections:
+        try:
+            nickname = ssec.replace('Server:','')
+            hostname = _config.get(ssec, 'hostname')
+            JCM_root = _config.get(ssec, 'JCM_root')
+            if JCM_root == 'AS_LOCAL':
+                JCM_root = os.path.join(_config.get('JCMsuite', 'root'),
+                                        _config.get('JCMsuite', 'dir'))
+            login = _config.get(ssec, 'login')
+            multiplicity_default = _config.getint(ssec, 'multiplicity_default')
+            n_threads_default = _config.getint(ssec, 'n_threads_default')
+            stype = _config.get(ssec, 'stype')
+        except:
+            raise ConfigurationError('Unable to parse configuration for '+
+                                     'server: {}.'.format(ssec))
+            return
+        
+        # Treat the manually provided options
+        options = _config.options(ssec)
+        manual_options = [o for o in options if not o in KNOWN_SERVER_OPTIONS]
+        manual_kwargs = {o:savely_convert_config_value(_config.get(ssec, o))
+                         for o in manual_options}
+        
+        # Initialize the DaemonResource instance
+        resources[nickname] = DaemonResource(hostname, login, JCM_root, 
+                                             multiplicity_default, 
+                                             n_threads_default,
+                                             stype, nickname, **manual_kwargs)
+    return resources
+        
+
 # =============================================================================
-class Workstation:
+class DaemonResource(object):
     """
     
     """
-    def __init__(self, name, Hostname, 
-                 JCMROOT='/hmi/kme/programs/JCMsuite_2_17_11_beta/', 
-                 Login='kme', Multiplicity=1, NThreads=1, 
-                 JCMKERNEL=None):
-        self.name = name
-        self.Hostname = Hostname
-        self.JCMROOT = JCMROOT
-        self.Login = Login
-        self.Multiplicity = Multiplicity
-        self.NThreads = NThreads
-        if JCMKERNEL is None:
-            JCMKERNEL = JCM_KERNEL
-        self.JCMKERNEL = JCMKERNEL
-        
-    def add(self):
-        logger.debug('Registering workstation {} using a multiplicity of' +
-                     '{} and {} threads'.format(self.name, self.Multiplicity, 
-                                                self.NThreads))
-        for _ in range(500):
+    def __init__(self, hostname, login, JCM_root, multiplicity_default, 
+              n_threads_default, stype, nickname, **kwargs):
+        self.hostname = hostname
+        self.login = login
+        self.JCM_root = JCM_root
+        self.multiplicity_default = multiplicity_default
+        self.n_threads_default = n_threads_default
+        self.stype = stype
+        self.nickname = nickname
+        self.JCMKERNEL = _config.get('JCMsuite', 'kernel')
+        self.kwargs = kwargs
+        self.restore_default_m_n()
+    
+    def __repr__(self):
+        return '{}({}, M={}, N={})'.format(self.stype, 
+                                           self.nickname,
+                                           self.multiplicity,
+                                           self.n_threads)
+    
+    def set_multiplicity(self, value):
+        """Set the number of CPUs to use."""
+        if not isinstance(value, int):
+            raise ValueError('multiplicity must be of type int.')
+            return
+        self.multiplicity = value
+    
+    def set_n_threads(self, value):
+        """Set the number of threads to use per CPU."""
+        if not isinstance(value, int):
+            raise ValueError('n_threads must be of type int.')
+            return
+        self.n_threads = value
+    
+    def set_m_n(self, m, n):
+        """Shorthand for setting multiplicity and n_threads both at a time."""
+        self.set_multiplicity(m)
+        self.set_n_threads(n)
+    
+    def restore_default_m_n(self):
+        """Restores the default values for multiplicity and n_threads."""
+        self.set_m_n(self.multiplicity_default, self.n_threads_default)
+    
+    def _add_type_dependent(self):
+        """Adds the current ressource depending on the stype."""
+        if self.stype == 'Workstation':
+            func = daemon.add_workstation
+        else:
+            func = daemon.add_queue
+        try:
+            IDs = func(Hostname = self.hostname,
+                       JCMROOT = self.JCM_root,
+                       Login = self.login,
+                       Multiplicity = self.multiplicity,
+                       NThreads = self.n_threads,
+                       JCMKERNEL = self.JCMKERNEL,
+                       **self.kwargs)
+        except TypeError:
+            # This is needed for backwards compatibility to JCMsuite 2.x
             try:
-                self.resourceIDs = daemon.add_workstation(
-                                   Hostname = self.Hostname,
-                                   JCMROOT = self.JCMROOT,
-                                   Login = self.Login,
-                                   Multiplicity = self.Multiplicity,
-                                   NThreads = self.NThreads,
-                                   JCMKERNEL = self.JCMKERNEL)
-                if self.resourceIDs == 'Error':
-                    raise Exception('Error occurred while adding workstations.')
-                else:
-                    logger.debug('... registration was successful.')
-                    break
-            except TypeError:
-                self.resourceIDs = daemon.add_workstation(
-                                   Hostname = self.Hostname,
-                                   JCMROOT = self.JCMROOT,
-                                   Login = self.Login,
-                                   Multiplicity = self.Multiplicity,
-                                   NThreads = self.NThreads)
-                if self.resourceIDs == 'Error':
-                    raise Exception('Error occurred while adding workstations.')
-                else:
-                    logger.debug('... registration was successful.')
-                    break
-            except Exception:
-                logger.exception('... registration failed: '+
-                                 'waiting for 5 seconds ...')
-                time.sleep(5)
+                IDs = func(Hostname = self.hostname,
+                           JCMROOT = self.JCM_root,
+                           Login = self.login,
+                           Multiplicity = self.multiplicity,
+                           NThreads = self.n_threads,
+                           **self.kwargs)
+            except:
+                raise ConfigurationError('Unable to add {}'.format(self) +
+                        'Maybe your custom options are buggy ({}).'.format(
+                                                                self.kwargs))
+        return IDs
+    
+    def add(self):
+        """Adds the resource to the current daemon configuration."""
+        logger.debug('Adding {}'.format(self))
+        self.resourceIDs = self._add_type_dependent()
+        if self.resourceIDs == 'Error':
+            raise Exception('An unknown error occurred while adding {}.'.format(
+                                                                        self))
+        logger.debug('... adding was successful.')
+    
+    def add_repeatedly(self, n_shots=10, wait_seconds=5):
+        """Tries to add the resource repeatedly for `n_shots` times."""
+        for _ in range(n_shots):
+            try:
+                self.add()
+                break
+            except ConfigurationError as e:
+                raise e
+            except:
+                logger.warn('Failed to add {}: '.format(self)+
+                            'waiting for {} seconds ...'.format(wait_seconds))
+                time.sleep(wait_seconds)
                 continue
 
 
-# =============================================================================
-class Queue:
-    """
-    
-    """
-    def __init__(self, name, PartitionName, JobName, Hostname='localhost', 
-                 JCMROOT='/nfs/datanumerik/instal/bzfhamme/JCMsuite.2.17.9/', 
-                 Login='bzfbarth', Multiplicity=1, 
-                 WorkingDir = '/nfs/datanumerik/bzfbarth/simulations/', 
-                 NThreads=1, JCMKERNEL=None):
-        self.name = name
-        self.PartitionName = PartitionName
-        self.JobName = JobName
-        self.Hostname = Hostname
-        self.JCMROOT = JCMROOT
-        self.Login = Login
-        self.Multiplicity = Multiplicity
-        self.WorkingDir = WorkingDir
-        self.NThreads = NThreads
-        if JCMKERNEL is None:
-            JCMKERNEL = JCM_KERNEL
-        self.JCMKERNEL = JCMKERNEL
-        
-    def add(self):
-        logger.debug('Registering queue {} using a multiplicity of' +
-                     '{} and {} CPUs per task'.format(self.name, 
-                                                      self.Multiplicity, 
-                                                      self.NThreads))
-        self.resourceIDs = daemon.add_queue(
-                                Hostname = self.Hostname,
-                                JCMROOT = self.JCMROOT,
-                                Login = self.Login,
-                                Multiplicity = self.Multiplicity,
-                                JobName = self.JobName,
-                                PartitionName = self.PartitionName,
-                                #WorkingDir = self.WorkingDir,
-                                NThreads = self.NThreads,
-                                JCMKERNEL = self.JCMKERNEL)
-        if self.resourceIDs == 'Error':
-            raise Exception('Error occurred while adding queues.')
-        else:
-            logger.debug('... registration was successful.')
-
+if __name__ == '__main__':
+    pass

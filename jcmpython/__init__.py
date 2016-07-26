@@ -89,6 +89,13 @@ logger.debug('\tJCMKERNEL: V{0}'.format(JCM_KERNEL))
 
 
 # load functions and classes into namespace
+from parallelization import read_resources_from_config, DaemonResource
+# initialize the daemon resources and load them into the namespace
+logger.debug('Initializing resources from configuration.')
+resources = read_resources_from_config()
+
+from core import JCMProject, Simulation, Results, SimulationSet
+from materials import RefractiveIndexInfo
 # from JCMpython.Accessory import * 
 # from JCMpython.BandstructureTools import * 
 # from JCMpython.startup import * 
@@ -96,4 +103,6 @@ logger.debug('\tJCMKERNEL: V{0}'.format(JCM_KERNEL))
 # from JCMpython.MaterialData import MaterialData, RefractiveIndexInfo
 # from JCMpython.Results import Results
 # from JCMpython.Simulation import Simulation
+
+__all__ = ['jcm', 'daemon']
 

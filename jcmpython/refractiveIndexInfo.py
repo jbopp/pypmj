@@ -3,7 +3,7 @@
 
 from scipy.interpolate import interp1d
 import sys
-from parse import *
+from parse import parse
 import yaml
 import numpy as np
 import cmath
@@ -102,7 +102,7 @@ def getDataNK(yamlFile,lamb, returnExistingDataOnly=False, noError = True):
 	for line in materialData["data"].split('\n'):
 		parsed=parse("{l:g} {n:g} {k:g}",line)
 		try:
-			n=parsed["n"]+1j*parsed["k"]
+# 			n=parsed["n"]+1j*parsed["k"]
 			matLambda.append(parsed["l"]);
 			matN.append(parsed["n"])
 			matK.append(parsed["k"])
