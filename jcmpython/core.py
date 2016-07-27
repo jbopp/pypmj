@@ -179,11 +179,16 @@ class Simulation(object):
     
     def removeWorkingDirectory(self):
         if os.path.exists(self.workingDir):
-            rmtree(self.workingDir)
+            try:
+                rmtree(self.workingDir)
+            except:
+                logging.warn('Failed to remove working directory {}'.format(
+                             os.path.basename(self.workingDir)) +\
+                             ' for simNumber {}'.format(self.number))
         else:
-            logging.warn('Simulation: cannot remove working directory ' +\
-                         os.path.basename(self.workingDir) +\
-                         ' for simNumber ' + str(self.number))
+            logging.warn('Working directory {} does not exist'.format(
+                         os.path.basename(self.workingDir)) +\
+                         ' for simNumber {}'.format(self.number))
 
 
 # =============================================================================
@@ -207,7 +212,7 @@ class Results(object):
         else:
             self.simulation.status = 'Finished'
             self.jcmResults = jcmResults
-            self.computeResults()
+#             self.computeResults()
     
     
 #     def computeResults(self):

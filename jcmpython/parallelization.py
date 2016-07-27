@@ -14,6 +14,28 @@ logger = logging.getLogger(__name__)
 KNOWN_SERVER_OPTIONS = ['hostname', 'JCM_root', 'login', 'multiplicity_default',
                         'n_threads_default', 'stype']
 
+
+# A custom exception for configuration errors
+# =============================================================================
+class DaemonError(Exception):
+    """Exception raised for errors in adding daemon resources.
+
+    Attributes
+    ----------
+    expression
+        Input expression in which the error occurred.
+    message : str
+        Explanation of the error.
+    """
+
+    def __init__(self, message):
+        self.message = message + ' Check if the server is up and running.'
+    
+    def __str__(self):
+        return self.message
+# =============================================================================
+
+
 def savely_convert_config_value(value):
     exc_msg = 'Unable to convert configuration value: {}.'.format(value)
     if not isinstance(value, (str,unicode)):
@@ -141,7 +163,7 @@ class DaemonResource(object):
                            NThreads = self.n_threads,
                            **self.kwargs)
             except:
-                raise ConfigurationError('Unable to add {}'.format(self) +
+                raise DaemonError('Unable to add {}. '.format(self) +
                         'Maybe your custom options are buggy ({}).'.format(
                                                                 self.kwargs))
         return IDs
@@ -155,19 +177,22 @@ class DaemonResource(object):
                                                                         self))
         logger.debug('... adding was successful.')
     
-    def add_repeatedly(self, n_shots=10, wait_seconds=5):
+    def add_repeatedly(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Tries to add the resource repeatedly for `n_shots` times."""
         for _ in range(n_shots):
             try:
                 self.add()
-                break
-            except ConfigurationError as e:
-                raise e
+                return
             except:
                 logger.warn('Failed to add {}: '.format(self)+
                             'waiting for {} seconds ...'.format(wait_seconds))
                 time.sleep(wait_seconds)
                 continue
+        
+        if ignore_fail:
+            logger.warn('Failed to add {}: . Ignoring.'.format(self))
+        else:
+            raise DaemonError('Failed to add {}: . Exiting.'.format(self))
 
 
 if __name__ == '__main__':
