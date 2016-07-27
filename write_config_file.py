@@ -84,7 +84,7 @@ config.set('Logging', 'write_logfile', True)
 config.set('Logging', 'send_mail', True)
 
 config.add_section('DEFAULTS')
-config.set('DEFAULTS', 'database_name', 'result_database.db')
+config.set('DEFAULTS', 'database_name', 'result_database.h5')
 config.set('DEFAULTS', 'database_tab_name', 'data')
 
 # Add servers

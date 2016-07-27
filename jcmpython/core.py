@@ -25,11 +25,9 @@ import numpy as np
 from numpy.lib import recfunctions
 from shutil import copyfile as cp, copytree, rmtree
 import os
-# from parallelization import Queue, Workstation
-import sqlite3 as sql
+import pandas as pd
 import time
-from utils import (adapt_array, convert_array, query_yes_no, randomIntNotInList,
-                   tForm)
+from utils import query_yes_no, randomIntNotInList, tForm, walk_df
 
 # Get a logger instance
 logger = logging.getLogger(__name__)
@@ -482,11 +480,12 @@ class SimulationSet(object):
         self._check_keys(keys)
         self.keys = keys
         
-        # Set up folders
+        # Load the project and set up the folders
+        self._load_project(project)
         self._set_up_folders(duplicate_path_levels, storage_folder)
         
-        # Connect to the SQL database
-        self._connect2database()
+        # Initialize the HDF5 store
+        self._initialize_store()
         
 #         self.wSpec = wSpec
 #         self.qSpec = qSpec
@@ -611,43 +610,40 @@ class SimulationSet(object):
         
         logging.info('Using folder {} for '.format(self.storage_dir)+ 
                      'data storage.')
-
-    def _connect2database(self, ignore_existing_dbase=False):
-        """Connects to the SQL database used for result storage and sets the
-        `_cursor` attribute for communication with the database. 
-        
+    
+    def _initialize_store(self):
+        """Initializes the HDF5 store and sets the `store` attribute. The
+        file name and the name of the data section inside the file are 
+        configured in the DEFAULTS section of the configuration file. 
         """
-        logging.debug('Connecting to database')
+        logging.debug('Initializing the HDF5 store')
         
         self._database_file = os.path.join(self.storage_dir, DBASE_NAME)
+        if not os.path.splitext(DBASE_NAME)[1] == '.h5':
+            logging.warn('The HDF5 store file has an unknown extension. '+
+                         'It should be `.h5`.')
+        self.store = pd.HDFStore(self._database_file)
+    
+    def get_store_data(self):
+        if DBASE_TAB in self.store:
+            return self.store[DBASE_TAB]
+        else:
+            return None
         
-        # Register the adapter/converter for numpy arrays
-        sql.register_adapter(np.ndarray, adapt_array)
-        sql.register_converter('array', convert_array)
- 
-        # Connect to the database
-        if ignore_existing_dbase and os.path.isfile(self._database_file): 
-            os.remove(self._database_file)
-        self.db = sql.connect(self._database_file, 
-                              detect_types=sql.PARSE_DECLTYPES)
-        self.db.row_factory = sql.Row
-        
-        # Get a cursor for communication
-        self._cursor = self.db.cursor()
-         
-        # Initialize the `data` table and the unique index `number` if they do 
-        # not already exist
-        statement = "SELECT name FROM sqlite_master WHERE type='table'"
-        tables = self._cursor.execute(statement).fetchall()
-        if not tables:
-            createStr = 'create table {0} {1}'
-            typeStr = '(number integer, params array, results array)'
-            self._cursor.execute(createStr.format(DBASE_TAB, typeStr))
-            self._cursor.execute("create unique index idx on {0}(number)".\
-                                                             format(DBASE_TAB))
+    def close_store(self):
+        """Closes the HDF5 store."""
+        logging.debug('Closing the HDF5 store: {}'.format(self._database_file))
+        self.store.close()
     
-    
-    
+    def append_store(self, data):
+        """Appends a new row or multiple rows to the HDF5 store."""
+        if not isinstance(data, pd.DataFrame):
+            raise ValueError('Can only append pandas DataFrames to the store.')
+            return
+        self.store.append(DBASE_TAB, data) 
+
+
+
     def initializeSimulations(self):
 #         if self.verb: print 'Initializing the simulations...'
 #         self.setFolders()
@@ -656,52 +652,52 @@ class SimulationSet(object):
         if self.loadDataOnly:
             self.gatherResults()
     
-    def prepare4RunAfterError(self):
-        self.sureAboutDbase = True
-        self.warningMode = False
-        self.overrideDatabase = False
-        self.useSaveFilesIfAvailable = True
-        self.logs = {}
-        self.initializeSimulations()     
-     
-    def run(self):
-        if self.loadFromResultsFile:
-            if self.verb: 
-                print 'Skipping run, since loadFromResultsFile = True...'
-            return
-        elif self.loadDataOnly:
-            if self.verb: 
-                print 'Skipping run, since loadDataOnly = True...'
-            return
-        t0 = time.time()
-        if not self.doneSimulations == self.Nsimulations:
-            self.registerResources()
-        else:
-            if self.verb:
-                print 'All simulations already done. Using data from save files.'
-        self.launchSimulations(self.maxNumberParallelSims)
-        if self.viewGeometryOnly: return
-        self.gatherResults()
-        self.saveGatheredResults()
-         
-        # Write all logs to the desired logfile, if not writeLogsToFile==''
-        if self.writeLogsToFile:
-            with open(self.writeLogsToFile, 'w') as f:
-                for simNumber in self.logs:
-                    strOut = '\n\n'
-                    strOut += 'Log for simulation number {0}\n'.format(
-                              simNumber) +  80 * '=' + '\n'
-                    strOut += self.logs[simNumber]
-                    f.write(strOut)
-            if self.verb: print 'Saved logs to', self.writeLogsToFile
-         
-        # Print out the overall time
-        t1 = time.time() - t0
-        if self.verb: print 'Total time for all simulations:', tForm(t1)
-     
-    def getDBinds(self):
-        self._cursor.execute("select number from {0}".format(DBASE_TAB))
-        return [i[0] for i in self._cursor.fetchall()]
+#     def prepare4RunAfterError(self):
+#         self.sureAboutDbase = True
+#         self.warningMode = False
+#         self.overrideDatabase = False
+#         self.useSaveFilesIfAvailable = True
+#         self.logs = {}
+#         self.initializeSimulations()     
+#      
+#     def run(self):
+#         if self.loadFromResultsFile:
+#             if self.verb: 
+#                 print 'Skipping run, since loadFromResultsFile = True...'
+#             return
+#         elif self.loadDataOnly:
+#             if self.verb: 
+#                 print 'Skipping run, since loadDataOnly = True...'
+#             return
+#         t0 = time.time()
+#         if not self.doneSimulations == self.Nsimulations:
+#             self.registerResources()
+#         else:
+#             if self.verb:
+#                 print 'All simulations already done. Using data from save files.'
+#         self.launchSimulations(self.maxNumberParallelSims)
+#         if self.viewGeometryOnly: return
+#         self.gatherResults()
+#         self.saveGatheredResults()
+#          
+#         # Write all logs to the desired logfile, if not writeLogsToFile==''
+#         if self.writeLogsToFile:
+#             with open(self.writeLogsToFile, 'w') as f:
+#                 for simNumber in self.logs:
+#                     strOut = '\n\n'
+#                     strOut += 'Log for simulation number {0}\n'.format(
+#                               simNumber) +  80 * '=' + '\n'
+#                     strOut += self.logs[simNumber]
+#                     f.write(strOut)
+#             if self.verb: print 'Saved logs to', self.writeLogsToFile
+#          
+#         # Print out the overall time
+#         t1 = time.time() - t0
+#         if self.verb: print 'Total time for all simulations:', tForm(t1)
+#      
+#     def getDBinds(self):
+#         self._cursor.execute("select number from {0}".format(DBASE_TAB))
+#         return [i[0] for i in self._cursor.fetchall()]
     
     
     
@@ -837,154 +833,61 @@ class SimulationSet(object):
             t += 1
          
         # From this list of types, a new sort order is derived and saved in
-        # self.sortIndices. To run the simulations in correct order, one now
-        # needs to loop over these indices. self.rerunJCMgeo gives you the
+        # self._sortIndices. To run the simulations in correct order, one now
+        # needs to loop over these indices. `self._rerunJCMgeo` gives you the
         # numbers of the simulations before which the geometry needs to be
         # calculated again (in the new order).
         self.NdifferentGeometries = t-1
-        self.rerunJCMgeo = np.zeros((self.NdifferentGeometries), dtype=int)
+        self._rerunJCMgeo = np.zeros((self.NdifferentGeometries), dtype=int)
         sortedGeometryTypes = np.sort(geometryTypes)
-        self.sortIndices = np.argsort(geometryTypes)
+        self._sortIndices = np.argsort(geometryTypes)
         for i in range(self.NdifferentGeometries):
-            self.rerunJCMgeo[i] = np.where(sortedGeometryTypes == (i+1))[0][0]
+            self._rerunJCMgeo[i] = np.where(sortedGeometryTypes == (i+1))[0][0]
 
-    def _compare2database(self):
-         
-        # Check which simulations are already done
-        self.doneSimulations = 0
-        if self.useSaveFilesIfAvailable:
-             
-            t0 = time.time()
-            if self.verb: print 'Beginning data comparison...'
-             
-            # Get a list of all indices which are in the current database
-            self._cursor.execute("select number from {0}".format(DBASE_TAB))
-            indexes = [i[0] for i in self._cursor.fetchall()]
-             
-            # If the user is completely sure about the correctness of the
-            # database, this mode can be used for very fast comparison. This
-            # means, only the known indexes are read from the database and it 
-            # is assumed that they correspond to the correct simulation.number
-            if self.sureAboutDbase:
-                print 'Warning! Using "sureAboutDbase"-mode...'
-                if self.warningMode == False or \
-                            query_yes_no('Do you know what you are doing?'):
-                    self.doneSimulations = indexes
-                    for ind in indexes:
-                        self.simulations[ind].results.done = True
-                    ttotal = time.time() - t0
-                    self.sims2run = self.Nsimulations-len(self.doneSimulations)
-                    if self.verb:
-                        print 'Finished data comparison. Found data for', \
-                              len(self.doneSimulations), 'simulations. Remaining:', \
-                              self.sims2run, 'simulations.'
-                        print 'Total loading time:', tForm(ttotal)
-                        if ttotal > 60: time.sleep(5)
-                    return
-                else: 
-                    if self.verb: print 'Leaving "sureAboutDbase"-mode...'
-                    self.sureAboutDbase = False
-             
-            # For each simulation, check if the data is already inside
-            # the database
-            self.doneSimulations = []
-             
-            # make a smart guess, that the indexes of the database exactly 
-            # match the simulation numbers, which would cause a great speed up
-            smartSuccessCounter = 0
-            extendedVerb = False
-            if (len(indexes) > 1000) and self.verb:
-                extendedVerb = True
-                print 'Beginning smart comparison using', len(indexes), \
-                      'datasets. This may take a while...'
-            t0_ev = time.time()
-            for i, ind in enumerate(indexes):
-                if (ind >= 0) and (ind < self.Nsimulations):
-                    if extendedVerb and (divmod(i+1, 1000)[1] == 0):
-                        tnow = time.time() - t0_ev
-                        tPerSet = tnow / (i+1)
-                        tToGo = (len(indexes) - (i+1)) * tPerSet
-                        print 'Checked', i+1, 'datasets in', tForm(tnow)
-                        print 'Approximate remaining time:', tForm(tToGo)
-                    sim = self.simulations[ind]
-                    if self.silentLoad:
-                        sim.results.verb = False
-                    num = sim.results.checkIfAlreadyDone(self._cursor,
-                                                         self.doneSimulations)
-                    if sim.results.done:
-                        if num == sim.number:
-                            self.doneSimulations.append(num)
-                            smartSuccessCounter += 1
-                        else:
-                            break
-                    else:
-                        break
-             
-            t0_ev = time.time()
-            if smartSuccessCounter != len(indexes):
-                if self.verb:
-                    print 'Smart comparison failed.'
-                    print 'Starting extended comparison...'
-                self.doneSimulations = []
-                for i, ind in enumerate(self.sortIndices):
-                    if extendedVerb and (divmod(i+1, 100)[1] == 0):
-                        tnow = time.time() - t0_ev
-                        tPerSet = tnow / (i+1)
-                        tToGo = (len(self.sortIndices) - (i+1)) * tPerSet
-                        print 'Checked', i+1, 'datasets in', tForm(tnow)
-                        print 'Approximate remaining time:', tForm(tToGo)
-                    sim = self.simulations[ind]
-                    if self.silentLoad:
-                        sim.results.verb = False
-                    num = sim.results.checkIfAlreadyDone(self._cursor, 
-                                                         self.doneSimulations)
-                    if sim.results.done:
-                        if num == sim.number:
-                            self.doneSimulations.append(num)
-                        else:
-                            execStr = ("update {0} ".format(DBASE_TAB) +
-                                       "set number=? where number=?")
-                            if sim.number in indexes:
-                                newSimNumber = randomIntNotInList(indexes)
-                                self._cursor.execute(execStr,
-                                                    (newSimNumber, sim.number))
-                                self.db.commit()
-                                # update indexes
-                                indexes[indexes.index(sim.number)] = \
-                                    newSimNumber
-                            self._cursor.execute(execStr,
-                                                (sim.number, num))
-                            self.db.commit()
-                            # update indexes
-                            indexes[indexes.index(num)] = sim.number
-                            self.doneSimulations.append(sim.number)
-                    if len(self.doneSimulations) == len(indexes): break
-            else:
-                if self.verb: print "Success using smart comparison..."
-             
-            # There might be datasets left in the database which have not been
-            # identified with planned simulations, but have identical 
-            # sim-numbers. These have to be set to random negative sim numbers
-            simsToDo = [i for i in self.sortIndices \
-                        if not i in self.doneSimulations]
-            execStr = "update {0} ".format(DBASE_TAB) + \
-                      "set number=? where number=?"
-            for sN in simsToDo:
-                if sN in indexes:
-                    newSimNumber = randomIntNotInList(indexes)
-                    self._cursor.execute(execStr, (newSimNumber, int(sN)))
-                    self.db.commit()
-                    # update indexes
-                    indexes[indexes.index(sN)] = newSimNumber
-             
-            ttotal = time.time() - t0
-            self.sims2run = self.Nsimulations-len(self.doneSimulations)
-            if self.verb:
-                print 'Finished data comparison. Found data for', \
-                      len(self.doneSimulations), 'simulations. Remaining:', \
-                      self.sims2run, 'simulations.'
-                print 'Total loading time:', tForm(ttotal)
-                if ttotal > 60: time.sleep(5)
+    def _compare_to_store(self, search, comparison_keys):
+        """Looks for simulations that are already inside the HDF5 store by
+        comparing the values of the columns given by `comparison_keys` to the
+        values of rows in the store.
+        """
+        if len(comparison_keys) > 255:
+            raise ValueError('Cannot treat more parameters than 255 in the '+
+                             'current implementation.')
+            return
+        
+        # Load the DataFrame from the store
+        data = self.get_store_data()
+        if data is None:
+            return None, None
+        
+        # Check if the comparison_keys are among the columns of the store 
+        # DataFrame
+        if not all([key_ in data.columns for key_ in comparison_keys]):
+            raise ValueError('The simulation parameters have changed compared'+
+                             ' to the results in the store. Valid parameters'+
+                             ' are: {}'.format(list(data.columns)))
+            return
+        
+        # Reduce the DataFrame size to the columns that need to be compared
+        df_ = data.ix[:,comparison_keys]
+        n_in_store = len(df_) # number of rows in the stored data
+        if n_in_store == 0:
+            return None, None
+        
+        # Do the comparison
+        matches = []
+        for srow in search.itertuples():
+            # If all rows in store have matched, we're done
+            if n_in_store == len(matches):
+                return matches, None
+            # Compare this row
+            idx = walk_df(df_, srow._asdict(), keys=comparison_keys)
+            if isinstance(idx, int):
+                matches.append((srow[0], idx))
+        
+        # Return the matches plus a ist of unmatched results indices in the 
+        # store
+        unmatched = [i for i in list(df_.index) if not i in zip(*matches)[1]]
+        return matches, unmatched
      
      
 
@@ -1083,11 +986,11 @@ class SimulationSet(object):
         if not self.doneSimulations == self.Nsimulations:
             if self.verb: print 'Launching the simulation(s)...'
          
-        for i, ind in enumerate(self.sortIndices):
+        for i, ind in enumerate(self._sortIndices):
             # if i >= (self.Nsimulations/2):
             sim = self.simulations[ind]
             # if geometry update is needed, run JCMgeo
-            if (i in self.rerunJCMgeo and 
+            if (i in self._rerunJCMgeo and 
                             not self.doneSimulations == self.Nsimulations):
                 if self.verb: print 'Running JCMgeo...'
                 self.runJCMgeo(simulation=sim)
@@ -1222,11 +1125,7 @@ class SimulationSet(object):
         self.gatheredResults = np.genfromtxt(filename, 
                                              delimiter = self.delim,  
                                              names = True)
-         
- 
-    def analyzeResults(self):
-        print 'Analyzing data...'
-        pass
+
              
  
 
@@ -1235,5 +1134,8 @@ class SimulationSet(object):
 
 # Call of the main function
 if __name__ == "__main__":
-    print 'This file is not meant to be run as a main file!', '*** Exiting ***'
+    pass
+    
+    
+    
 

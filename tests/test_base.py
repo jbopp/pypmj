@@ -18,6 +18,9 @@ import unittest
 logger = logging.getLogger(__name__)
 
 
+reason = 'because of limited time. Maybe tomorrow.'
+limited_time = True
+
 STANDARD_KEYS_SINGLE = {'constants' : {'info_level':10,
                                        'storage_format':'Binary',
                                        'mat_superspace':jpy.RefractiveIndexInfo(
@@ -58,9 +61,11 @@ class Test_JCMbasics(unittest.TestCase):
             if os.path.exists(self.tmpDir):
                 rmtree(self.tmpDir)
     
+    @unittest.skipIf(limited_time, 'Bad readability.')
     def test_0_print_info(self):
         jpy.jcm.info()
-      
+    
+    @unittest.skipIf(limited_time, reason)
     def test_project_loading(self):
         specs =['scattering/photonic_crystals/slabs/hexagonal/half_spaces',
                 ['scattering', 'photonic_crystals', 'slabs', 'hexagonal', 
@@ -71,11 +76,13 @@ class Test_JCMbasics(unittest.TestCase):
             project.copy_to(overwrite=True)
             project.remove_working_dir()
 
+    @unittest.skipIf(limited_time, reason)
     def test_parallelization_add_servers(self):
         for resource in jpy.resources.values():
             resource.set_m_n(1,1)
             resource.add_repeatedly()
-
+    
+    @unittest.skipIf(limited_time, reason)
     def test_simuSet_basic(self):
         self.tmpDir = os.path.abspath('tmp')
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
@@ -92,7 +99,8 @@ class Test_JCMbasics(unittest.TestCase):
          
         # This should work:
         jpy.SimulationSet(project, {'constants':{}})
-
+    
+    @unittest.skipIf(limited_time, reason)
     def test_simuSet_single_schedule(self):
         self.tmpDir = os.path.abspath('tmp')
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
@@ -100,12 +108,17 @@ class Test_JCMbasics(unittest.TestCase):
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.Nsimulations, 1)
     
+#     @unittest.skipIf(limited_time, reason)
     def test_simuSet_multi_schedule(self):
         self.tmpDir = os.path.abspath('tmp')
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
         simuset = jpy.SimulationSet(project, STANDARD_KEYS_MULTI)
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.Nsimulations, 20)
+        
+        
+        
+        simuset.close_store()
         
         
 

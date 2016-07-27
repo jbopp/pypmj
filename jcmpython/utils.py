@@ -34,23 +34,71 @@ def acosd(arr):
         arr = np.clip(arr, 0., 1.)
     return np.rad2deg( np.arccos( arr ) )
 
-
 def tand(arr):
     return np.tan( np.deg2rad(arr) )
 
+def walk_df(df, col_vals, keys=None):
+    """Recursively finds a row in a pandas DataFrame where all values match 
+    the values given in col_vals for the keys (i.e. column specifiers) in keys.
+    
+    If no matching rows exist, False is returned. If multiple matching rows
+    exist, a list of indices of the matching rows is returned.
+    
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        This is the DataFrame in which a matching row should be found. For 
+        efficiency, it is not checked if the keys are present in the columns of
+        df, so this should be checked by the user.
+    col_vals : dict or OrderedDict
+        A dict that holds the (single) values the matching row of the DataFrame
+        should have, so that df.loc[match_index, key) ==  col_vals[key] for all
+        keys in the row with index `match_index`. If keys is only a subset of
+        the keys in the dict, remaining key-value pairs are ignored.
+    keys : sequence (list/tuple/numpy.ndarray/etc.), default None
+        keys (i.e. columns in df) to use for the comparison. The keys must be
+        present in col_vals. If keys is None, all keys of col_vals are used.
+    """
+    if keys is None:
+        keys = col_vals.keys()
+    if len(keys) == 0:
+        # No keys are left for comparison, but len(df)>1. This means, all
+        # remaining rows are matches
+        return list(df.index)
+    
+    # Reduce DataFrame to those rows that match the current key
+    df_sub = df[ df[keys[0]]==col_vals[keys[0]] ]
+    
+    if len(df_sub) > 1:
+        # Still multiple rows
+        keys.pop(0)
+        return walk_df(df_sub, col_vals, keys)
+    elif len(df_sub) == 1:
+        # Single row
+        idx = df_sub.index[0]
+        if all([df_sub.at[idx,k] == col_vals[k] for k in keys]):
+            # Single row matches
+            return idx
+        else:
+            # Single row does not match
+            return False
+    else:
+        # No row left
+        return False
 
-def adapt_array(arr):
-    out = io.BytesIO()
-    np.save(out, arr)
-    out.seek(0)
-    # http://stackoverflow.com/a/3425465/190597 (R. Hill)
-    return buffer(out.read())
 
-
-def convert_array(text):
-    out = io.BytesIO(text)
-    out.seek(0)
-    return np.load(out)
+# def adapt_array(arr):
+#     out = io.BytesIO()
+#     np.save(out, arr)
+#     out.seek(0)
+#     # http://stackoverflow.com/a/3425465/190597 (R. Hill)
+#     return buffer(out.read())
+# 
+# 
+# def convert_array(text):
+#     out = io.BytesIO(text)
+#     out.seek(0)
+#     return np.load(out)
 
 
 def pwInVol(V, epsR):
