@@ -48,7 +48,8 @@ STANDARD_KEYS_SINGLE = {'constants' : {'info_level':10,
 
 STANDARD_KEYS_MULTI = deepcopy(STANDARD_KEYS_SINGLE)
 STANDARD_KEYS_MULTI['parameters']['phi'] = [0.,90.]
-STANDARD_KEYS_MULTI['parameters']['theta'] = np.linspace(6.e-7,9.e-7,10)
+STANDARD_KEYS_MULTI['parameters']['theta'] = np.linspace(6.e-7,9.e-7,5)
+STANDARD_KEYS_MULTI['geometry']['h'] = np.linspace(116.,118.,3)
 
 
 
@@ -78,9 +79,8 @@ class Test_JCMbasics(unittest.TestCase):
 
     @unittest.skipIf(limited_time, reason)
     def test_parallelization_add_servers(self):
-        for resource in jpy.resources.values():
-            resource.set_m_n(1,1)
-            resource.add_repeatedly()
+        jpy.resources.set_m_n_for_all(1,1)
+        jpy.resources.add_all_repeatedly()
     
     @unittest.skipIf(limited_time, reason)
     def test_simuSet_basic(self):
@@ -114,7 +114,7 @@ class Test_JCMbasics(unittest.TestCase):
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
         simuset = jpy.SimulationSet(project, STANDARD_KEYS_MULTI)
         simuset.make_simulation_schedule()
-        self.assertEqual(simuset.Nsimulations, 20)
+        self.assertEqual(simuset.Nsimulations, 30)
         
         
         

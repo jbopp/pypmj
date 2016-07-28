@@ -17,6 +17,7 @@
 # =============================================================================
 import logging
 from jcmpython.internals import jcm, daemon, _config
+from jcmpython import resources
 from copy import deepcopy
 from datetime import date
 from glob import glob
@@ -803,8 +804,8 @@ class SimulationSet(object):
         only needs to be called if the geometry changes.
         """
         logging.debug('Sorting the simulations.')
-        # Get a list of dictionaries, each dictionary containing the keys and
-        # values which correspond to geometry information of a single 
+        # Get a list of dictionaries, where each dictionary contains the keys 
+        # and values which correspond to geometry information of a single 
         # simulation
         allGeoKeys = []
         geometryTypes = np.zeros((self.Nsimulations), dtype=int)
@@ -822,6 +823,7 @@ class SimulationSet(object):
             geometryTypes[pos] = t
             foundDiscrepancy = False
             for i in range(pos+1, self.Nsimulations):
+                logging.debug('{}, {}, {}, {}'.format(i,pos,t,foundDiscrepancy))
                 if cmp( allGeoKeys[pos], allGeoKeys[i] ) == 0:
                     if geometryTypes[i] == 0:
                         geometryTypes[i] = t
@@ -831,6 +833,7 @@ class SimulationSet(object):
                         foundDiscrepancy = True
             pos = nextPos
             t += 1
+            
          
         # From this list of types, a new sort order is derived and saved in
         # self._sortIndices. To run the simulations in correct order, one now
@@ -839,6 +842,7 @@ class SimulationSet(object):
         # calculated again (in the new order).
         self.NdifferentGeometries = t-1
         self._rerunJCMgeo = np.zeros((self.NdifferentGeometries), dtype=int)
+        logging.debug('{}'.format(geometryTypes))
         sortedGeometryTypes = np.sort(geometryTypes)
         self._sortIndices = np.argsort(geometryTypes)
         for i in range(self.NdifferentGeometries):
@@ -888,10 +892,14 @@ class SimulationSet(object):
         # store
         unmatched = [i for i in list(df_.index) if not i in zip(*matches)[1]]
         return matches, unmatched
-     
-     
+    
+    def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
+        """Tries to adds all resources configured in the configuration to using
+        the JCMdaemon."""
+        resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
 
- 
+
+
          
     def runJCMgeo(self, simulation, backup = False):
         """

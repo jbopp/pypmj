@@ -60,7 +60,7 @@ def read_resources_from_config():
     if len(server_sections) == 0:
         raise ConfigurationError('No servers were found in the configuration.')
         return
-    resources = {}
+    resources = ResourceDict()
     for ssec in server_sections:
         try:
             nickname = ssec.replace('Server:','')
@@ -193,6 +193,72 @@ class DaemonResource(object):
             logger.warn('Failed to add {}: . Ignoring.'.format(self))
         else:
             raise DaemonError('Failed to add {}: . Exiting.'.format(self))
+
+
+# =============================================================================
+class ResourceDict(dict):
+    """Subclass of dict for extended handling of DaemonResource instances. If
+    a key value pair is added
+    """
+    def __init__(self, *args, **kwargs):
+        dict.__init__(self, *args, **kwargs)
+    
+    def __setitem__(self, key, val):
+        """Sets a key value pair if input is of proper type. Tries to add the
+        key as an attribute."""
+        # Check proper types
+        if not isinstance(key, (str, unicode)):
+            raise ValueError('Keys must be of type str or unicode in a '+
+                             'ResourceDict. Your key is of type {}'.format(
+                                                                type(key)))
+            return
+        if not isinstance(val, DaemonResource):
+            raise ValueError('Values must be of type DaemonResource in a '+
+                             'ResourceDict. Your value is of type {}'.format(
+                                                                type(val)))
+            return
+        
+        # Call the dict.__setitem__ method as usual
+        dict.__setitem__(self, key, val)
+        
+        # Set the key as an attribute
+        try:
+            setattr(self, key, val)
+        except:
+            logger.debug('Unable to add {} as an attribute'.forma(key)+
+                         ' in ResourceDict instance.')
+    
+    def get_resource_names(self):
+        """Just a more meaningful name for the keys()-method"""
+        return self.keys()
+    
+    def get_resources(self):
+        """Just a more meaningful name for the values()-method"""
+        return self.values()
+    
+    def get_all_workstations(self):
+        """Returns a list of all resources with stype=='Workstation'"""
+        return [r for r in self.values() if r.stype == 'Workstation']
+    
+    def get_all_queues(self):
+        """Returns a list of all resources with stype=='Queue'"""
+        return [r for r in self.values() if r.stype == 'Queue']
+    
+    def set_m_n_for_all(self, m, n):
+        """Shorthand for setting multiplicity and n_threads for all
+        resources."""
+        for resource in self.values():
+            resource.set_m_n(m,n)
+    
+    def add_all(self):
+        """Calls the `add` method for all resources."""
+        for r in self.values():
+            r.add_all()
+    
+    def add_all_repeatedly(self, n_shots=10, wait_seconds=5, ignore_fail=False):
+        """Calls the `add_repeatedly` method for all resources."""
+        for r in self.values():
+            r.add_repeatedly(n_shots, wait_seconds, ignore_fail)
 
 
 if __name__ == '__main__':
