@@ -107,6 +107,7 @@ class Test_JCMbasics(unittest.TestCase):
         simuset = jpy.SimulationSet(project, STANDARD_KEYS_SINGLE)
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.Nsimulations, 1)
+        simuset.close_store()
     
 #     @unittest.skipIf(limited_time, reason)
     def test_simuSet_multi_schedule(self):
@@ -116,18 +117,55 @@ class Test_JCMbasics(unittest.TestCase):
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.Nsimulations, 30)
         
+        # Test the correct sort order
+        allGeoKeys = []
+        for s in simuset.simulations:
+            allGeoKeys.append({k: s.keys[k] for k in simuset.geometry.keys()})
+        for i,s in enumerate(simuset.simulations):
+            if s.rerun_JCMgeo:
+                gtype = allGeoKeys[i]
+            else:
+                self.assertDictEqual(gtype, allGeoKeys[i])
+        simuset.close_store()
+
+
+class Test_JCMstorage(unittest.TestCase):
+    
+    DEFAULT_PROJECT = 'scattering/mie/mie2D'
+    MIE_KEYS = {'constants' :{}, 
+                'parameters': {},
+                'geometry': {'radius':np.linspace(0.3, 0.5, 40)}}
+    
+    def tearDown(self):
+        if hasattr(self, 'tmpDir'):
+            if os.path.exists(self.tmpDir):
+                rmtree(self.tmpDir)
+        if os.path.exists(os.path.abspath('logs')):
+            rmtree(os.path.abspath('logs'))
+    
+    #     @unittest.skipIf(limited_time, reason)
+    def test_simuSet(self):
+        self.tmpDir = os.path.abspath('tmp')
+        project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
+        simuset = jpy.SimulationSet(project, self.MIE_KEYS)
+        simuset.make_simulation_schedule()
+        self.assertEqual(simuset.Nsimulations, 40)
         
+        simuset.use_only_resources('localhost')
+        simuset.run()
         
         simuset.close_store()
-        
         
 
 
 if __name__ == '__main__':
     logger.info('This is test_base.py')
     
+#     suites = [
+#         unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics)
+#     ]
     suites = [
-        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics)
+        unittest.TestLoader().loadTestsFromTestCase(Test_JCMstorage)
     ]
     
     for suite in suites:

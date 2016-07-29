@@ -86,6 +86,28 @@ def walk_df(df, col_vals, keys=None):
         # No row left
         return False
 
+def is_sequence(obj):
+    """Checks if a given object is a sequence by checking if it is not a string
+    or dict, but has a __len__-method. This might fail!"""
+    return not isinstance(obj, (str,unicode, dict)) and hasattr(obj, '__len__')
+
+def get_len_of_parameter_dict(d):
+    """Given a dict, returns the length of the longest sequence in its 
+    values."""
+    if not isinstance(d, dict):
+        raise ValueError('Need a dict object for get_len_of_parameter_dict.')
+    cols = d.keys()
+    length = 0
+    for c in cols:
+        val = d[c]
+        if is_sequence(val):
+            l = len(val)
+        else:
+            l = 1
+        if l > length:
+            length = l
+    return length
+
 
 # def adapt_array(arr):
 #     out = io.BytesIO()
