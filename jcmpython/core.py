@@ -55,22 +55,37 @@ class JCMProject(object):
             configuration, given as complete str to append or sequence of
             strings which are .joined by os.path.join(),
           * or an absolute path to the project directory.
-    working_dir : str
+    working_dir : str or None, default None
         The path to which the files in the project directory are copied. If 
         None, a folder called `current_run` is created in the current working
         directory
-    job_name : str
+    project_file_name : str or None, default None
+        The name of the project file. If None, automatic detection is tried
+        by looking for a .jcmp or .jcmpt file with a line that starts with
+        the word `Project`. If this fails, an Exception is raised.
+    job_name : str or None, default None
         Name to use for queuing system such as slurm. If None, a name is
         composed using the specifier.
     
     """
-    def __init__(self, specifier, working_dir=None, job_name=None):
+    def __init__(self, specifier, working_dir=None, project_file_name=None, 
+                 job_name=None):
         self.source = self._find_path(specifier)
         self._check_project()
         self._check_working_dir(working_dir)
+        if project_file_name is None:
+            self.project_file_name = self._find_project_file()
+        else:
+            if (not isinstance(project_file_name, (str, unicode)) or
+                not os.path.splitext(project_file_name)[1] in ['.jcmp', '.jcmpt']):
+                raise ValueError('`project_file_name` must be a project filename'+
+                                 ' or None')
+                return
+            self.project_file_name = project_file_name
         if job_name is None:
             job_name = 'JCMProject_{}'.format(os.path.basename(self.source))
         self.job_name = job_name
+        self.was_copied = False
         
     def _find_path(self, specifier):
         """Finds a JCMsuite project using a path specifier relative to
@@ -100,6 +115,36 @@ class JCMProject(object):
             print source_folder
             raise OSError(err_msg)
         return source_folder
+    
+    def _find_project_file(self):
+        """Tries to find the project file name in the source folder by parsing
+        all .jcmp or .jcmpt files."""
+        jcmpts = glob(os.path.join(self.source, '*.jcmpt'))
+        jcmps = glob(os.path.join(self.source, '*.jcmp'))
+        for files in [jcmpts, jcmps]:
+            matches = self.__parse_jcmp_t_files(files)
+            if len(matches) == 1:
+                return matches[0]
+            elif len(matches) > 1:
+                raise Exception('Multiple valid project files found in '+
+                                'source folder: {}'.format(matches) + 
+                                'Please specify the project filename manually.')
+        # Only arrives here if no valid project file was found
+        raise Exception('No valid project file found in source folder. ' + 
+                        'Please specify the project filename manually.')
+    
+    def __parse_jcmp_t_files(self, files):
+        """Returns all valid project files in a list of jcmp(t)-files."""
+        return [os.path.basename(f) for f in files if self.__is_project_file(f)]
+    
+    def __is_project_file(self, fname):
+        """Checks if a given file contains a line starting with the
+        word `Project`."""
+        with open(fname, 'r') as f:
+            for line in f.readlines():
+                if line.strip().startswith('Project'):
+                    return True
+        return False
     
     def __repr__(self):
         return 'JCMProject({})'.format(self.source)
@@ -141,7 +186,13 @@ class JCMProject(object):
             else:
                 raise OSError('Path {} already exists! If you '.format(path)+
                               'wish copy anyway set `overwrite` to True.')
+        logging.debug('Copying project to folder: {}'.format(self.working_dir))
         copytree(self.source, path)
+        self.was_copied = True
+    
+    def get_project_file_path(self):
+        """Returns the complete path to the project file."""
+        return os.path.join(self.working_dir, self.project_file_name)
     
     def remove_working_dir(self):
         """Removes the working directory.
@@ -149,6 +200,7 @@ class JCMProject(object):
         logging.debug('Removing working directory: {}'.format(self.working_dir))
         if os.path.exists(self.working_dir):
             rmtree(self.working_dir)
+        self.was_copied = False
 
 
 # =============================================================================
@@ -157,17 +209,20 @@ class Simulation(object):
     Class which describes a distinct simulation and provides a method to run it
     and to remove the working directory afterwards.
     """
-    def __init__(self, number, keys, stored_keys, workingDir, 
-                 rerun_JCMgeo=False, projectFileName = 'project.jcmp'):
+    def __init__(self, number, keys, stored_keys, workingDir, projectFileName,
+                 rerun_JCMgeo=False):
         self.number = number
         self.keys = keys
         self.stored_keys = stored_keys
         self.workingDir = workingDir
-        self.rerun_JCMgeo = rerun_JCMgeo
         self.projectFileName = projectFileName
+        self.rerun_JCMgeo = rerun_JCMgeo
         self.results = Results(self)
         self.status = 'Pending'
-        
+    
+    def __repr__(self):
+        return 'Simulation(number={}, status={})'.format(self.number, 
+                                                         self.status)
         
     def run(self, **jcm_kwargs):
         forbidden_keys = ['project_file', 'keys', 'working_dir']
@@ -598,7 +653,12 @@ class SimulationSet(object):
                 raise ValueError('`project` must be of length 2 if it is a '+
                                  'sequence')
             self.project = JCMProject(*project)
-        self.project.copy_to()
+        if not self.project.was_copied:
+            self.project.copy_to()
+    
+    def get_project_wdir(self):
+        """Returns the path to the working directory of the current project."""
+        return self.project.working_dir
 
     def _set_up_folders(self, duplicate_path_levels, storage_folder):
         """Reads storage specific parameters from the configuration and prepares
@@ -843,13 +903,14 @@ class SimulationSet(object):
             logging.info('Performing a single simulation')
         else:
             logging.info('Loops will be done over the following parameter(s):'+
-                         '{}'.format(self._loop_props))
+                         ' {}'.format(self._loop_props))
             logging.info('Total number of simulations: {}'.format(
                                                             self.Nsimulations))
          
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed
         logging.debug('Generating the simulation list.')
+        pfile_path = self.project.get_project_file_path()
         for i, keySet in enumerate(propertyCombinations):
             keys = {}
             workingDir = os.path.join( self.storage_dir, 
@@ -860,7 +921,8 @@ class SimulationSet(object):
                 keys[p] = allKeys[p]
             self.simulations.append(Simulation(number = i, keys = keys,
                                             stored_keys = self.stored_keys,
-                                            workingDir = workingDir) )
+                                            workingDir = workingDir,
+                                            projectFileName=pfile_path) )
 
     def _sort_simulations(self):
         """Sorts the list of simulations in a way that all simulations with 
@@ -1070,6 +1132,14 @@ class SimulationSet(object):
         unmatched = [i for i in list(df_.index) if not i in zip(*matches)[1]]
         return matches, unmatched
     
+    def get_current_resources(self):
+        """Returns a list of the currently configured resources, i.e. the 
+        ones that will be added using `add_resources`."""
+        if hasattr(self, 'resource_list'):
+            return [resources[r] for r in self.resource_list]
+        else:
+            return [resources[r] for r in resources.get_resource_names()]
+    
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
         resources have not already been added. 
@@ -1132,10 +1202,51 @@ class SimulationSet(object):
 #         if self.viewGeometry:
 #             jcm.view(os.path.join(self.geometryFolder, 'grid.jcm'))
  
-    def compute_geometry(self, show=False):
+    def compute_geometry(self, simulation, **jcm_kwargs):
+        """Computes the geometry (i.e. runs jcm.geo) for a specific simulation
+        of the simulation set.
+        
+        Parameters
+        ----------
+        simulation : Simulation or int
+            The `Simulation`-instance for which the geometry should be
+            computed. If the type is `int`, it is treated as the index of the
+            simulation in the simulation list.
+        
+        The jcm_kwargs are directly passed to jcm.geo, except for `project_dir`,
+        `keys` and `working_dir`, which are set automatically (ignored if 
+        provided).
+        """
         logging.debug('Computing geometry.')
+        
+        if isinstance(simulation, int):
+            simulation = self.simulations[simulation]
+        if not isinstance(simulation, Simulation):
+            raise ValueError('`simulation` must be of type Simulation or int.')
+            return
+        
+        # Check the keyword arguments
+        forbidden_keys = ['project_file', 'keys', 'working_dir']
+        for key in jcm_kwargs:
+            if key in forbidden_keys:
+                logging.warn('You cannot use {} as a keyword '.format(key)+
+                             'argument for jcm.geo. It is already set by the'+
+                             ' SimulationSet instance.')
+                del jcm_kwargs[key]
+        
+        # Run jcm.geo. The cd-fix is necessary because the project_dir/working_dir
+        # functionality seems to be broken in the current python interface!
+        _thisdir = os.getcwd()
+        os.chdir(self.get_project_wdir())
+        jcm.geo(project_dir=self.project.working_dir,
+                keys=simulation.keys, 
+                working_dir=self.project.working_dir,
+                **jcm_kwargs)
+        os.chdir(_thisdir)
+        
  
-    def _start_simulations(self, N='all', **jcm_kwargs):
+    def _start_simulations(self, N='all', jcm_geo_kwargs={}, 
+                           jcm_solve_kwargs={}):
         logging.debug('Starting to simulate.')
         
         jobIDs = []
@@ -1149,9 +1260,9 @@ class SimulationSet(object):
         for sim in self.simulations:
             i = sim.number
             if sim.rerun_JCMgeo:
-                self.compute_geometry()
+                self.compute_geometry(sim, **jcm_geo_kwargs)
             if not sim.number in self.finished_sim_numbers:
-                sim.run(**jcm_kwargs)
+                sim.run(**jcm_solve_kwargs)
                 if hasattr(sim, 'jobID'):
                     logging.debug(
                             'Queued simulation {0} of {1} with jobID {2}'.\
