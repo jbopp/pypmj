@@ -1,0 +1,30 @@
+Project = {
+  InfoLevel = 3
+  Electromagnetics {
+    TimeHarmonic {
+      Scattering {
+        FieldComponents = Electric
+        FiniteElementDegree = 3
+        Refinement = {
+          NSegmentsPerWavelength = 5
+          Adaptivity = no
+          MaxNumberSteps = 0
+          PreRefinements = 0
+        }
+      }
+    }
+  }
+}
+
+# computes the energy flux of the scattered field into the exterior domain
+PostProcess {
+  FluxIntegration {
+    FieldBagPath = "./mie2D_results/fieldbag.jcm"
+    OutputFileName = "./mie2D_results/energyflux_scattered.jcm"  
+    OutputQuantity = ElectromagneticFieldEnergyFlux
+    InterfaceType = ExteriorDomain
+  }
+}
+
+
+

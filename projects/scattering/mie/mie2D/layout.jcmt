@@ -1,0 +1,40 @@
+Layout {
+  UnitOfLength = 1e-6
+
+  # Computational domain
+  Parallelogram {
+    DomainId = 1
+    SidelengthA = 4
+    SidelengthB = 4
+    Priority = -1
+
+    # set transparent boundary conditions
+    BoundarySegment {
+      Number = 1
+      BoundaryClass = Transparent
+    }
+    BoundarySegment {
+      Number = 2
+      BoundaryClass = Transparent
+    }
+    BoundarySegment {
+      Number = 3
+      BoundaryClass = Transparent
+    }
+    BoundarySegment {
+      Number = 4
+      BoundaryClass = Transparent
+    }
+  }
+
+  # Scatterer (rod)
+  Circle {
+    DomainId = 2
+    Radius = %(radius)e
+    RefineAll = 4
+    Priority = 1
+  } 
+}
+
+
+ 
