@@ -82,6 +82,7 @@ config.add_section('Logging')
 config.set('Logging', 'level', 'DEBUG')
 config.set('Logging', 'write_logfile', True)
 config.set('Logging', 'send_mail', True)
+config.set('Logging', 'mail_server', 'localhost')
 
 config.add_section('DEFAULTS')
 config.set('DEFAULTS', 'database_name', 'result_database.h5')

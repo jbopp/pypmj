@@ -106,7 +106,7 @@ class DaemonResource(object):
         self.n_threads_default = n_threads_default
         self.stype = stype
         self.nickname = nickname
-        self.JCMKERNEL = _config.get('JCMsuite', 'kernel')
+        self.JCMKERNEL = _config.getint('JCMsuite', 'kernel')
         self.kwargs = kwargs
         self.restore_default_m_n()
     

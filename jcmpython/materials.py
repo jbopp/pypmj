@@ -1,13 +1,27 @@
 # coding: utf8
 
-"""Utilities for setting material data or to read in and interpolate it from
+"""Extension for setting material data or to read in and interpolate it from
 appropriate data bases.
 
 Authors : Carlo Barth
-
 """
 
-from jcmpython.internals import _config
+# Let users know if they're missing any of our hard dependencies
+# (this is section is copied from the pandas __init__.py) 
+hard_dependencies = ('parse', 'yaml')
+missing_dependencies = []
+
+for dependency in hard_dependencies:
+    try:
+        __import__(dependency)
+    except ImportError as e:
+        missing_dependencies.append(dependency)
+
+if missing_dependencies:
+    raise ImportError("Missing required dependencies {0}".format(
+                                                        missing_dependencies))
+
+from jcmpython.internals import _config, ConfigurationError
 import numpy as np
 import os
 from scipy.interpolate import pchip
@@ -19,71 +33,21 @@ logger = logging.getLogger(__name__)
 # Load values from configuration
 RI_DBASE = _config.get('Data', 'refractiveIndexDatabase')
 
-
-# =============================================================================
-class MaterialData:
-    """
-    
-    """
-    
-    defaultMinWvl = 1.e-9
-    defaultMaxWvl = 1.e-5
-    
-    def __init__(self, filename, unitOfLength = 1.e-10, 
-                 molarAbsorptionData = False, fixedN = 1.,
-                 extendDataWithDefaults = False):
-        self.filename = filename
-        self.unitOfLength = unitOfLength
-        self.molarAbsorptionData = molarAbsorptionData
-        self.fixedN = fixedN
-        self.extendDataWithDefaults = extendDataWithDefaults
-        self.loadData()
-    
-    def loadData(self):
-        self.data = np.loadtxt(self.filename)
-        _, I = np.unique(self.data[:,0], return_index=True)
-        self.data = self.data[I, :]
-        self.data[:,0] *= self.unitOfLength # convert to meter
-        
-        if self.molarAbsorptionData:
-            newData = np.zeros((self.data.shape[0], 3))
-            newData[:,0] = self.data[:,0]
-            newData[:,1] = self.fixedN
-            newData[:,2] = self.data[:,1] * 100*newData[:,0] * np.log(10.) / \
-                           ( 4 * np.pi)
-            self.data = newData
-            self.data[:,2] = np.clip(self.data[:,2], a_min=0., a_max=np.inf)
-            if self.extendDataWithDefaults:
-                Nwvl = self.data.shape[0]
-                minWvl = np.min(self.data[:,0])
-                maxWvl = np.max(self.data[:,0])
-                avgStepSize = (maxWvl-minWvl)/Nwvl
-                
-                wvlBefore = np.arange(self.defaultMinWvl, minWvl, avgStepSize)
-                wvlAfter = np.arange(maxWvl+avgStepSize, 
-                                     self.defaultMaxWvl+avgStepSize, 
-                                     avgStepSize)
-                newAbsorp = np.hstack((np.zeros_like(wvlBefore),
-                                       self.data[:,2],
-                                       np.zeros_like(wvlAfter)) )
-                allWvls = np.hstack((wvlBefore, self.data[:,0], wvlAfter))
-                NwvlNew = len(allWvls)
-                self.data = np.vstack((allWvls,
-                                       np.ones((NwvlNew)) * self.fixedN,
-                                       newAbsorp)).T
-            
-    
-    def averagedRefractiveIndex(self, wavelengths):
-        nSpline = UnivariateSpline(self.data[:,0], self.data[:,1], s=0)
-        nVals = nSpline(wavelengths)
-        return np.average(nVals)
-
+# Check if the configured refractiveIndexDatabase is valid
+_err_msg = 'The configured refractiveIndexDatabase {} does'.format(RI_DBASE)+\
+           ' not seem to be an appropriate data base for this module.'
+if not os.path.isdir(RI_DBASE):
+    raise ConfigurationError(_err_msg)
+content = os.listdir(RI_DBASE)
+for sub in ['filmetrics','glass','main','organic','other','library.yml']:
+    if not sub in content:
+        raise ConfigurationError(_err_msg+' Missing: {}'.format(sub))
 
 
 # =============================================================================
-class RefractiveIndexInfo(object):
+class MaterialData(object):
     """
-    Class RefractiveIndexInfo
+    Class MaterialData
     --------------------------
     
     Makes different refractive index databases accessible with Python, currently
@@ -92,7 +56,7 @@ class RefractiveIndexInfo(object):
     Usage:
     ------
     Create an instance for the desired material, e.g. silicon, using 
-        >> refInfo = RefractiveIndexInfo( material = 'silicon' )
+        >> refInfo = MaterialData( material = 'silicon' )
     You can easily calculate the refractive index data at desired wavelength
     using
         >> refInfo.getNKdata( yourWavelengths )
@@ -102,7 +66,7 @@ class RefractiveIndexInfo(object):
         >> refInfo.plotData() # you can also provide desired wavelengths here
     
     Further, you can get a list of knownMaterials by
-        >> refInfo = RefractiveIndexInfo()
+        >> refInfo = MaterialData()
         >> print refInfo.getKnownMaterials()
     
     
@@ -116,22 +80,25 @@ class RefractiveIndexInfo(object):
     preferred database.
 
 
-    Input parameters:
+    Parameters:
     -----------------
-        material (default: None)            : value for the materials-dictionary
-        unitOfLength (default: 1.)          : multiplier for the wavelengths you
-                                              will provide (e.g.: 1. = meter,
-                                              1.e-9 = nanometer) 
-        database (default: 'preferred')     : the database to use. 'preferred'
-                                              makes use of the 'preferredDbase'
-                                              key in the materials-dictionary
-        interpolater (default: 'pchip')     : SciPy-interpolater to use.
-                                              Available: pchip, spline
-        splineDegree (default: 3)           : only for interpolater = 'spline'
-                                              specifies the k-parameter in
-                                              scipy.UnivariateSpline
-        NformulaSampleVals (default: 1000.) : Number of (logspaced) values for
-                                              sampling of formula-based data
+    material : str, number or None, default None
+        If str, it is the name of the material in the materials-dictionary. If
+        number, fixed refractive index of this value.
+    unitOfLength : float, default 1.
+        multiplier for the wavelengths you will provide (e.g.: 1. = meter,
+        1.e-9 = nanometer).
+    database {'RefractiveIndex.info', 'filmetrics', 'preferred'}, 
+             default 'preferred'
+        The database to use. 'preferred' makes use of the 'preferredDbase'
+        key in the materials-dictionary.
+    interpolater {'spline', 'pchip'}, default 'pchip'
+        SciPy-interpolater to use.
+    splineDegree : int, default: 3
+        Only for interpolater 'spline'. Specifies the k-parameter in
+        scipy.UnivariateSpline.
+    NformulaSampleVals: int, default: 1000
+        Number of (logspaced) values for sampling of formula-based data.
     """
     
     materials = {
@@ -225,7 +192,7 @@ class RefractiveIndexInfo(object):
     
     def __init__(self, material = None, unitOfLength = 1., 
                  database = 'preferred', interpolater = 'pchip', 
-                 splineDegree = 3, NformulaSampleVals = 1000.):
+                 splineDegree = 3, NformulaSampleVals = 1000):
         
         if material == None:
             return
@@ -603,7 +570,7 @@ class RefractiveIndexInfo(object):
 
 if __name__ == '__main__':
     
-    d = RefractiveIndexInfo('silicon')
+    d = MaterialData('silicon')
     d.plotData()
     
     # Wavelength parameters
@@ -613,11 +580,11 @@ if __name__ == '__main__':
     wvl = np.arange(wavelength_start, wavelength_end + wavelength_stepSize,
                     wavelength_stepSize)
     
-#     data1 = RefractiveIndexInfo(database = 'RefractiveIndex.info',
+#     data1 = MaterialData(database = 'RefractiveIndex.info',
 #                                material = 'gallium_arsenide')
 #     data1.getAllInfo()
 #       
-#     data2 = RefractiveIndexInfo(database = 'filmetrics',
+#     data2 = MaterialData(database = 'filmetrics',
 #                                 material = 'gallium_arsenide')
 #     data2.getAllInfo()
 #     
@@ -629,24 +596,12 @@ if __name__ == '__main__':
 #     plt.show()
 #     quit()
     
-    mats = RefractiveIndexInfo().getKnownMaterials()
+    mats = MaterialData().getKnownMaterials()
     mats = ['silver']
     for m in mats:
         try:
             logger.debug(m)
-#             data1 = RefractiveIndexInfo(material = m)
-#             data2 = RefractiveIndexInfo(database = 'filmetrics', material = m)
-#             data1.getAllInfo()
-#             data2.getAllInfo()
-#             data1.plotData(wavelengths = wvl, convert=True)
-#             
-#             plt.figure(1)
-#             data1.plotData(wavelengths = wvl, convert=True, show=False)
-#             plt.figure(2)
-#             data2.plotData(wavelengths = wvl, convert=True, show=False)
-#             plt.show()
-
-            refInfo = RefractiveIndexInfo(material = m)
+            refInfo = MaterialData(material = m)
             refInfo.plotData(wavelengths = wvl, convert=True)
         except:
             pass

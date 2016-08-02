@@ -1,7 +1,6 @@
 """Startup utilities for config file parsing and import of jcmwave.
 
 Authors : Carlo Barth
-
 """
 
 # Imports

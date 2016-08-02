@@ -4,12 +4,18 @@ Project = {
     TimeHarmonic {
       Scattering {
         FieldComponents = Electric
-        FiniteElementDegree = 3
+        Accuracy{
+            FiniteElementDegree{
+                Adaptive{
+	                MaximumDegree= 4
+	            }
+	        }
+	    }
         Refinement = {
-          NSegmentsPerWavelength = 5
-          Adaptivity = no
-          MaxNumberSteps = 0
-          PreRefinements = 0
+          Adaptivity = yes
+          Termination {
+            PrecisionFieldEnergy = 2.e-2
+          }
         }
       }
     }
