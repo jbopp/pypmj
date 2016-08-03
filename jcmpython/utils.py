@@ -3,7 +3,7 @@
 Authors : Carlo Barth
 """
 
-from jcmpython.internals import _config
+from jcmpython.internals import _config, daemon
 from cStringIO import StringIO
 from datetime import timedelta
 import logging
@@ -11,6 +11,9 @@ from numbers import Number
 import os
 import sys
 from tempfile import mktemp
+import time
+import traceback
+import zipfile
 logger = logging.getLogger(__name__)
 
 # Load values from configuration
@@ -151,7 +154,57 @@ def rename_directories(renaming_dict):
     # Step 2: rename these folders to the target names
     for dir_ in valid_dict:
         os.rename(tmp_dict[dir_], valid_dict[dir_])
-    
+
+def split_path_to_parts(path):
+    """Splits a path to its parts, so that os.path.join(*parts) gives
+    the input path again."""
+    parts = []
+    head, tail = os.path.split(path)
+    while head and head != os.path.sep:
+        parts.append(tail)
+        head, tail = os.path.split(head)
+    if head == os.path.sep:
+        tail = os.path.join(head, tail)
+    parts.append(tail)
+    parts.reverse()
+    return parts
+
+def get_folders_in_zip(zipf):
+    """Returns a list of all folders and files in the root level
+    of an open ZipFile."""
+    if not isinstance(zipf, zipfile.ZipFile):
+        raise ValueError('`zipfile` must be an open zipfile.ZipFile.')
+    folders = []
+    for name in zipf.namelist():
+        split = split_path_to_parts(name)
+        if len(split) <= 2:
+            fold = split[0]
+            if not fold in folders:
+                folders.append(fold)
+    return folders
+
+def append_dir_to_zip(directory, zip_file_path):
+    """Appends a directory to a zip-archive. Raises an exception if the
+    directory is already inside the archive."""
+    if not os.path.isdir(directory):
+        raise ValueError('{} is not a valid directory.'.format(directory))
+        return
+    rel_to_path = os.path.dirname(directory)
+    ziph = zipfile.ZipFile(zip_file_path, 'a')
+    folders = get_folders_in_zip(ziph)
+    for root, _, files in os.walk(directory):
+        relDir = os.path.relpath(root, rel_to_path)
+        # Check if the directory is already inside
+        if relDir in folders:
+            raise Exception('Folder {} is already in the zip-archive'.format(
+                                                                        relDir))
+            ziph.close()
+            return
+        # Write contents to the archive
+        for file_ in files:
+            ziph.write(os.path.join(root, file_),
+                       os.path.join(relDir, file_))
+    ziph.close()    
 
 class Capturing(list):
     """
@@ -202,61 +255,73 @@ def send_status_email(text):
     except Exception as e:
         logger.warn('Sending of status e-mail failed: {}'.format(e))
         return
-        
 
-# def runSimusetsInSaveMode(simusets, doAnalyze = False,
-#                           Ntrials = 5, verb = True, sendLogs = True):
-#     
-#     Nsets = len(simusets)
-#     thisPC = simusets[0].PC
-#     ti0 = time.time()
-#     for i, sset in enumerate(simusets):
-#         trials = 0
-#         msg = 'Starting simulation-set {0} of {1}'.format(i+1, Nsets)
-#         if verb: print msg
-#         send_status_email(thisPC.institution, msg)
-#             
-#         # Initialize the simulations
-#         while trials < Ntrials:
-#             tt0 = time.time()
-#             daemon.shutdown()
-#             try:
-#                 if trials > 0:
-#                     sset.prepare4RunAfterError()
-#                 sset.run()
-#                 if doAnalyze:
-#                     try:
-#                         simusets[i].analyzeResults()
-#                     except:
-#                         pass
-#             except:
-#                 trials += 1
-#                 msg = 'Simulation-set {0} failed at trial {1} of {2}'.\
-#                       format(i+1, trials, Ntrials)
-#                 msg += '\n\n***Error Message:\n'+traceback.format_exc()+'\n***'
-#                 if verb: print msg
-#                 send_status_email(thisPC.institution, msg)
-#                 continue
-#             break
-#         ttend = tForm(time.time() - tt0)
-#         msg = 'Finished simulation-set {0} of {1}. Runtime: {2}'.\
-#               format(i+1, Nsets, ttend)
-#         if verb: print msg
-#         send_status_email(thisPC.institution, msg)
-#          
-#     tend = tForm(time.time() - ti0)
-#     msg = 'All simulations finished after {0}'.format(tend)
-#     if sendLogs:
-#         for i, sset in enumerate(simusets):
-#             msg += '\n\n***Logs for simulation set {0}'.format(i+1)
-#             for simNumber in sset.logs:
-#                 msg += '\n\n'
-#                 msg += 'Log for simulation number {0}\n'.format(
-#                           simNumber) +  80 * '=' + '\n'
-#                 msg += sset.logs[simNumber]
-#             msg += '\n***'
-#             
-#     if verb: print msg
-#     send_status_email(thisPC.institution, msg)
+
+def __prepare_SimulationSet_after_fail(simuset):
+    """Prepares a SimulationSet instance to be run again after termination by
+    an Error. It reschedules the simulations and shuts down the JCMdaemon."""
+    if hasattr(simuset, '_wdirs_to_clean'):
+        del simuset._wdirs_to_clean
+    simuset.make_simulation_schedule()
+    try:
+        daemon.shutdown()
+    except:
+        pass
+
+def run_simusets_in_save_mode(simusets, Ntrials=5, **run_kwargs):
+    """Given a list of SimulationSets, tries to run each SimulationSet 
+    `Ntrials` times, starting at the point where it was terminated by an 
+    unwanted error. The `run_kwargs` are passed to the run-method of each
+    set. Status e-mails are sent if configured in the configuration file."""
+    
+    if not is_sequence(simusets):
+        simusets = [simusets]
+    
+    # Check simuset validity
+    for sset in simusets:
+        # dirty check if this is a SimulationSet instance
+        if not hasattr(sset, 'STORE_META_GROUPS'):
+            raise ValueError('All simusets must be of type SimulatuionSet.')
+            return
+        if not sset._is_scheduled():
+            raise RuntimeError('{} is not scheduled yet.'.format(sset))
+            return
+    
+    # Start
+    Nsets = len(simusets)
+    ti0 = time.time()
+    for i, sset in enumerate(simusets):
+        trials = 0
+        msg = 'Starting SimulationSet {0} of {1}'.format(i+1, Nsets)
+        if SEND_MAIL: send_status_email(msg)
+             
+        # Run the simulations
+        while trials < Ntrials:
+            tt0 = time.time()
+            try:
+                if trials > 0:
+                    # Set up this simuset again after the error
+                    __prepare_SimulationSet_after_fail(sset)
+                sset.run(**run_kwargs)
+            except KeyboardInterrupt:
+                # Allow keyboard interrupts
+                return
+            except:
+                trials += 1
+                msg = 'SimulationSet {0} failed at trial {1} of {2}'.\
+                      format(i+1, trials, Ntrials)
+                msg += '\n\n***Error Message:\n'+traceback.format_exc()+'\n***'
+                if SEND_MAIL: send_status_email(msg)
+                continue
+            break
+        ttend = tForm(time.time() - tt0)
+        msg = 'Finished SimulationSet {0} of {1}. Runtime: {2}'.\
+              format(i+1, Nsets, ttend)
+        if SEND_MAIL: send_status_email(msg)
+          
+    tend = tForm(time.time() - ti0)
+    msg = 'All simulations finished after {0}'.format(tend)
+             
+    if SEND_MAIL: send_status_email(msg)
 
 

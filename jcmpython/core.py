@@ -14,7 +14,7 @@ from datetime import date
 from glob import glob
 from itertools import product
 import numpy as np
-from shutil import copyfile as cp, copytree, rmtree
+from shutil import copytree, rmtree
 import os
 import pandas as pd
 import time
@@ -383,16 +383,21 @@ class Simulation(object):
         else:
             logger.warn('You are trying to get a DataFrame for a non-'+
                          'evaluated simulation. Returning only the keys.')
-        return pd.DataFrame(dfdict, index=[self.number])
+        df = pd.DataFrame(dfdict, index=[self.number])
+        df.index.name = 'number'
+        return df
     
     def _get_parameter_DataFrame(self):
         """Returns a DataFrame containing only the input parameters with the
         simulation number as the index. This is mainly used for HDF5 store
         comparison."""
         dfdict = {skey:self.keys[skey] for skey in self.stored_keys}
-        return pd.DataFrame(dfdict, index=[self.number])
+        df = pd.DataFrame(dfdict, index=[self.number])
+        df.index.name = 'number'
+        return df
     
     def remove_working_directory(self):
+        """Removes the working directory."""
         wdir = self.working_dir()
         if os.path.exists(wdir):
             try:
@@ -405,8 +410,6 @@ class Simulation(object):
             logger.warn('Working directory {} does not exist'.format(
                          os.path.basename(wdir)) +\
                          ' for simNumber {}'.format(self.number))
-
-
 
 
 # =============================================================================
@@ -468,7 +471,7 @@ class SimulationSet(object):
     STORE_META_GROUPS = ['parameters', 'geometry']
     STORE_VERSION_GROUP = 'version_data'
     
-    def __init__(self, project, keys, duplicate_path_levels=3, 
+    def __init__(self, project, keys, duplicate_path_levels=0, 
                  storage_folder='from_date', ignore_existing_dbase=False,
                  combination_mode='product', check_version_match=True):
                 
@@ -485,7 +488,11 @@ class SimulationSet(object):
         
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
-     
+    
+    def __repr__(self):
+        return 'SimulationSet(project={}, storage={})'.format(self.project,
+                                                              self.storage_dir)
+    
     def _check_keys(self, keys):
         """Checks if the provided keys are valid and if they contain values for
         loops.
@@ -645,6 +652,24 @@ class SimulationSet(object):
         if self.is_store_empty():
             return None
         return self.store[DBASE_TAB]
+    
+    def write_store_data_to_file(self, file_path=None, mode='CSV', **kwargs):
+        """Writes the data that is currently in the store to a CSV or an Excel
+        file. `mode` must be either 'CSV' or 'Excel'. If `file_path` is None, 
+        the default name results.csv/xls in the storage folder is used. 
+        `kwargs` are passed to the corresponding pandas functions."""
+        if not mode in ['CSV', 'Excel']:
+            raise ValueError('Unknown mode: {}. Use CSV or Excel.'.format(mode))
+        if mode=='CSV':
+            if file_path is None:
+                file_path = os.path.join(self.storage_dir, 'results.csv')
+            self.get_store_data().to_csv(file_path, **kwargs)
+        else:
+            if file_path is None:
+                file_path = os.path.join(self.storage_dir, 'results.xls')
+            writer = pd.ExcelWriter(file_path)
+            self.get_store_data().to_excel(writer, 'data', **kwargs)
+            writer.save()
         
     def close_store(self):
         """Closes the HDF5 store."""
@@ -657,68 +682,6 @@ class SimulationSet(object):
             raise ValueError('Can only append pandas DataFrames to the store.')
             return
         self.store.append(DBASE_TAB, data) 
-
-
-
-#     def initializeSimulations(self):
-#         if self.verb: print 'Initializing the simulations...'
-#         self.setFolders()
-#         self.connect2database()
-#         self.planSimulations()
-#         if self.loadDataOnly:
-#             self.gatherResults()
-    
-#     def prepare4RunAfterError(self):
-#         self.sureAboutDbase = True
-#         self.warningMode = False
-#         self.overrideDatabase = False
-#         self.useSaveFilesIfAvailable = True
-#         self.logs = {}
-#         self.initializeSimulations()     
-#
-        
-
-#     def run(self):
-#         if self.loadFromResultsFile:
-#             if self.verb: 
-#                 print 'Skipping run, since loadFromResultsFile = True...'
-#             return
-#         elif self.loadDataOnly:
-#             if self.verb: 
-#                 print 'Skipping run, since loadDataOnly = True...'
-#             return
-#         t0 = time.time()
-#         if not self.doneSimulations == self.num_sims:
-#             self.registerResources()
-#         else:
-#             if self.verb:
-#                 print 'All simulations already done. Using data from save files.'
-#         self.launchSimulations(self.maxNumberParallelSims)
-#         if self.viewGeometryOnly: return
-#         self.gatherResults()
-#         self.saveGatheredResults()
-#          
-#         # Write all logs to the desired logfile, if not writeLogsToFile==''
-#         if self.writeLogsToFile:
-#             with open(self.writeLogsToFile, 'w') as f:
-#                 for simNumber in self.logs:
-#                     strOut = '\n\n'
-#                     strOut += 'Log for simulation number {0}\n'.format(
-#                               simNumber) +  80 * '=' + '\n'
-#                     strOut += self.logs[simNumber]
-#                     f.write(strOut)
-#             if self.verb: print 'Saved logs to', self.writeLogsToFile
-#          
-#         # Print out the overall time
-#         t1 = time.time() - t0
-#         if self.verb: print 'Total time for all simulations:', tForm(t1)
-#      
-#     def getDBinds(self):
-#         self._cursor.execute("select number from {0}".format(DBASE_TAB))
-#         return [i[0] for i in self._cursor.fetchall()]
-    
-    
-    
     
     def make_simulation_schedule(self):
         """Makes a schedule by getting a list of simulations that must be
@@ -739,7 +702,6 @@ class SimulationSet(object):
         precheck = self._precheck_store()
         logger.debug('Result of the store pre-check: {}'.format(precheck))
         if precheck == 'Empty':
-            self._store_metadata()
             self.finished_sim_numbers = []
         if precheck == 'Extended Check':
             self._extended_store_check()
@@ -905,9 +867,6 @@ class SimulationSet(object):
     
     def _store_version_data(self):
         """Stores metadata of the JCMsuite and jcmpython versions."""
-        if not self.is_store_empty():
-            logger.warn('Tried to set version data on a non-empty store.')
-            return
         self.store[self.STORE_VERSION_GROUP] = self.__get_version_dframe()
     
     def __get_meta_dframe(self, which):
@@ -971,9 +930,6 @@ class SimulationSet(object):
         The `constants` attribute is not stored in the metadata, as these keys
         are also not stored in the data store.
         """
-        if not self.is_store_empty():
-            logger.warn('Tried to set metadata on a non-empty store.')
-            return
         for group in self.STORE_META_GROUPS:
             self.store[group] = self.__get_meta_dframe(group)
         self._store_version_data()
@@ -1285,12 +1241,16 @@ class SimulationSet(object):
         if N == 'all':
             N = self.num_sims
         if not isinstance(N, int):
-            raise ValueError('`N` must be an integer or `all`')
+            raise ValueError('`N` must be an integer or "all"')
             
         for sim in self.simulations:
             i = sim.number
+            
+            # TODO: Find out how to reduce the calls of JCMgeo
 #             if sim.rerun_JCMgeo:
 #                 self.compute_geometry(sim, **jcm_geo_kwargs)
+            
+            # Start the simulation if it is not already finished
             if not sim.number in self.finished_sim_numbers:
                 # Start to solve the simulation and receive a job ID
                 jobID = sim.solve(**jcm_solve_kwargs)
@@ -1300,14 +1260,14 @@ class SimulationSet(object):
                 jobIDs.append(jobID)
                 ID2simNumber[jobID] = sim.number
                 
-                # wait for N simulations to finish
-                if len(jobIDs) != 0:
-                    if (divmod(i+1, N)[1] == 0) or ((i+1) == self.num_sims):
-                        logger.info('Waiting for {} '.format(len(jobIDs)) +
-                                      'simulation(s) to finish...')
-                        self._wait_for_simulations(jobIDs, ID2simNumber)
-                        jobIDs = []
-                        ID2simNumber = {}
+            # wait for N simulations to finish
+            if len(jobIDs) != 0:
+                if (divmod(i+1, N)[1] == 0) or ((i+1) == self.num_sims):
+                    logger.info('Waiting for {} '.format(len(jobIDs)) +
+                                  'simulation(s) to finish...')
+                    self._wait_for_simulations(jobIDs, ID2simNumber)
+                    jobIDs = []
+                    ID2simNumber = {}
  
     def _wait_for_simulations(self, ids2waitFor, ID2simNumber):
         """Waits for the job IDS in the list `ids2waitFor` to finish using
@@ -1352,10 +1312,14 @@ class SimulationSet(object):
                     # and append them to the HDF5 store
                     self.append_store(sim._get_DataFrame())
               
-            # Remove all working directories of the finished simulations if
-            # cleanMode is used
-            if self._clean_mode:
+            # Remove/zip all working directories of the finished simulations if
+            # wdir_mode is 'zip'/'delete'
+            if self._wdir_mode in ['zip', 'delete']:
                 for n in finishedSimNumbers:
+                    if self._wdir_mode == 'zip':
+                        utils.append_dir_to_zip(
+                                self.simulations[n].working_dir(), 
+                                self._zip_file_path)
                     self.simulations[n].remove_working_directory()
               
             # Update the number of finished jobs and the list with ids2waitFor
@@ -1376,20 +1340,40 @@ class SimulationSet(object):
             return False
         return set(range(self.num_sims)) == set(self.finished_sim_numbers)
 
-    def run(self, evaluation_func, N='all', delete_wdirs=False,
-            jcm_geo_kwargs={}, jcm_solve_kwargs={}):
+    def run(self, evaluation_func=None, N='all', wdir_mode='keep', 
+            zip_file_path = None, jcm_geo_kwargs={}, jcm_solve_kwargs={}):
         """Convenient function to add the resources, run all necessary
-        simulations and save the results to the HDF5 store. Only `N` simulations
-        will be executed in parallel at a time as a maximum. The evaluation will
-        be performed using the evaluation_func. `jcm_geo_kwargs` and 
-        `jcm_solve_kwargs` are dicts of keyword arguments which are directly 
-        passed to jcm.geo and jcm.solve, respectively. Please consult the docs
-        of the Simulation.evaluate_results-method for info on how to use the
-        evaluation_func.
+        simulations and save the results to the HDF5 store.
         
         Parameters
         ----------
-        """ 
+        evaluation_func : callable or None, default None
+            Function for result evaluation. If None, only a standard evaluation
+            will be executed. See the docs of the 
+            Simulation.evaluate_results-method for more info on how to use this
+            parameter.
+        N : int or 'all', default 'all'
+            Number of simulations that will be pushed to the jcm.daemon at a
+            time. If 'all', all simulations will be pushed at once. If many 
+            simulations are pushed to the daemon, the number of files and the
+            size on disk can grow dramatically. This can be avoided by using
+            this parameter, while deleting or zipping the working directories
+            at the same time using the `wdir_mode` parameter.
+        wdir_mode : {'keep', 'zip', 'delete'}, default 'keep'
+            The way in which the working directories of the simulations are
+            treated. If 'keep', they are left on disk. If 'zip', they are
+            appended to the zip-archive controled by `zip_file_path`. If 
+            'delete', they are deleted. Caution: if you zip the directories and
+            extend your data later in a way that the simulation numbers change,
+            problems may occur.
+        zip_file_path : str (file path) or None
+            Path to the zip file if `wdir_mode` is 'zip'. The file is created
+            if it does not exist. If None, the default file name 
+            'working_directories.zip' in the current `storage_dir` is used.
+        
+        `jcm_geo_kwargs` and `jcm_solve_kwargs` are dicts of keyword arguments
+        which are directly passed to jcm.geo and jcm.solve, respectively. 
+        """
         if self.all_done():
             logger.info('Nothing to run: all simulations finished.')
             return
@@ -1398,10 +1382,26 @@ class SimulationSet(object):
             logger.info('Please run `make_simulation_schedule` first.')
             return
         
-        self._clean_mode = delete_wdirs
+        if zip_file_path is None:
+            zip_file_path = os.path.join(self.storage_dir, 
+                                         'working_directories.zip')
+        if not os.path.isdir(os.path.dirname(zip_file_path)):
+            raise OSError('The zip file cannot be created, as the containing'+
+                          ' folder does not exist.')
+        
+        if not wdir_mode in ['keep', 'zip', 'delete']:
+            raise ValueError('Unknown wdir_mode: {}'.format(wdir_mode))
+            return
+        
+        # Add class attributes for `_wait_for_simulations`
+        self._wdir_mode = wdir_mode
+        self._zip_file_path = zip_file_path
         
         # Start the timer
         t0 = time.time()
+        
+        # Store the metadata of this run
+        self._store_metadata()
         
         # Try to add the resources
         if not self._resources_ready():
@@ -1411,71 +1411,18 @@ class SimulationSet(object):
             logger.warn('The following simulations failed: {}'.format(
                             [sim.number for sim in self.failed_simulations]))
         
-        # Delete working directories from previous runs if delete_wdirs==True
-        if delete_wdirs and hasattr(self, '_wdirs_to_clean'):
-            logger.info('Cleaning up old working directories.')
+        # Delete/zip working directories from previous runs if needed
+        if wdir_mode in ['zip', 'delete'] and hasattr(self, '_wdirs_to_clean'):
+            logger.info('Treating old working directories with mode: {}'.format(
+                                                                    wdir_mode))
             for dir_ in self._wdirs_to_clean:
+                if wdir_mode == 'zip':
+                    utils.append_dir_to_zip(dir_, zip_file_path)
                 if os.path.isdir(dir_):
                     rmtree(dir_)
         
         logger.info('Total time for all simulations: {}'.format(
                                                 utils.tForm(time.time()-t0)))
-        
-
-
-#     def gatherResults(self, ignoreMissingResults = False):
-#         if self.verb: print 'Gathering results...'
-#         for i, sim in enumerate(self.simulations):
-#             if not sim.status == 'Failed':
-#                 if not ignoreMissingResults:
-#                     sim.results.load(self._cursor)
-#                     results =  sim.results.npResults
-#                     if i == 0:
-#                         self.gatheredResults = results
-#                     else:
-#                         self.gatheredResults = np.append(self.gatheredResults, 
-#                                                          results)
-#                 else:
-#                     try:
-#                         sim.results.load(self._cursor)
-#                         results =  sim.results.npResults
-#                         if i == 0:
-#                             self.gatheredResults = results
-#                         else:
-#                             self.gatheredResults = np.append(self.gatheredResults, 
-#                                                              results)
-#                     except:
-#                         pass
-#  
-#      
-#     def saveGatheredResults(self):
-#         if not hasattr(self, 'gatheredResults'):
-#             if self.verb: print 'No results to save... Leaving.'
-#             return
-#         self.gatheredResultsSaveFile = os.path.join(self.storage_dir, 
-#                                                     'results.dat')
-#         if self.verb: 
-#             print 'Saving gathered results to:', self.gatheredResultsSaveFile
-#         header = self.delim.join(self.gatheredResults.dtype.names)
-#         np.savetxt(self.gatheredResultsSaveFile, 
-#                    self.gatheredResults,
-#                    header = header,
-#                    delimiter=self.delim)
-#      
-#      
-#     def loadGatheredResultsFromFile(self, filename = 'auto'):
-#         if filename == 'auto':
-#             filename = os.path.join(self.storage_dir, 
-#                                                     'results.dat')
-#         if self.verb:
-#             print 'Loading gathered results from', filename
-#         self.gatheredResults = np.genfromtxt(filename, 
-#                                              delimiter = self.delim,  
-#                                              names = True)
-
-             
- 
-
 
 
 
