@@ -4,12 +4,22 @@ Authors : Carlo Barth
 
 """
 
-# set the path to the config.cfg file
+# Append the parent dir to the path in order to import jcmpython
+import sys
+sys.path.append('..')
+
+#  Check if the configuration file is present in the cwd or if the path is set
 import os
-os.environ['JCMPYTHON_CONFIG_FILE'] = \
-            '/hmi/kme/workspace/scattering_generalized/160719_start/config.cfg'
+if (not 'JCMPYTHON_CONFIG_FILE' in os.environ and 
+    not 'config.cfg' in os.listdir(os.getcwd())):
+    raise EnvironmentError('Please specify the path to the configuration file'+
+                           ' using the environment variable '+
+                           '`JCMPYTHON_CONFIG_FILE` or put it to the current '+
+                           'directory (name must be config.cfg).')
 
 import jcmpython as jpy
+jpy.load_extension('materials')
+
 from copy import deepcopy
 import logging
 import numpy as np
@@ -17,17 +27,16 @@ from shutil import rmtree
 import unittest
 logger = logging.getLogger(__name__)
 
-
-reason = 'because of limited time. Maybe tomorrow.'
-limited_time = True
+reason = 'Limited time. Maybe tomorrow.'
+limited_time = False
 
 STANDARD_KEYS_SINGLE = {'constants' : {'info_level':10,
                                        'storage_format':'Binary',
-                                       'mat_superspace':jpy.RefractiveIndexInfo(
+                                       'mat_superspace':jpy.MaterialData(
                                             material=1.5),
-                                       'mat_phc':jpy.RefractiveIndexInfo(
+                                       'mat_phc':jpy.MaterialData(
                                             material='silicon'),
-                                       'mat_subspace':jpy.RefractiveIndexInfo(
+                                       'mat_subspace':jpy.MaterialData(
                                             material='glass_CorningEagleXG')},
                         'parameters': {'phi':0.,
                                        'theta':45.,
@@ -106,7 +115,7 @@ class Test_JCMbasics(unittest.TestCase):
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
         simuset = jpy.SimulationSet(project, STANDARD_KEYS_SINGLE)
         simuset.make_simulation_schedule()
-        self.assertEqual(simuset.Nsimulations, 1)
+        self.assertEqual(simuset.num_sims, 1)
         simuset.close_store()
     
 #     @unittest.skipIf(limited_time, reason)
@@ -115,7 +124,7 @@ class Test_JCMbasics(unittest.TestCase):
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
         simuset = jpy.SimulationSet(project, STANDARD_KEYS_MULTI)
         simuset.make_simulation_schedule()
-        self.assertEqual(simuset.Nsimulations, 30)
+        self.assertEqual(simuset.num_sims, 30)
         
         # Test the correct sort order
         allGeoKeys = []
@@ -149,7 +158,7 @@ class Test_JCMstorage(unittest.TestCase):
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
         simuset = jpy.SimulationSet(project, self.MIE_KEYS)
         simuset.make_simulation_schedule()
-        self.assertEqual(simuset.Nsimulations, 40)
+        self.assertEqual(simuset.num_sims, 40)
         
         simuset.use_only_resources('localhost')
         simuset.run()
@@ -161,12 +170,9 @@ class Test_JCMstorage(unittest.TestCase):
 if __name__ == '__main__':
     logger.info('This is test_base.py')
     
-#     suites = [
-#         unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics)
-#     ]
     suites = [
-        unittest.TestLoader().loadTestsFromTestCase(Test_JCMstorage)
-    ]
+        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
+        unittest.TestLoader().loadTestsFromTestCase(Test_JCMstorage)]
     
     for suite in suites:
         unittest.TextTestRunner(verbosity=2).run(suite)
