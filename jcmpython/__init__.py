@@ -15,7 +15,7 @@ __status__ = 'Production'
 
 # Let users know if they're missing any of our hard dependencies
 # (this is section is copied from the pandas __init__.py) 
-hard_dependencies = ('numpy', 'pandas', 'scipy')
+hard_dependencies = ('numpy', 'pandas', 'scipy', 'tables')
 missing_dependencies = []
 
 for dependency in hard_dependencies:
