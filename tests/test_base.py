@@ -131,8 +131,7 @@ logger = logging.getLogger(__name__)
 
 
 # Globals
-reason = 'Limited time. Maybe tomorrow.'
-limited_time = False
+CWD = os.getcwd()
 DEFAULT_PROJECT = 'scattering/mie/mie2D'
 MIE_KEYS_SINGLE = {'constants' :{}, 'parameters': {},
                    'geometry': {'radius':0.3}}
@@ -140,22 +139,28 @@ MIE_KEYS = {'constants' :{},
             'parameters': {},
             'geometry': {'radius':np.linspace(0.3, 0.4, 6)}}
 
+def DEFAULT_EVALUATION_FUNC(pp):
+    results = {}
+    results['SCS'] = pp[0]['ElectromagneticFieldEnergyFlux'][0][0].real
+    return results
+
 
 # ==============================================================================
 class Test_JCMbasics(unittest.TestCase):
-    
-    DEFAULT_PROJECT = 'scattering/photonic_crystals/slabs/hexagonal/half_spaces'
     tmpDir = os.path.abspath('tmp')
+    DF_ARGS = {'duplicate_path_levels':0,
+               'storage_folder':'tmp_storage_folder',
+               'storage_base':CWD}
     
     def tearDown(self):
         if os.path.exists(self.tmpDir):
             rmtree(self.tmpDir)
+        if os.path.exists('tmp_storage_folder'):
+            rmtree('tmp_storage_folder')
     
-    @unittest.skipIf(limited_time, reason)
     def test_0_print_info(self):
         jpy.jcm_license_info()
     
-    @unittest.skipIf(limited_time, reason)
     def test_project_loading(self):
         specs =[DEFAULT_PROJECT,
                 jpy.utils.split_path_to_parts(DEFAULT_PROJECT)]
@@ -164,17 +169,14 @@ class Test_JCMbasics(unittest.TestCase):
             project.copy_to(overwrite=True)
             project.remove_working_dir()
 
-    @unittest.skipIf(limited_time, reason)
-    def test_parallelization_add_servers(self):
-        jpy.resources.set_m_n_for_all(1,1)
-        jpy.resources.add_all_repeatedly()
+    def test_parallelization_add_localhost(self):
+        jpy.resources['localhost'].add_repeatedly()
         jpy.daemon.shutdown()
     
-    @unittest.skipIf(limited_time, reason)
     def test_simuSet_basic(self):
         project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
         
-        # Wrong project and keys specification
+        # Wrong project and keys specifications
         arg_tuples = [('non_existent_dir', {}),
                       (('a', 'b', 'c'), {}),
                       (project, {}),
@@ -182,24 +184,22 @@ class Test_JCMbasics(unittest.TestCase):
                       (project, {'geometry':[]})]
         for args in arg_tuples:
             self.assertRaises(ValueError, 
-                              jpy.SimulationSet, *args)
+                              jpy.SimulationSet, *args, **self.DF_ARGS)
          
         # This should work:
-        jpy.SimulationSet(project, {'constants':{}})
+        jpy.SimulationSet(project, {'constants':{}}, **self.DF_ARGS)
     
-    @unittest.skipIf(limited_time, reason)
     def test_simuSet_single_schedule(self):
         project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, MIE_KEYS_SINGLE)
+        simuset = jpy.SimulationSet(project, MIE_KEYS_SINGLE, **self.DF_ARGS)
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.num_sims, 1)
         simuset.close_store()
     
-#     @unittest.skipIf(limited_time, reason)
     def test_simuSet_multi_schedule(self):
         self.tmpDir = os.path.abspath('tmp')
-        project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, MIE_KEYS)
+        project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
+        simuset = jpy.SimulationSet(project, MIE_KEYS, **self.DF_ARGS)
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.num_sims, 6)
         
@@ -216,37 +216,60 @@ class Test_JCMbasics(unittest.TestCase):
 
 
 # ==============================================================================
-class Test_JCMstorage(unittest.TestCase):
+class Test_Run_JCM(unittest.TestCase):
+    
+    tmpDir = os.path.abspath('tmp')
+    DF_ARGS = {'duplicate_path_levels':0,
+               'storage_folder':'tmp_storage_folder',
+               'storage_base':CWD}
+    
+    def setUp(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS, **self.DF_ARGS)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.assertEqual(self.sset.num_sims, 6)
+        self.assertTrue(self.sset.is_store_empty())
     
     def tearDown(self):
-        if hasattr(self, 'tmpDir'):
-            if os.path.exists(self.tmpDir):
-                rmtree(self.tmpDir)
+        self.sset.close_store()
+        if os.path.exists(self.tmpDir):
+            rmtree(self.tmpDir)
+        if os.path.exists('tmp_storage_folder'):
+            rmtree('tmp_storage_folder')
     
-    #     @unittest.skipIf(limited_time, reason)
-    def test_simuSet(self):
-        self.tmpDir = os.path.abspath('tmp')
-        project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, self.MIE_KEYS)
-        simuset.make_simulation_schedule()
-        self.assertEqual(simuset.num_sims, 40)
+    def test_compute_geometry(self):
+        self.sset.compute_geometry(0)
+        self.assertTrue('grid.jcm' in os.listdir(self.sset.get_project_wdir()))
+    
+    def test_single_simulation(self):
+        sim = self.sset.simulations[0]
+        _, _ = self.sset.solve_single_simulation(sim)
+        self.assertTrue(hasattr(sim, 'fieldbag_file'))    
+    
+    def test_plain_run(self):
+        self.sset.run()
+    
+    def test_run_and_eval(self):
+        self.sset.run(evaluation_func=DEFAULT_EVALUATION_FUNC)
+        self.assertTrue('SCS' in self.sset.simulations[0]._results_dict)
         
-        simuset.use_only_resources('localhost')
-        simuset.run()
-        
-        simuset.close_store()
-        
+        # CSV export
+        self.sset.write_store_data_to_file()
+        try:
+            self.sset.write_store_data_to_file(
+                        os.path.join(self.sset.storage_dir,'results_excel.xls'),
+                        mode='Excel')
+        except ImportError as e:
+            logger.warn('Export to Excel format not working: {}'.format(e))
 
 
 if __name__ == '__main__':
     logger.info('This is test_base.py')
     
-#     suites = [
-#         unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
-#         unittest.TestLoader().loadTestsFromTestCase(Test_JCMstorage)]
-    
     suites = [
-        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics)]
+        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
+        unittest.TestLoader().loadTestsFromTestCase(Test_Run_JCM)]
     
     for suite in suites:
         unittest.TextTestRunner(verbosity=2).run(suite)
