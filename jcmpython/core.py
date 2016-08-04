@@ -451,8 +451,9 @@ class SimulationSet(object):
     storage_folder : str, default 'from_date'
         Name of the subfolder inside the storage folder in which the final data
         is stored. If 'from_date' (default), the current date (%y%m%d) is used.
-    ignore_existing_dbase : bool
-        If True, any existing SQL database is ignored.
+    storage_base : str, default 'from_config'
+        Directory to use as the base storage folder. If 'from_config', the
+        folder set by the configuration option Storage->base is used. 
     combination_mode : {'product', 'list'}
         Controls the way in which sequences in the `geometry` or `parameters`
         keys are treated.
@@ -473,7 +474,7 @@ class SimulationSet(object):
     STORE_VERSION_GROUP = 'version_data'
     
     def __init__(self, project, keys, duplicate_path_levels=0, 
-                 storage_folder='from_date', ignore_existing_dbase=False,
+                 storage_folder='from_date', storage_base='from_config',
                  combination_mode='product', check_version_match=True):
                 
         # Save initialization arguments into namespace
@@ -485,7 +486,8 @@ class SimulationSet(object):
         
         # Load the project and set up the folders
         self._load_project(project)
-        self._set_up_folders(duplicate_path_levels, storage_folder)
+        self._set_up_folders(duplicate_path_levels, storage_folder, 
+                             storage_base)
         
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
@@ -562,7 +564,8 @@ class SimulationSet(object):
         """Returns the path to the working directory of the current project."""
         return self.project.working_dir
 
-    def _set_up_folders(self, duplicate_path_levels, storage_folder):
+    def _set_up_folders(self, duplicate_path_levels, storage_folder,
+                        storage_base):
         """Reads storage specific parameters from the configuration and prepares
         the folder used for storage as desired.
         
@@ -570,9 +573,16 @@ class SimulationSet(object):
         documentation for further reference.
         """
         # Read storage base from configuration
-        base = _config.get('Storage', 'base')
-        if base == 'CWD':
-            base = os.getcwd()
+        if storage_base == 'from_config':
+            base = _config.get('Storage', 'base')
+            if base == 'CWD':
+                base = os.getcwd()
+        else:
+            base = storage_base
+        if not os.path.isdir(base):
+            raise OSError('The storage base folder {} does not exist.'.format(
+                                                                        base))
+            return
         
         if duplicate_path_levels > 0:
             # get a list folders that build the current path and use the number

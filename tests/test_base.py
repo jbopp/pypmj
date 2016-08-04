@@ -134,33 +134,31 @@ logger = logging.getLogger(__name__)
 reason = 'Limited time. Maybe tomorrow.'
 limited_time = False
 DEFAULT_PROJECT = 'scattering/mie/mie2D'
+MIE_KEYS_SINGLE = {'constants' :{}, 'parameters': {},
+                   'geometry': {'radius':0.3}}
 MIE_KEYS = {'constants' :{}, 
             'parameters': {},
             'geometry': {'radius':np.linspace(0.3, 0.4, 6)}}
-
-
 
 
 # ==============================================================================
 class Test_JCMbasics(unittest.TestCase):
     
     DEFAULT_PROJECT = 'scattering/photonic_crystals/slabs/hexagonal/half_spaces'
+    tmpDir = os.path.abspath('tmp')
     
     def tearDown(self):
-        if hasattr(self, 'tmpDir'):
-            if os.path.exists(self.tmpDir):
-                rmtree(self.tmpDir)
+        if os.path.exists(self.tmpDir):
+            rmtree(self.tmpDir)
     
-    @unittest.skipIf(limited_time, 'Bad readability.')
+    @unittest.skipIf(limited_time, reason)
     def test_0_print_info(self):
-        jpy.jcm.info()
+        jpy.jcm_license_info()
     
     @unittest.skipIf(limited_time, reason)
     def test_project_loading(self):
-        specs =['scattering/photonic_crystals/slabs/hexagonal/half_spaces',
-                ['scattering', 'photonic_crystals', 'slabs', 'hexagonal', 
-                 'half_spaces']]
-        self.tmpDir = os.path.abspath('tmp')
+        specs =[DEFAULT_PROJECT,
+                jpy.utils.split_path_to_parts(DEFAULT_PROJECT)]
         for s in specs:
             project = jpy.JCMProject(s, working_dir=self.tmpDir)
             project.copy_to(overwrite=True)
@@ -170,12 +168,12 @@ class Test_JCMbasics(unittest.TestCase):
     def test_parallelization_add_servers(self):
         jpy.resources.set_m_n_for_all(1,1)
         jpy.resources.add_all_repeatedly()
+        jpy.daemon.shutdown()
     
     @unittest.skipIf(limited_time, reason)
     def test_simuSet_basic(self):
-        self.tmpDir = os.path.abspath('tmp')
-        project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
-         
+        project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
+        
         # Wrong project and keys specification
         arg_tuples = [('non_existent_dir', {}),
                       (('a', 'b', 'c'), {}),
@@ -191,9 +189,8 @@ class Test_JCMbasics(unittest.TestCase):
     
     @unittest.skipIf(limited_time, reason)
     def test_simuSet_single_schedule(self):
-        self.tmpDir = os.path.abspath('tmp')
-        project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, STANDARD_KEYS_SINGLE)
+        project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
+        simuset = jpy.SimulationSet(project, MIE_KEYS_SINGLE)
         simuset.make_simulation_schedule()
         self.assertEqual(simuset.num_sims, 1)
         simuset.close_store()
@@ -202,9 +199,9 @@ class Test_JCMbasics(unittest.TestCase):
     def test_simuSet_multi_schedule(self):
         self.tmpDir = os.path.abspath('tmp')
         project = jpy.JCMProject(self.DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, STANDARD_KEYS_MULTI)
+        simuset = jpy.SimulationSet(project, MIE_KEYS)
         simuset.make_simulation_schedule()
-        self.assertEqual(simuset.num_sims, 30)
+        self.assertEqual(simuset.num_sims, 6)
         
         # Test the correct sort order
         allGeoKeys = []
@@ -244,12 +241,15 @@ class Test_JCMstorage(unittest.TestCase):
 if __name__ == '__main__':
     logger.info('This is test_base.py')
     
-    suites = [
-        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
-        unittest.TestLoader().loadTestsFromTestCase(Test_JCMstorage)]
+#     suites = [
+#         unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
+#         unittest.TestLoader().loadTestsFromTestCase(Test_JCMstorage)]
     
-#     for suite in suites:
-#         unittest.TextTestRunner(verbosity=2).run(suite)
+    suites = [
+        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics)]
+    
+    for suite in suites:
+        unittest.TextTestRunner(verbosity=2).run(suite)
         
     # Remove the logs folder
     if os.path.exists(os.path.abspath('logs')):
