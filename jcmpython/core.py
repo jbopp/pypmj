@@ -74,9 +74,10 @@ class JCMProject(object):
             self.project_file_name = self._find_project_file()
         else:
             if (not isinstance(project_file_name, (str, unicode)) or
-                not os.path.splitext(project_file_name)[1] in ['.jcmp', '.jcmpt']):
-                raise ValueError('`project_file_name` must be a project filename'+
-                                 ' or None')
+                not os.path.splitext(project_file_name)[1] in ['.jcmp',
+                                                               '.jcmpt']):
+                raise ValueError('`project_file_name` must be a project '+
+                                 'filename or None')
                 return
             self.project_file_name = project_file_name
         if job_name is None:
