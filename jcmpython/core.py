@@ -1178,10 +1178,13 @@ class SimulationSet(object):
         # functionality seems to be broken in the current python interface!
         _thisdir = os.getcwd()
         os.chdir(self.get_project_wdir())
-        jcm.geo(project_dir=self.project.working_dir,
-                keys=simulation.keys, 
-                working_dir=self.project.working_dir,
-                **jcm_kwargs)
+        with utils.Capturing() as output:
+            jcm.geo(project_dir=self.project.working_dir,
+                    keys=simulation.keys, 
+                    working_dir=self.project.working_dir,
+                    **jcm_kwargs)
+        for line in output:
+            logger.debug('[JCMgeo] '+line)
         os.chdir(_thisdir)
     
     def solve_single_simulation(self, simulation, compute_geometry=True, 
