@@ -17,6 +17,7 @@ import numpy as np
 from shutil import copytree, rmtree
 import os
 import pandas as pd
+import sys
 import time
 import utils
 
@@ -171,9 +172,10 @@ class JCMProject(object):
                 os.makedirs(working_dir)
         self.working_dir = working_dir
     
-    def copy_to(self, path=None, overwrite=True):
+    def copy_to(self, path=None, overwrite=True, sys_append=True):
         """Copies all files inside the project directory to path, overwriting it
-        if  overwrite=True, raising an Error otherwise if it already exists.
+        if  overwrite=True, raising an Error otherwise if it already exists. 
+        Note: Appends the path to sys.path if sys_append=True.
         """
         if path is None:
             path = self.working_dir
@@ -186,6 +188,12 @@ class JCMProject(object):
                               'wish copy anyway set `overwrite` to True.')
         logger.debug('Copying project to folder: {}'.format(self.working_dir))
         copytree(self.source, path)
+        
+        # Append this path to the PYTHONPATH. This is necessary to allow python
+        # files inside the project directory, e.g. to use them inside a JCM
+        # template file
+        if sys_append:
+            sys.path.append(path)
         self.was_copied = True
     
     def get_project_file_path(self):
