@@ -12,6 +12,7 @@ from jcmpython import resources, __version__, __jcm_version__
 from copy import deepcopy
 from datetime import date
 from glob import glob
+import inspect
 from itertools import product
 import numpy as np
 from shutil import copytree, rmtree
@@ -308,12 +309,15 @@ class Simulation(object):
         nothing will be saved to the HDF5 store, except for the computational
         costs.
         
-        The `evaluation_func` must be a function of a single input argument. 
+        The `evaluation_func` must be a function of one or two input arguments.
         A list of all results returned by post processes in JCMsolve are passed
-        to this function. It must return a dict with key-value pairs that should
-        be saved to the HDF5 store. Consequently, the values must be of types
-        that can be stored to HDF5, otherwise Exceptions will occur in the
-        saving steps. 
+        as the first argument to this function. If a second input  argument is 
+        present, it must be called keys. Then, the simulation keys are passed
+        (i.e. self.keys). This is useful to use parameters of the simulation,
+        e.g. the wavelength, inside your evaluation function. It must return a
+        dict with key-value pairs that should be saved to the HDF5 store. 
+        Consequently, the values must be of types that can be stored to HDF5, 
+        otherwise Exceptions will occur in the saving steps. 
         """
         
         if self.status in ['Pending', 'Failed']:
@@ -360,8 +364,19 @@ class Simulation(object):
         
         # We try to evaluate the evaluation_func now. If it fails or its results
         # are not of type dict, it is ignored and the user will be warned
+        signature = inspect.getargspec(evaluation_func)
+        if len(signature.args) == 1:
+            evalargs = [self.jcm_results[1:]]
+        elif len(signature.args) == 2:
+            if not signature.args[1] == 'keys':
+                logger.warn('Call of `evaluation_func` failed. If your '+
+                            'function uses two input arguments, the second '+
+                            'one must be named `keys`.')
+                return
+            evalargs = [self.jcm_results[1:], self.keys]
         try:
-            eres = evaluation_func(self.jcm_results[1:]) # anything might happen
+            # anything might happen
+            eres = evaluation_func(*evalargs)
         except Exception as e:
             logger.warn('Call of `evaluation_func` failed: {}'.format(e))
             return
