@@ -100,12 +100,16 @@ def get_len_of_parameter_dict(d):
     return length
 
 def check_type_consistency_in_sequence(sequence):
+    """Checks if all elements of a sequence have the same type."""
     if len(sequence) < 2:
         return True
     type_ = type(sequence[0])
     return all([isinstance(s, type_) for s in sequence])
 
 def infer_dtype(obj):
+    """Tries to infer the numpy.dtype (or equivalent) of the elements of a 
+    sequence, or the numpy.dtype (or equivalent) of the object intelf if it is
+    no sequence."""
     if is_sequence(obj):
         if len(obj) == 0:
             return None
@@ -115,24 +119,32 @@ def infer_dtype(obj):
             if not check_type_consistency_in_sequence(obj):
                 raise ValueError('Sequence of type {} has unconsistent types.'.\
                                  format(type(obj)))
-            type_ = obj[0]
             return np.dtype(type(obj[0]))
     return np.dtype(type(obj))
 
 def obj_to_fixed_length_Series(obj, length):
+    """Generates a pandas Series with a fixed len of `length` with the best
+    matching dtype for the object. If the object is sequence, the rows of the
+    Series are filled with its elements. Otherwise it will be the value of the
+    first row.""" 
     dtype = infer_dtype(obj)
     if not is_sequence(obj):
         obj = [obj]
+    if len(obj) > length:
+        raise ValueError('Cannot create a fixed_length_Series of '+
+                         'length {} for a sequence of length {}.'.format(
+                                                            length, len(obj)))
+        return
     obj = np.array(obj, dtype=dtype)
     series = pd.Series(index=range(length), dtype=dtype)
     series.loc[:len(obj)-1] = obj
     return series
 
 def computational_costs_to_flat_dict(ccosts, _sub=False):
-    """Converts the computational costs dict as returned by JCMsolve to a flat dict
-    with only scalar values (i.e. numbers or strings). This is useful to store the
-    computational costs in a pandas DataFrame. Keys which have sequence values with
-    a length other than 1 are ignored."""
+    """Converts the computational costs dict as returned by JCMsolve to a flat 
+    dict with only scalar values (i.e. numbers or strings). This is useful to 
+    store the computational costs in a pandas DataFrame. Keys which have 
+    sequence values with a length other than 1 are ignored."""
     
     # Check validity if this is not a sub dict
     if not _sub:
