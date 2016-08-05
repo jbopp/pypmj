@@ -943,14 +943,9 @@ class SimulationSet(object):
         d_ = getattr(self, which)
         cols = d_.keys()
         n_rows = utils.get_len_of_parameter_dict(d_)
-        df = pd.DataFrame(index=range(n_rows), columns=cols)
-        for c in cols:
-            val = d_[c]
-            if utils.is_sequence(val):
-                df.loc[:len(val)-1, c] = val
-            else:
-                df.loc[0, c] = val
-        return df
+        df_dict = {c:utils.obj_to_fixed_length_Series(d_[c], n_rows) \
+                   for c in cols}
+        return pd.DataFrame(df_dict)
     
     def __restore_from_meta_dframe(self, which):
         """Restores a dict from data which was stored in the HDF5 store using
@@ -991,8 +986,6 @@ class SimulationSet(object):
         are also not stored in the data store.
         """
         for group in self.STORE_META_GROUPS:
-            # TODO:
-            # self.store.put(group, self.__get_meta_dframe(group), format='table')
             self.store[group] = self.__get_meta_dframe(group)
         self._store_version_data()
     
@@ -1166,7 +1159,7 @@ class SimulationSet(object):
             else:
                 valid.append(n)
         if len(valid) == 0:
-            logger.warn('No valid resources found, using all instead.')
+            logger.warn('No valid resources found, no change is made.')
             return
         logger.info('Restricting resources to: {}'.format(valid))
         self.resource_list = valid
@@ -1312,8 +1305,8 @@ class SimulationSet(object):
             i = sim.number
             
             # TODO: Find out how to reduce the calls of JCMgeo
-#             if sim.rerun_JCMgeo:
-#                 self.compute_geometry(sim, **jcm_geo_kwargs)
+            if sim.rerun_JCMgeo:
+                self.compute_geometry(sim, **jcm_geo_kwargs)
             
             # Start the simulation if it is not already finished
             if not sim.number in self.finished_sim_numbers:

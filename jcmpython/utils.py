@@ -8,7 +8,9 @@ from cStringIO import StringIO
 from datetime import timedelta
 import logging
 from numbers import Number
+import numpy as np
 import os
+import pandas as pd
 import sys
 from tempfile import mktemp
 import time
@@ -96,6 +98,35 @@ def get_len_of_parameter_dict(d):
         if l > length:
             length = l
     return length
+
+def check_type_consistency_in_sequence(sequence):
+    if len(sequence) < 2:
+        return True
+    type_ = type(sequence[0])
+    return all([isinstance(s, type_) for s in sequence])
+
+def infer_dtype(obj):
+    if is_sequence(obj):
+        if len(obj) == 0:
+            return None
+        if hasattr(obj, 'dtype'):
+            return obj.dtype
+        else:
+            if not check_type_consistency_in_sequence(obj):
+                raise ValueError('Sequence of type {} has unconsistent types.'.\
+                                 format(type(obj)))
+            type_ = obj[0]
+            return np.dtype(type(obj[0]))
+    return np.dtype(type(obj))
+
+def obj_to_fixed_length_Series(obj, length):
+    dtype = infer_dtype(obj)
+    if not is_sequence(obj):
+        obj = [obj]
+    obj = np.array(obj, dtype=dtype)
+    series = pd.Series(index=range(length), dtype=dtype)
+    series.loc[:len(obj)-1] = obj
+    return series
 
 def computational_costs_to_flat_dict(ccosts, _sub=False):
     """Converts the computational costs dict as returned by JCMsolve to a flat dict

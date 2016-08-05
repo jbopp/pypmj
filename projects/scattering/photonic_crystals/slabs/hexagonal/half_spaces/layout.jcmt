@@ -1,7 +1,6 @@
 <?
 # Imports
 import os
-print os.getcwd()
 import pointlist_im_to_re as pl
 import numpy as np
 from math import pi

@@ -9,8 +9,8 @@ Project {
         Accuracy{
 	  FiniteElementDegree{
 	    Adaptive{
-          MinimumDegree= 2
-	      MaximumDegree= %(fem_degree)i
+          MinimumDegree= %(fem_degree_min)i
+	      MaximumDegree= %(fem_degree_max)i
 	    }
 	  }
 	}
