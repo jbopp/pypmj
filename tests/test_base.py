@@ -139,7 +139,7 @@ MIE_KEYS = {'constants' :{},
             'parameters': {},
             'geometry': {'radius':np.linspace(0.3, 0.4, 6)}}
 
-def DEFAULT_EVALUATION_FUNC(pp):
+def DEFAULT_PROCESSING_FUNC(pp):
     results = {}
     results['SCS'] = pp[0]['ElectromagneticFieldEnergyFlux'][0][0].real
     return results
@@ -250,8 +250,8 @@ class Test_Run_JCM(unittest.TestCase):
     def test_plain_run(self):
         self.sset.run()
     
-    def test_run_and_eval(self):
-        self.sset.run(evaluation_func=DEFAULT_EVALUATION_FUNC)
+    def test_run_and_proc(self):
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
         self.assertTrue('SCS' in self.sset.simulations[0]._results_dict)
         
         # CSV export

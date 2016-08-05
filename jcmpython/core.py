@@ -41,10 +41,10 @@ def _default_sim_wdir(storage_dir, sim_number):
 
 # =============================================================================
 class JCMProject(object):
-    """Class that finds a JCMsuite project using a path specifier (relative to
-    the `projects` path specified in the configuration), checks its validity
-    and provides functions to copy its content to a working directory, remove
-    it afterwards etc.
+    """Represents a JCMsuite project, initialized using a path specifier (
+    relative to the `projects` path specified in the configuration), checks 
+    its validity and provides functions to copy its content to a working 
+    directory, remove it afterwards, etc.
     
     Parameters
     ----------
@@ -212,17 +212,43 @@ class JCMProject(object):
 
 # =============================================================================
 class Simulation(object):
+    """Describes a distinct JCMsuite simulation by its keys and path/filename
+    specific attributes. Provides method to perform the simulation , i.e. run
+    JCMsolve on the project and to process the returned results using a custom
+    function. It then also holds all the results, logs, etc. and can return
+    them as a pandas DataFrame.
+    
+    Parameters
+    ----------
+    number : int
+        A simulation number to identify/order simulations in a series of 
+        multiple simulations. It is used as the row index of the returned pandas
+        DataFrame (e.g. by _get_DataFrame()).
+    keys : dict
+        The keys dict passed as the `keys` argument of jcmwave.solve. Used to
+        translate JCM template files (i.e. *.jcmt-files).
+    stored_keys : list
+        A list of keys (must be a subset of `keys.keys()`) which will be part
+        of the data in the pandas DataFrame, i.e. columns in the DataFrame
+        returned by _get_DataFrame(). These keys will be stored in the HDF5
+        store by the SimulationSet-instance.
+    storage_dir : str (path)
+        Path to the directory were simulation working directories will be 
+        stored. The Simulation itself will be in a subfolder containing its
+        number in the folder name.
+    project_file_name : str
+        Name of the JCM project file (a .jcmp(t)-file).
+    rerun_JCMgeo : bool
+        Controls if JCMgeo needs to be called before execution in a series of
+        simulations.
     """
-    Class which describes a distinct simulation and provides a method to run it
-    and to remove the working directory afterwards.
-    """
-    def __init__(self, number, keys, stored_keys, storage_dir, projectFileName,
-                 rerun_JCMgeo=False):
+    def __init__(self, number, keys, stored_keys, storage_dir, 
+                 project_file_name, rerun_JCMgeo=False):
         self.number = number
         self.keys = keys
         self.stored_keys = stored_keys
         self.storage_dir = storage_dir
-        self.projectFileName = projectFileName
+        self.project_file_name = project_file_name
         self.rerun_JCMgeo = rerun_JCMgeo
         self.status = 'Pending'
     
@@ -257,7 +283,7 @@ class Simulation(object):
             os.makedirs(wdir)
         
         # Start to solve
-        self.jobID = jcm.solve(self.projectFileName, keys=self.keys, 
+        self.jobID = jcm.solve(self.project_file_name, keys=self.keys, 
                                working_dir=wdir, **jcm_kwargs)
         return self.jobID
     
@@ -299,37 +325,37 @@ class Simulation(object):
         self.fieldbag_file = results[0]['file']
         self.status = 'Finished'
     
-    def evaluate_results(self, evaluation_func=None, overwrite=False):
-        """Evaluate the raw results from JCMsolve with a function 
-        `evaluation_func` of one input argument. The input argument, which is
+    def process_results(self, processing_func=None, overwrite=False):
+        """Process the raw results from JCMsolve with a function 
+        `processing_func` of one input argument. The input argument, which is
         the list of results as it was set in `_set_jcm_results_and_logs`, is
         automatically passed to this function.
         
-        If `evaluation_func` is None, the JCM results are not processed and
+        If `processing_func` is None, the JCM results are not processed and
         nothing will be saved to the HDF5 store, except for the computational
         costs.
         
-        The `evaluation_func` must be a function of one or two input arguments.
+        The `processing_func` must be a function of one or two input arguments.
         A list of all results returned by post processes in JCMsolve are passed
         as the first argument to this function. If a second input  argument is 
-        present, it must be called keys. Then, the simulation keys are passed
+        present, it must be called 'keys'. Then, the simulation keys are passed
         (i.e. self.keys). This is useful to use parameters of the simulation,
-        e.g. the wavelength, inside your evaluation function. It must return a
+        e.g. the wavelength, inside your processing function. It must return a
         dict with key-value pairs that should be saved to the HDF5 store. 
         Consequently, the values must be of types that can be stored to HDF5, 
         otherwise Exceptions will occur in the saving steps. 
         """
         
         if self.status in ['Pending', 'Failed']:
-            logger.warn('Unable to evaluate the results, as the status of '+
+            logger.warn('Unable to process the results, as the status of '+
                          'the simulation is: {}'.format(self.status))
             return
-        elif self.status == 'Finished and evaluated':
+        elif self.status == 'Finished and processed':
             if overwrite:
                 self.status = 'Finished'
                 del self._results_dict
             else:
-                logger.warn('The simulation results are already evaluated!'+
+                logger.warn('The simulation results are already processed!'+
                              ' To overwrite, set `overwrite` to True.')
                 return
         
@@ -342,46 +368,46 @@ class Simulation(object):
         self._results_dict = utils.computational_costs_to_flat_dict(
                                     self.jcm_results[0]['computational_costs'])
 #         self._results_dict['fieldbag_file'] = self.fieldbag_file
-        self.status = 'Finished and evaluated'
+        self.status = 'Finished and processed'
         
-        # Stop here if evaluation_func is None
-        if evaluation_func is None:
-            logger.debug('No result evaluation was done.')
+        # Stop here if processing_func is None
+        if processing_func is None:
+            logger.debug('No result processing was done.')
             return
         
         # Also stop, if there are no results from post processes
         if len(self.jcm_results) <= 1:
-            logger.info('No further evaluation will be performed, as there '+
+            logger.info('No further processing will be performed, as there '+
                          'are no results from post processes in the JCM result'+
                          ' list.')
             return
         
-        # Otherwise, evaluation_func must be a callable
-        if not callable(evaluation_func):
-            logger.warn('`evaluation_func` must be callable of one input '+
-                         'Please consult the docs of `evaluate_results`.')
+        # Otherwise, processing_func must be a callable
+        if not callable(processing_func):
+            logger.warn('`processing_func` must be callable of one input '+
+                         'Please consult the docs of `process_results`.')
             return
         
-        # We try to evaluate the evaluation_func now. If it fails or its results
+        # We try to call the processing_func now. If it fails or its results
         # are not of type dict, it is ignored and the user will be warned
-        signature = inspect.getargspec(evaluation_func)
+        signature = inspect.getargspec(processing_func)
         if len(signature.args) == 1:
-            evalargs = [self.jcm_results[1:]]
+            procargs = [self.jcm_results[1:]]
         elif len(signature.args) == 2:
             if not signature.args[1] == 'keys':
-                logger.warn('Call of `evaluation_func` failed. If your '+
+                logger.warn('Call of `processing_func` failed. If your '+
                             'function uses two input arguments, the second '+
                             'one must be named `keys`.')
                 return
-            evalargs = [self.jcm_results[1:], self.keys]
+            procargs = [self.jcm_results[1:], self.keys]
         try:
             # anything might happen
-            eres = evaluation_func(*evalargs)
+            eres = processing_func(*procargs)
         except Exception as e:
-            logger.warn('Call of `evaluation_func` failed: {}'.format(e))
+            logger.warn('Call of `processing_func` failed: {}'.format(e))
             return
         if not isinstance(eres, dict):
-            logger.warn('The return value of `evaluation_func` must be of '+
+            logger.warn('The return value of `processing_func` must be of '+
                          'type dict, not {}'.format(type(eres)))
             return
         
@@ -402,11 +428,11 @@ class Simulation(object):
         with the simulation number as the index. It can readily be appended to
         the HDF5 store."""
         dfdict = {skey:self.keys[skey] for skey in self.stored_keys}
-        if self.status == 'Finished and evaluated':
+        if self.status == 'Finished and processed':
             dfdict.update(self._results_dict)
         else:
             logger.warn('You are trying to get a DataFrame for a non-'+
-                         'evaluated simulation. Returning only the keys.')
+                         'processed simulation. Returning only the keys.')
         df = pd.DataFrame(dfdict, index=[self.number])
         df.index.name = 'number'
         return df
@@ -438,7 +464,7 @@ class Simulation(object):
 
 # =============================================================================
 class SimulationSet(object):
-    """Class for initializing, planning, running and evaluating multiple 
+    """Class for initializing, planning, running and processing multiple 
     simulations.
     
     Parameters
@@ -837,7 +863,7 @@ class SimulationSet(object):
             self.simulations.append(Simulation(number = i, keys = keys,
                                                stored_keys = self.stored_keys,
                                                storage_dir = self.storage_dir,
-                                               projectFileName=pfile_path))
+                                               project_file_name=pfile_path))
 
     def _sort_simulations(self):
         """Sorts the list of simulations in a way that all simulations with 
@@ -965,6 +991,8 @@ class SimulationSet(object):
         are also not stored in the data store.
         """
         for group in self.STORE_META_GROUPS:
+            # TODO:
+            # self.store.put(group, self.__get_meta_dframe(group), format='table')
             self.store[group] = self.__get_meta_dframe(group)
         self._store_version_data()
     
@@ -1205,7 +1233,7 @@ class SimulationSet(object):
     def solve_single_simulation(self, simulation, compute_geometry=True, 
                                 jcm_geo_kwargs=None, jcm_solve_kwargs=None):
         """Solves a specific simulation and returns the results and logs
-        without any further evaluation and without saving of data to the HDF5
+        without any further processing and without saving of data to the HDF5
         store. Recomputes the geometry before if compute_geometry is True.
         
         Parameters
@@ -1257,23 +1285,23 @@ class SimulationSet(object):
         simulation._set_jcm_results_and_logs(results[0], logs[0])
         return results[0], logs[0]
     
-    def _start_simulations(self, N='all', evaluation_func=None,
+    def _start_simulations(self, N='all', processing_func=None,
                            jcm_geo_kwargs={}, jcm_solve_kwargs={}):
         """
         Starts all simulations, `N` at a time, waits for them to finish using
-        `_wait_for_simulations` and evaluates the results using the
-        `evaluation_func`. `jcm_geo_kwargs` and `jcm_solve_kwargs` are dicts
+        `_wait_for_simulations` and processes the results using the
+        `processing_func`. `jcm_geo_kwargs` and `jcm_solve_kwargs` are dicts
         of keyword arguments which are directly passed to jcm.geo and jcm.solve,
         respectively. Please consult the docs of the 
-        Simulation.evaluate_results-method for info on how to use the
-        evaluation_func.
+        Simulation.process_results-method for info on how to use the
+        processing_func.
         """
         logger.info('Starting to solve.')
         
         jobIDs = []
         ID2simNumber = {} # dict to find the simulation number from the job ID
         self.failed_simulations = []
-        self.evaluation_func = evaluation_func
+        self.processing_func = processing_func
         
         if N == 'all':
             N = self.num_sims
@@ -1309,11 +1337,11 @@ class SimulationSet(object):
     def _wait_for_simulations(self, ids2waitFor, ID2simNumber):
         """Waits for the job IDS in the list `ids2waitFor` to finish using
         daemon.wait. Failed simulations are appended to the list 
-        `self.failed_simulations`, while successful simulations are evaluated
+        `self.failed_simulations`, while successful simulations are processed
         and stored.
         """
         # Wait for all simulations using daemon.wait with break_condition='any'.
-        # In each loop, the results are directly evaluated and saved
+        # In each loop, the results are directly processed and saved
         nFinished = 0
         nTotal = len(ids2waitFor)
         logger.debug('Waiting for jobIDs: {}'.format(ids2waitFor))
@@ -1344,8 +1372,8 @@ class SimulationSet(object):
                 else:
                     # Add the computed results to the Simulation-instance, ...
                     sim._set_jcm_results_and_logs(thisResults[ind], logs[ind])
-                    # evaluate them, ...
-                    sim.evaluate_results(self.evaluation_func)
+                    # process them, ...
+                    sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
                     self.append_store(sim._get_DataFrame())
               
@@ -1377,17 +1405,17 @@ class SimulationSet(object):
             return False
         return set(range(self.num_sims)) == set(self.finished_sim_numbers)
 
-    def run(self, evaluation_func=None, N='all', wdir_mode='keep', 
+    def run(self, processing_func=None, N='all', wdir_mode='keep', 
             zip_file_path = None, jcm_geo_kwargs={}, jcm_solve_kwargs={}):
         """Convenient function to add the resources, run all necessary
         simulations and save the results to the HDF5 store.
         
         Parameters
         ----------
-        evaluation_func : callable or None, default None
-            Function for result evaluation. If None, only a standard evaluation
+        processing_func : callable or None, default None
+            Function for result processing. If None, only a standard processing
             will be executed. See the docs of the 
-            Simulation.evaluate_results-method for more info on how to use this
+            Simulation.process_results-method for more info on how to use this
             parameter.
         N : int or 'all', default 'all'
             Number of simulations that will be pushed to the jcm.daemon at a
@@ -1443,7 +1471,7 @@ class SimulationSet(object):
         # Try to add the resources
         if not self._resources_ready():
             self.add_resources()
-        self._start_simulations(N=N, evaluation_func=evaluation_func)
+        self._start_simulations(N=N, processing_func=processing_func)
         if len(self.failed_simulations) > 0:
             logger.warn('The following simulations failed: {}'.format(
                             [sim.number for sim in self.failed_simulations]))
