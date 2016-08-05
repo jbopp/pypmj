@@ -9,6 +9,7 @@ Authors : Carlo Barth
 import logging
 from jcmpython.internals import jcm, daemon, _config, ConfigurationError
 from jcmpython import resources, __version__, __jcm_version__
+from jcmpython.parallelization import ResourceDict
 from copy import deepcopy
 from datetime import date
 from glob import glob
@@ -540,6 +541,9 @@ class SimulationSet(object):
         
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
+        
+        # Initialize the resources
+        self.reset_resources()
     
     def __repr__(self):
         return 'SimulationSet(project={}, storage={})'.format(self.project,
@@ -1135,13 +1139,15 @@ class SimulationSet(object):
         unmatched = [i for i in list(df_.index) if not i in zip(*matches)[1]]
         return matches, unmatched
     
+    def reset_resources(self):
+        self.resources = ResourceDict()
+        for r in resources:
+            self.resources[r] = resources[r]
+    
     def get_current_resources(self):
         """Returns a list of the currently configured resources, i.e. the 
         ones that will be added using `add_resources`."""
-        if hasattr(self, 'resource_list'):
-            return [resources[r] for r in self.resource_list]
-        else:
-            return [resources[r] for r in resources.get_resource_names()]
+        return self.resources
     
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
@@ -1162,16 +1168,14 @@ class SimulationSet(object):
             logger.warn('No valid resources found, no change is made.')
             return
         logger.info('Restricting resources to: {}'.format(valid))
-        self.resource_list = valid
+        self.resources = ResourceDict()
+        for v in valid:
+            self.resources[v] = resources[v]
     
     def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Tries to add all resources configured in the configuration using
         the JCMdaemon."""
-        if hasattr(self, 'resource_list'):
-            for r in self.resource_list:
-                resources[r].add_repeatedly(n_shots, wait_seconds, ignore_fail)
-        else:
-            resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
+        self.resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
     
     def _resources_ready(self):
         """Returns whether the resources are already added."""
