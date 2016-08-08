@@ -99,6 +99,12 @@ BLACK_LIST = ['parse']
 for handler in logging.root.handlers:
     handler.addFilter(Blacklist(*BLACK_LIST))
 
+# Activate the capturing of warnings by logging. Warnings issued by the warnings
+# module will be redirected to the logging system. Specifically, a warning will
+# be formatted using warnings.formatwarning() and the resulting string logged to
+# a logger named 'py.warnings' with a severity of WARNING.
+logging.captureWarnings(True)
+
 # Output of initial logging info
 logger.info('This is jcmpython. Starting up.')
 if LOGGING_TO_FILE:
