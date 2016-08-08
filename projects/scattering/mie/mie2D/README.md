@@ -38,8 +38,8 @@ electric field strength.*
 ------
 
 [setup]: example_geometry.png "Example geometry"
-[mesh]: example_mesh.png "Example geometry"
-[field]: example_field.png "Example geometry"
+[mesh]: example_mesh.png "Example mesh"
+[field]: example_field.png "Example field"
 
 # Parameters
 
