@@ -1375,12 +1375,12 @@ class SimulationSet(object):
                 finishedSimNumbers.append( iSim )
                 
                 sim = self.simulations[iSim]
+                # Add the computed results to the Simulation-instance, ...
+                sim._set_jcm_results_and_logs(thisResults[ind], logs[ind])
                 # Check whether the simulation failed
                 if sim.status == 'Failed':
                     self.failed_simulations.append(sim)
                 else:
-                    # Add the computed results to the Simulation-instance, ...
-                    sim._set_jcm_results_and_logs(thisResults[ind], logs[ind])
                     # process them, ...
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
@@ -1390,11 +1390,13 @@ class SimulationSet(object):
             # wdir_mode is 'zip'/'delete'
             if self._wdir_mode in ['zip', 'delete']:
                 for n in finishedSimNumbers:
-                    if self._wdir_mode == 'zip':
-                        utils.append_dir_to_zip(
-                                self.simulations[n].working_dir(), 
-                                self._zip_file_path)
-                    self.simulations[n].remove_working_directory()
+                    sim = self.simulations[n]
+                    # Zip the working_dir if the simulation did not fail
+                    if (self._wdir_mode == 'zip' and 
+                        not sim in self.failed_simulations):
+                        utils.append_dir_to_zip(sim.working_dir(), 
+                                                self._zip_file_path)
+                    sim.remove_working_directory()
               
             # Update the number of finished jobs and the list with ids2waitFor
             nFinished += len(indices)
