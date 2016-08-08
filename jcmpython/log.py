@@ -15,6 +15,25 @@ import logging
 import logging.config
 logger = logging.getLogger('init')
 
+# ------------------------------------------------------------------------------
+class Blacklist(logging.Filter):
+    """Subclass of logging.filter to specify a black list of logger names for
+    which no output will be displayed.
+    
+    Source:
+    http://stackoverflow.com/questions/17275334/what-is-a-correct-way-to-filter-
+    different-loggers-using-python-logging
+    
+    Note: This is mainly used to filter unwanted logging-events of the logger
+    with name `parse` which are caused by refractiveIndexInfo.py.
+    """
+    def __init__(self, *blacklist):
+        self.blacklist = [logging.Filter(name) for name in blacklist]
+
+    def filter(self, record):
+        return not any(f.filter(record) for f in self.blacklist)
+# ------------------------------------------------------------------------------
+
 # Read logging specific information from the configuration and configure the 
 # logging
 LOGGING_HANDLERS = ['console']
@@ -74,6 +93,11 @@ logging.config.dictConfig({
         }
     }
 })
+
+# Apply the black list that filters the `parse` logger events to all handlers
+BLACK_LIST = ['parse']
+for handler in logging.root.handlers:
+    handler.addFilter(Blacklist(*BLACK_LIST))
 
 # Output of initial logging info
 logger.info('This is jcmpython. Starting up.')
