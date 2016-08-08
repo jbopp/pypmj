@@ -23,8 +23,11 @@ import sys
 import time
 import utils
 
-# Get a logger instance
-logger = logging.getLogger(__name__)
+# Get special logger instances for output which is captured from JCMgeo and
+# JCMsolve/JCMdaemon. The remaining logging in the core.module is done by
+# class specific loggers.
+logger_JCMgeo = logging.getLogger('JCMgeo')
+logger_JCMsolve = logging.getLogger('JCMsolve')
 
 # Load values from configuration
 PROJECT_BASE = _config.get('Data', 'projects')
@@ -68,8 +71,10 @@ class JCMProject(object):
         composed using the specifier.
     
     """
+    
     def __init__(self, specifier, working_dir=None, project_file_name=None, 
                  job_name=None):
+        self.logger = logging.getLogger('core.'+self.__class__.__name__)
         self.source = self._find_path(specifier)
         self._check_project()
         self._check_working_dir(working_dir)
@@ -165,12 +170,12 @@ class JCMProject(object):
         """
         if working_dir is None:
             working_dir = os.path.abspath('current_run')
-            logger.debug('JCMProject: No working_dir specified, using {}'.\
-                                                            format(working_dir))
+            self.logger.debug('No working_dir specified, using {}'.format(
+                                                                working_dir))
         else:
             if not os.path.isdir(working_dir):
-                logger.debug('JCMProject: Creating working directory {}'.\
-                                                            format(working_dir))
+                self.logger.debug('Creating working directory {}'.format(
+                                                                working_dir))
                 os.makedirs(working_dir)
         self.working_dir = working_dir
     
@@ -183,12 +188,13 @@ class JCMProject(object):
             path = self.working_dir
         if os.path.exists(path):
             if overwrite:
-                logger.debug('Removing existing folder {}'.format(path))
+                self.logger.debug('Removing existing folder {}'.format(path))
                 rmtree(path)
             else:
                 raise OSError('Path {} already exists! If you '.format(path)+
                               'wish copy anyway set `overwrite` to True.')
-        logger.debug('Copying project to folder: {}'.format(self.working_dir))
+        self.logger.debug('Copying project to folder: {}'.format(
+                                                            self.working_dir))
         copytree(self.source, path)
         
         # Append this path to the PYTHONPATH. This is necessary to allow python
@@ -205,7 +211,8 @@ class JCMProject(object):
     def remove_working_dir(self):
         """Removes the working directory.
         """
-        logger.debug('Removing working directory: {}'.format(self.working_dir))
+        self.logger.debug('Removing working directory: {}'.format(
+                                                            self.working_dir))
         if os.path.exists(self.working_dir):
             rmtree(self.working_dir)
         self.was_copied = False
@@ -245,6 +252,7 @@ class Simulation(object):
     """
     def __init__(self, number, keys, stored_keys, storage_dir, 
                  project_file_name, rerun_JCMgeo=False):
+        self.logger = logging.getLogger('core.'+self.__class__.__name__)
         self.number = number
         self.keys = keys
         self.stored_keys = stored_keys
@@ -273,7 +281,7 @@ class Simulation(object):
         forbidden_keys = ['project_file', 'keys', 'working_dir']
         for key in jcm_kwargs:
             if key in forbidden_keys:
-                logger.warn('You cannot use {} as a keyword '.format(key)+
+                self.logger.warn('You cannot use {} as a keyword '.format(key)+
                              'argument for jcm.solve. It is already set by the'+
                              ' Simulation instance.')
                 del jcm_kwargs[key]
@@ -348,7 +356,7 @@ class Simulation(object):
         """
         
         if self.status in ['Pending', 'Failed']:
-            logger.warn('Unable to process the results, as the status of '+
+            self.logger.warn('Unable to process the results, as the status of '+
                          'the simulation is: {}'.format(self.status))
             return
         elif self.status == 'Finished and processed':
@@ -356,8 +364,8 @@ class Simulation(object):
                 self.status = 'Finished'
                 del self._results_dict
             else:
-                logger.warn('The simulation results are already processed!'+
-                             ' To overwrite, set `overwrite` to True.')
+                self.logger.warn('The simulation results are already '+
+                            'processed! To overwrite, set `overwrite` to True.')
                 return
         
         # Now the status must be 'Finished'
@@ -373,19 +381,19 @@ class Simulation(object):
         
         # Stop here if processing_func is None
         if processing_func is None:
-            logger.debug('No result processing was done.')
+            self.logger.debug('No result processing was done.')
             return
         
         # Also stop, if there are no results from post processes
         if len(self.jcm_results) <= 1:
-            logger.info('No further processing will be performed, as there '+
-                         'are no results from post processes in the JCM result'+
-                         ' list.')
+            self.logger.info('No further processing will be performed, as '+
+                         'there are no results from post processes in the JCM'+
+                         ' result list.')
             return
         
         # Otherwise, processing_func must be a callable
         if not callable(processing_func):
-            logger.warn('`processing_func` must be callable of one input '+
+            self.logger.warn('`processing_func` must be callable of one input '+
                          'Please consult the docs of `process_results`.')
             return
         
@@ -396,7 +404,7 @@ class Simulation(object):
             procargs = [self.jcm_results[1:]]
         elif len(signature.args) == 2:
             if not signature.args[1] == 'keys':
-                logger.warn('Call of `processing_func` failed. If your '+
+                self.logger.warn('Call of `processing_func` failed. If your '+
                             'function uses two input arguments, the second '+
                             'one must be named `keys`.')
                 return
@@ -405,18 +413,19 @@ class Simulation(object):
             # anything might happen
             eres = processing_func(*procargs)
         except Exception as e:
-            logger.warn('Call of `processing_func` failed: {}'.format(e))
+            self.logger.warn('Call of `processing_func` failed: {}'.format(e))
             return
         if not isinstance(eres, dict):
-            logger.warn('The return value of `processing_func` must be of '+
-                         'type dict, not {}'.format(type(eres)))
+            self.logger.warn('The return value of `processing_func` must be '+
+                         'of type dict, not {}'.format(type(eres)))
             return
         
         # Warn the user if she/he used a key that is already present due to the
         # stored computational costs
         for key in eres.keys():
             if key in self._results_dict:
-                logger.warn('The key {} is already present due to'.format(key)+
+                self.logger.warn('The key {} is already present due to'.format(
+                                                                           key)+
                              ' the automatic storage of computational costs. '+
                              'It will be overwritten!')
         
@@ -432,7 +441,7 @@ class Simulation(object):
         if self.status == 'Finished and processed':
             dfdict.update(self._results_dict)
         else:
-            logger.warn('You are trying to get a DataFrame for a non-'+
+            self.logger.warn('You are trying to get a DataFrame for a non-'+
                          'processed simulation. Returning only the keys.')
         df = pd.DataFrame(dfdict, index=[self.number])
         df.index.name = 'number'
@@ -454,11 +463,11 @@ class Simulation(object):
             try:
                 rmtree(wdir)
             except:
-                logger.warn('Failed to remove working directory {}'.format(
+                self.logger.warn('Failed to remove working directory {}'.format(
                              os.path.basename(wdir)) +\
                              ' for simNumber {}'.format(self.number))
         else:
-            logger.warn('Working directory {} does not exist'.format(
+            self.logger.warn('Working directory {} does not exist'.format(
                          os.path.basename(wdir)) +\
                          ' for simNumber {}'.format(self.number))
 
@@ -526,7 +535,8 @@ class SimulationSet(object):
     def __init__(self, project, keys, duplicate_path_levels=0, 
                  storage_folder='from_date', storage_base='from_config',
                  combination_mode='product', check_version_match=True):
-                
+        self.logger = logging.getLogger('core.'+self.__class__.__name__)
+        
         # Save initialization arguments into namespace
         self.combination_mode = combination_mode
         
@@ -650,11 +660,11 @@ class SimulationSet(object):
         
         # Create the necessary directories
         if not os.path.exists(self.storage_dir):
-            logger.debug('Creating non-existent storage folder {}'.format(
+            self.logger.debug('Creating non-existent storage folder {}'.format(
                                                             self.storage_dir))
             os.makedirs(self.storage_dir)
         
-        logger.info('Using folder {} for '.format(self.storage_dir)+ 
+        self.logger.info('Using folder {} for '.format(self.storage_dir)+ 
                      'data storage.')
     
     def _initialize_store(self, check_version_match):
@@ -662,17 +672,17 @@ class SimulationSet(object):
         file name and the name of the data section inside the file are 
         configured in the DEFAULTS section of the configuration file. 
         """
-        logger.debug('Initializing the HDF5 store')
+        self.logger.debug('Initializing the HDF5 store')
         
         self._database_file = os.path.join(self.storage_dir, DBASE_NAME)
         if not os.path.splitext(DBASE_NAME)[1] == '.h5':
-            logger.warn('The HDF5 store file has an unknown extension. '+
+            self.logger.warn('The HDF5 store file has an unknown extension. '+
                          'It should be `.h5`.')
         self.store = pd.HDFStore(self._database_file)
         
         # Version comparison
         if not self.is_store_empty() and check_version_match:
-            logger.debug('Checking version match.')
+            self.logger.debug('Checking version match.')
             self._check_store_version_match()
     
     def _check_store_version_match(self):
@@ -694,7 +704,7 @@ class SimulationSet(object):
                 'initialization.')
             return
         if not stored_jpy_version == __version__:
-            logger.warn('Version mismatch! HDF5 store was created using '+
+            self.logger.warn('Version mismatch! HDF5 store was created using '+
                 'jcmpython version {}, the current '.format(stored_jcm_version)+
                 'version is {}.'.format(__jcm_version__))
     
@@ -737,7 +747,8 @@ class SimulationSet(object):
         
     def close_store(self):
         """Closes the HDF5 store."""
-        logger.debug('Closing the HDF5 store: {}'.format(self._database_file))
+        self.logger.debug('Closing the HDF5 store: {}'.format(
+                                                           self._database_file))
         self.store.close()
     
     def append_store(self, data):
@@ -764,18 +775,18 @@ class SimulationSet(object):
         #   * If the status is 'Extended Check', we will need to compare the
         #     stored data to the one we want to compute currently
         precheck = self._precheck_store()
-        logger.debug('Result of the store pre-check: {}'.format(precheck))
+        self.logger.debug('Result of the store pre-check: {}'.format(precheck))
         if precheck == 'Empty':
             self.finished_sim_numbers = []
         if precheck == 'Extended Check':
             self._extended_store_check()
-            logger.info('Found matches in the extended check of the HDF5 '+
+            self.logger.info('Found matches in the extended check of the HDF5 '+
                          'store. Number of stored simulations: {}'.format(
                                                 len(self.finished_sim_numbers)))
         elif precheck == 'Match':
             self.finished_sim_numbers = list(self.get_store_data().index)
-            logger.info('Found a match in the pre-check of the HDF5 store. '+
-                         'Number of stored simulations: {}'.format(
+            self.logger.info('Found a match in the pre-check of the HDF5 '+
+                         'store. Number of stored simulations: {}'.format(
                                                 len(self.finished_sim_numbers)))
      
     def _get_simulation_list(self):
@@ -784,7 +795,7 @@ class SimulationSet(object):
         simulation by using the `combination_mode` as specified. The simulations
         that must be performed are stored in the `self.simulations`-list.
         """
-        logger.debug('Analyzing loop properties.')
+        self.logger.debug('Analyzing loop properties.')
         self.simulations = []
          
         # Convert lists in the parameters- and geometry-dictionaries to numpy
@@ -847,16 +858,16 @@ class SimulationSet(object):
 
         self.num_sims = len(propertyCombinations) # total num of simulations
         if self.num_sims == 1:
-            logger.info('Performing a single simulation')
+            self.logger.info('Performing a single simulation')
         else:
-            logger.info('Loops will be done over the following parameter(s):'+
-                         ' {}'.format(self._loop_props))
-            logger.info('Total number of simulations: {}'.format(
+            self.logger.info('Loops will be done over the following '+
+                         'parameter(s): {}'.format(self._loop_props))
+            self.logger.info('Total number of simulations: {}'.format(
                                                                 self.num_sims))
          
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed
-        logger.debug('Generating the simulation list.')
+        self.logger.debug('Generating the simulation list.')
         pfile_path = self.project.get_project_file_path()
         for i, keySet in enumerate(propertyCombinations):
             keys = {}
@@ -874,7 +885,7 @@ class SimulationSet(object):
         identical geometry are performed consecutively. That way, jcmwave.geo()
         only needs to be called if the geometry changes.
         """
-        logger.debug('Sorting the simulations.')
+        self.logger.debug('Sorting the simulations.')
         # Get a list of dictionaries, where each dictionary contains the keys 
         # and values which correspond to geometry information of a single 
         # simulation
@@ -1077,7 +1088,7 @@ class SimulationSet(object):
             dwdir = _default_sim_wdir(self.storage_dir, idx)
             dir_rename_dict[dwdir] = _default_sim_wdir(self.storage_dir, 
                                                        look_up_dict[idx])
-        logger.debug('Renaming directories.')
+        self.logger.debug('Renaming directories.')
         utils.rename_directories(dir_rename_dict)
         self._wdirs_to_clean = dir_rename_dict.values()
         
@@ -1161,13 +1172,14 @@ class SimulationSet(object):
         valid = []
         for n in names:
             if not n in resources:
-                logger.warn('{} is not in the configured resources'.format(n))
+                self.logger.warn('{} is not in the configured resources'.format(
+                                                                             n))
             else:
                 valid.append(n)
         if len(valid) == 0:
-            logger.warn('No valid resources found, no change is made.')
+            self.logger.warn('No valid resources found, no change is made.')
             return
-        logger.info('Restricting resources to: {}'.format(valid))
+        self.logger.info('Restricting resources to: {}'.format(valid))
         self.resources = ResourceDict()
         for v in valid:
             self.resources[v] = resources[v]
@@ -1196,7 +1208,7 @@ class SimulationSet(object):
         `keys` and `working_dir`, which are set automatically (ignored if 
         provided).
         """
-        logger.debug('Computing geometry.')
+        self.logger.debug('Computing geometry.')
         
         if isinstance(simulation, int):
             simulation = self.simulations[simulation]
@@ -1209,7 +1221,7 @@ class SimulationSet(object):
         forbidden_keys = ['project_file', 'keys', 'working_dir']
         for key in jcm_kwargs:
             if key in forbidden_keys:
-                logger.warn('You cannot use {} as a keyword '.format(key)+
+                self.logger.warn('You cannot use {} as a keyword '.format(key)+
                              'argument for jcm.geo. It is already set by the'+
                              ' SimulationSet instance.')
                 del jcm_kwargs[key]
@@ -1224,7 +1236,7 @@ class SimulationSet(object):
                     working_dir=self.project.working_dir,
                     **jcm_kwargs)
         for line in output:
-            logger.debug('[JCMgeo] '+line)
+            logger_JCMgeo.debug(line)
         os.chdir(_thisdir)
     
     def solve_single_simulation(self, simulation, compute_geometry=True, 
@@ -1276,7 +1288,7 @@ class SimulationSet(object):
             simulation.solve(**jcm_solve_kwargs)
             results, logs = daemon.wait()
         for line in output:
-            logger.debug(line)
+            logger_JCMsolve.debug(line)
         
         # Set the results and logs in the Simulation-instance and return them
         simulation._set_jcm_results_and_logs(results[0], logs[0])
@@ -1293,7 +1305,7 @@ class SimulationSet(object):
         Simulation.process_results-method for info on how to use the
         processing_func.
         """
-        logger.info('Starting to solve.')
+        self.logger.info('Starting to solve.')
         
         jobIDs = []
         ID2simNumber = {} # dict to find the simulation number from the job ID
@@ -1316,7 +1328,7 @@ class SimulationSet(object):
             if not sim.number in self.finished_sim_numbers:
                 # Start to solve the simulation and receive a job ID
                 jobID = sim.solve(**jcm_solve_kwargs)
-                logger.debug(
+                self.logger.debug(
                         'Queued simulation {0} of {1} with jobID {2}'.\
                                 format(i+1, self.num_sims, sim.jobID))
                 jobIDs.append(jobID)
@@ -1325,7 +1337,7 @@ class SimulationSet(object):
             # wait for N simulations to finish
             if len(jobIDs) != 0:
                 if (divmod(i+1, N)[1] == 0) or ((i+1) == self.num_sims):
-                    logger.info('Waiting for {} '.format(len(jobIDs)) +
+                    self.logger.info('Waiting for {} '.format(len(jobIDs)) +
                                   'simulation(s) to finish...')
                     self._wait_for_simulations(jobIDs, ID2simNumber)
                     jobIDs = []
@@ -1341,7 +1353,7 @@ class SimulationSet(object):
         # In each loop, the results are directly processed and saved
         nFinished = 0
         nTotal = len(ids2waitFor)
-        logger.debug('Waiting for jobIDs: {}'.format(ids2waitFor))
+        self.logger.debug('Waiting for jobIDs: {}'.format(ids2waitFor))
         while nFinished < nTotal:
             # wait till any simulations are finished
             # deepcopy is needed to protect ids2waitFor from being modified
@@ -1350,7 +1362,7 @@ class SimulationSet(object):
                 indices, thisResults, logs = daemon.wait(deepcopy(ids2waitFor), 
                                                      break_condition = 'any')
             for line in output:
-                logger.debug(line)
+                logger_JCMsolve.debug(line)
               
             # Get lists for the IDs of the finished jobs and the corresponding
             # simulation numbers
@@ -1397,7 +1409,7 @@ class SimulationSet(object):
         """
         if (not hasattr(self, 'finished_sim_numbers') or 
             not hasattr(self, 'num_sims')):
-            logger.info('Cannot check if all simulations are done before '+
+            self.logger.info('Cannot check if all simulations are done before '+
                          '`make_simulation_schedule` was executed.')
             return False
         return set(range(self.num_sims)) == set(self.finished_sim_numbers)
@@ -1437,11 +1449,11 @@ class SimulationSet(object):
         which are directly passed to jcm.geo and jcm.solve, respectively. 
         """
         if self.all_done():
-            logger.info('Nothing to run: all simulations finished.')
+            self.logger.info('Nothing to run: all simulations finished.')
             return
         
         if not self._is_scheduled():
-            logger.info('Please run `make_simulation_schedule` first.')
+            self.logger.info('Please run `make_simulation_schedule` first.')
             return
         
         if zip_file_path is None:
@@ -1470,20 +1482,20 @@ class SimulationSet(object):
             self.add_resources()
         self._start_simulations(N=N, processing_func=processing_func)
         if len(self.failed_simulations) > 0:
-            logger.warn('The following simulations failed: {}'.format(
+            self.logger.warn('The following simulations failed: {}'.format(
                             [sim.number for sim in self.failed_simulations]))
         
         # Delete/zip working directories from previous runs if needed
         if wdir_mode in ['zip', 'delete'] and hasattr(self, '_wdirs_to_clean'):
-            logger.info('Treating old working directories with mode: {}'.format(
-                                                                    wdir_mode))
+            self.logger.info('Treating old working directories with mode: {}'.\
+                                                              format(wdir_mode))
             for dir_ in self._wdirs_to_clean:
                 if wdir_mode == 'zip':
                     utils.append_dir_to_zip(dir_, zip_file_path)
                 if os.path.isdir(dir_):
                     rmtree(dir_)
         
-        logger.info('Total time for all simulations: {}'.format(
+        self.logger.info('Total time for all simulations: {}'.format(
                                                 utils.tForm(time.time()-t0)))
 
 
