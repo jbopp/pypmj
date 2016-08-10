@@ -714,8 +714,8 @@ class SimulationSet(object):
             return
         if not stored_jpy_version == __version__:
             self.logger.warn('Version mismatch! HDF5 store was created using '+
-                'jcmpython version {}, the current '.format(stored_jcm_version)+
-                'version is {}.'.format(__jcm_version__))
+                'jcmpython version {}, the current '.format(stored_jpy_version)+
+                'version is {}.'.format(__version__))
     
     def is_store_empty(self):
         """Checks if the HDF5 store is empty.""" 
