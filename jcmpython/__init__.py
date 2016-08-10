@@ -40,6 +40,7 @@ from parallelization import read_resources_from_config, DaemonResource
 # initialize the daemon resources and load them into the namespace
 __logger.debug('Initializing resources from configuration.')
 resources = read_resources_from_config()
+__logger.debug('Found resources: {}'.format(resources))
 
 # Some extra functionality
 def jcm_version_info(log=True, return_output=False):
@@ -68,7 +69,7 @@ if matches is None:
 else:
     __jcm_version__ = matches.group().split(' ')[1]
 
-from core import JCMProject, Simulation, SimulationSet
+from core import JCMProject, Simulation, SimulationSet, ConvergenceTest
 import utils
 
 # Function to load extensions

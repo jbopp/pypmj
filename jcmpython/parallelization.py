@@ -108,6 +108,7 @@ class DaemonResource(object):
         self.nickname = nickname
         self.JCMKERNEL = _config.getint('JCMsuite', 'kernel')
         self.kwargs = kwargs
+        self.previous_state_saved = False
         self.restore_default_m_n()
     
     def __repr__(self):
@@ -115,6 +116,11 @@ class DaemonResource(object):
                                            self.nickname,
                                            self.multiplicity,
                                            self.n_threads)
+    
+    def get_available_cores(self):
+        """Returns the total number of currently configured cores for this
+        resource, i.e. multiplicity*n_threads."""
+        return self.multiplicity*self.n_threads
     
     def set_multiplicity(self, value):
         """Set the number of CPUs to use."""
@@ -134,6 +140,21 @@ class DaemonResource(object):
         """Shorthand for setting multiplicity and n_threads both at a time."""
         self.set_multiplicity(m)
         self.set_n_threads(n)
+    
+    def save_m_n(self):
+        """Saves the currently active multiplicity and n_threads. They can be
+        restored using the `restore_previous_m_n`-method.
+        """
+        self.previous_multiplicity = self.multiplicity
+        self.previous_n_threads = self.n_threads
+        self.previous_state_saved = True
+    
+    def restore_previous_m_n(self):
+        """Restores the default values for multiplicity and n_threads."""
+        if self.previous_state_saved:
+            self.set_m_n(self.previous_multiplicity, self.previous_n_threads)
+        else:
+            self.restore_default_m_n()
     
     def restore_default_m_n(self):
         """Restores the default values for multiplicity and n_threads."""
@@ -259,6 +280,20 @@ class ResourceDict(dict):
         """Calls the `add_repeatedly` method for all resources."""
         for r in self.values():
             r.add_repeatedly(n_shots, wait_seconds, ignore_fail)
+    
+    def get_resource_with_most_cores(self):
+        """Determines which of the resources has the most usable cores, i.e.
+        multiplicity*n_threads, and returns its nickname and this number.
+        """
+        names = []
+        cores = []
+        for r in self.values():
+            names.append(r.nickname)
+            cores.append(r.get_available_cores())
+        max_cores = max(cores)
+        imax = cores.index(max_cores)
+        return names[imax], max_cores
+        
 
 
 if __name__ == '__main__':

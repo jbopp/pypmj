@@ -249,14 +249,40 @@ def append_dir_to_zip(directory, zip_file_path):
                        os.path.join(relDir, file_))
     ziph.close()    
 
-class Capturing(list):
+def relative_deviation(sample, reference):
     """
-    Context manager to capture any output printed to stdout.
+    Returns the relative deviation d=|A/B-1| of sample A and reference B. A can
+    be a (complex) number or a list/numpy.ndarray of (complex) numbers. In case
+    of complex numbers, the average relative deviation of real and imaginary
+    part (d_real+d_imag)/2 is returned.
+    """
+    def rel_dev_real(A,B):
+        return np.abs( A/B -1. )
+    if isinstance(sample, list): sample = np.array(sample)
+    if np.any(np.iscomplex(sample)):
+        assert np.iscomplex(reference), \
+            'relative_deviation for complex numbers is only possible '+\
+            'if the reference is complex as-well.'
+        return (rel_dev_real(sample.real, reference.real) +\
+                rel_dev_real(sample.imag, reference.imag))/2.
+    else:
+        return rel_dev_real(sample, reference.real)
+
+class DisableLogger(object):
+    """Context manager to disable all logging events below specific level.""" 
+    def __init__(self, level=logging.INFO):
+        self.level = level
+        
+    def __enter__(self):
+        logging.disable(self.level)
     
-    Usage:
-        with Capturing() as output:
-            do_something...
-    
+    def __exit__(self, a, b, c):
+        logging.disable(logging.NOTSET)
+
+
+class Capturing(list):
+    """Context manager to capture any output printed to stdout.
+
     based on: 
     http://stackoverflow.com/questions/16571150/
                         how-to-capture-stdout-output-from-a-python-function-call

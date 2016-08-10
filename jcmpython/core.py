@@ -36,6 +36,7 @@ DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
 
 # Global defaults
 SIM_DIR_FMT = 'simulation{0:06d}'
+STANDARD_DATE_FORMAT = '%y%m%d'
 
 def _default_sim_wdir(storage_dir, sim_number):
     """Returns the default working directory path for a given storage folder
@@ -577,9 +578,9 @@ class SimulationSet(object):
         # assumed
         keys_rest = [_k for _k in keys.keys() if not _k in loop_indication]
         if len(keys_rest) > 0:
-            self.constants = keys
+            self.constants = []
             self.geometry = []
-            self.parameters = []
+            self.parameters = keys
             return
         
         # Otherwise, case 2 is assumed
@@ -627,6 +628,16 @@ class SimulationSet(object):
         """Returns the path to the working directory of the current project."""
         return self.project.working_dir
 
+    def __get_storage_folder(self, storage_folder):
+        """Returns the standard storage folder name, depending on the input
+        `storage_folder`. If `storage_folder` is 'from_date', returns the
+        standard date string, otherwise it returns the input.
+        """
+        if storage_folder == 'from_date':
+            # Generate a directory name from date
+            storage_folder = date.today().strftime(STANDARD_DATE_FORMAT)
+        return storage_folder
+
     def _set_up_folders(self, duplicate_path_levels, storage_folder,
                         storage_base):
         """Reads storage specific parameters from the configuration and prepares
@@ -653,9 +664,7 @@ class SimulationSet(object):
             cfolders = os.path.normpath(os.getcwd()).split(os.sep)
             base = os.path.join(base, *cfolders[-duplicate_path_levels:])
         
-        if storage_folder == 'from_date':
-            # Generate a directory name from date
-            storage_folder = date.today().strftime("%y%m%d")
+        storage_folder = self.__get_storage_folder(storage_folder)
         self.storage_dir = os.path.join(base, storage_folder)
         
         # Create the necessary directories
@@ -750,6 +759,12 @@ class SimulationSet(object):
         self.logger.debug('Closing the HDF5 store: {}'.format(
                                                            self._database_file))
         self.store.close()
+    
+    def open_store(self):
+        """Closes the HDF5 store."""
+        self.logger.debug('Opening the HDF5 store: {}'.format(
+                                                           self._database_file))
+        self.store.open()
     
     def append_store(self, data):
         """Appends a new row or multiple rows to the HDF5 store."""
@@ -1316,16 +1331,27 @@ class SimulationSet(object):
             N = self.num_sims
         if not isinstance(N, int):
             raise ValueError('`N` must be an integer or "all"')
-            
+        
+        # We only want to compute the geometry if necessary, which is controlled
+        # using the `rerun_JCMgeo`-attribute of the Simulation-instances.
+        # However, if a simulation is already finished, we need to make sure
+        # that the geometry is calculated before the next unfinished simulation
+        # if necessary. This is controlled by `force_geo_run`, which is set to
+        # True if a finished simulation would have caused a geometry
+        # computation.
+        force_geo_run = False
+        
+        # Loop over all simulations
         for sim in self.simulations:
             i = sim.number
             
-            # TODO: Find out how to reduce the calls of JCMgeo
-            if sim.rerun_JCMgeo:
-                self.compute_geometry(sim, **jcm_geo_kwargs)
-            
             # Start the simulation if it is not already finished
             if not sim.number in self.finished_sim_numbers:
+                # Compute the geometry if necessary
+                if sim.rerun_JCMgeo or force_geo_run:
+                    self.compute_geometry(sim, **jcm_geo_kwargs)
+                    force_geo_run = False
+                
                 # Start to solve the simulation and receive a job ID
                 jobID = sim.solve(**jcm_solve_kwargs)
                 self.logger.debug(
@@ -1333,6 +1359,11 @@ class SimulationSet(object):
                                 format(i+1, self.num_sims, sim.jobID))
                 jobIDs.append(jobID)
                 ID2simNumber[jobID] = sim.number
+            else:
+                # Set `force_geo_run` to True if this finished simulation would
+                # have caused to compute the geometry
+                if sim.rerun_JCMgeo:
+                    force_geo_run = True
                 
             # wait for N simulations to finish
             if len(jobIDs) != 0:
@@ -1500,6 +1531,246 @@ class SimulationSet(object):
         self.logger.info('Total time for all simulations: {}'.format(
                                                 utils.tForm(time.time()-t0)))
 
+
+# =============================================================================
+class ConvergenceTest(object):
+    """
+    """
+    
+    def __init__(self, project, keys_test, keys_ref, duplicate_path_levels=0, 
+        storage_folder='from_date', storage_base='from_config', 
+        combination_mode='product', check_version_match=True):
+        self.logger = logging.getLogger('core.'+self.__class__.__name__)
+        
+        # Get appropriate storage folders for the two simulation sets
+        storage_folder_test = self.__get_storage_folder(storage_folder, 'Test')
+        storage_folder_ref = self.__get_storage_folder(storage_folder, 
+                                                       'Reference')
+        
+        # Initialize the SimualtionSet-instances
+        self.logger.info('Initializing the reference simulation set.')
+        self.sset_ref= SimulationSet(project, keys_ref, duplicate_path_levels,
+                                     storage_folder_ref, storage_base,
+                                     combination_mode, check_version_match)
+        self.logger.info('Initializing the test simulation set.')
+        self.sset_test=SimulationSet(project, keys_test, duplicate_path_levels,
+                                     storage_folder_test, storage_base,
+                                     combination_mode, check_version_match)
+        self.simulation_sets = [self.sset_ref, self.sset_test]
+        self.storage_dir = os.path.dirname(self.sset_ref.storage_dir)
+
+    def __get_storage_folder(self, storage_folder, sub_folder):
+        """Returns the standard storage folder name, depending on the input
+        `storage_folder`. If `storage_folder` is 'from_date', uses the
+        standard date string plus '_convergence_test', otherwise the
+        input for `storage_folder`, and returns this result plus the 
+        `sub_folder`.
+        """
+        if storage_folder == 'from_date':
+            # Generate a directory name from date
+            storage_folder = date.today().strftime(STANDARD_DATE_FORMAT)
+            storage_folder += '_convergence_test'
+        return os.path.join(storage_folder, sub_folder)
+    
+    def __log_paragraph(self, message):
+        """A special log message of level 'INFO' with a blank line in front of
+        it and a 70 character dashed line after it."""
+        self.logger.info('\n\n{}\n'.format(message)+70*'-')
+    
+    def make_simulation_schedule(self):
+        self.__log_paragraph('Scheduling simulation for the reference set.')
+        self.sset_ref.make_simulation_schedule()
+        if not self.sset_ref.num_sims == 1:
+            raise Exception('The keys for the reference SimulationSet must '+
+                            'indicate a single computation. Multiple reference'+
+                            ' simulations are not supported at this time.')
+            return
+        self.__log_paragraph('Scheduling simulation for the test set.')
+        self.sset_test.make_simulation_schedule()
+    
+    def use_only_resources(self, names):
+        """Restrict the daemon resources to `names`. Only makes sense if the
+        resources have not already been added. 
+        
+        Names that are unknown are ignored. If no valid name is present, the
+        default configuration will remain untouched.
+        """
+        self.logger.info('Restricting resources to: {}'.format(names))
+        with utils.DisableLogger():
+            self.logger.info('Test info')
+            for sset in self.simulation_sets:
+                sset.use_only_resources(names)
+    
+    def open_stores(self):
+        """Opens all HDF5 stores."""
+        self.logger.debug('Opening HDF5 stores.')
+        with utils.DisableLogger():
+            for sset in self.simulation_sets:
+                sset.open_store()
+    
+    def close_stores(self):
+        """Closes all HDF5 stores."""
+        self.logger.info('Closing HDF5 stores.')
+        with utils.DisableLogger():
+            for sset in self.simulation_sets:
+                sset.close_store()
+    
+    def run(self, run_ref_with_max_cores='AUTO', save_run=False, 
+            **simuset_kwargs):
+        """Runs the reference and the test simulation sets using the 
+        simuset_kwargs, which are passed to the run-method of each 
+        SimulationSet-instance. 
+        
+        Parameters
+        ----------
+        run_ref_with_max_cores : str (DaemonResource nickname) or False, 
+                                 default 'AUTO'
+            If 'AUTO', the DaemonResource with the most cores is automatically
+            determined and used for the reference simulation with a
+            `multiplicity` of one and all configured cores as `n_threads`. If
+            a nickname is given, all configured cores of this resource are used
+            in the same way. If False, the currently active resource 
+            configuration is used. The configuration for the test simulation
+            set remains untouched.
+        save_run : bool, default False
+            If True, the utility function `run_simusets_in_save_mode` is used
+            for the run.
+        """
+        # Reference simulation
+        change_resource_configuration = False
+        if run_ref_with_max_cores == 'AUTO':
+            nick, N = self.sset_ref.resources.get_resource_with_most_cores()
+            change_resource_configuration = True
+        elif isinstance(run_ref_with_max_cores, (str, unicode)):
+            if nick in self.sset_ref.resources:
+                nick = run_ref_with_max_cores
+                N = self.sset_ref.resources[nick].get_available_cores()
+                change_resource_configuration = True
+            else:
+                self.logger.warn('You specified a resource name for '+
+                                 '`run_ref_with_max_cores` which is unknown. '+
+                                 'Leaving the configuration untouched.')
+        
+        
+        self.__log_paragraph('Running the reference simulation set.')
+        # If necessary we change the resource configuration for the reference
+        # simulation here
+        if change_resource_configuration:
+            # Restrict resources
+            self.sset_ref.use_only_resources(nick)
+            # Save the configuration for this resource for restoring it later
+            ref_resource = self.sset_ref.resources[nick]
+            ref_resource.save_m_n()
+            # Set multiplicity and n_threads
+            ref_resource.set_m_n(1,N)
+            self.logger.info('Changed resource configuration to: {}'.format(
+                                                                ref_resource))
+        
+        # Run the reference simulation set
+        if save_run:
+            utils.run_simusets_in_save_mode(self.sset_ref, **simuset_kwargs)
+        else:
+            self.sset_ref.run(**simuset_kwargs)
+        
+        # Restore the previous configuration for the resource
+        ref_resource.restore_previous_m_n()
+        
+        # Shut down the daemon to cause the test set to add its resources again. 
+        daemon.shutdown()
+        
+        # Run the test simulation set
+        self.__log_paragraph('Running the test simulation set.')
+        if save_run:
+            utils.run_simusets_in_save_mode(self.sset_test, **simuset_kwargs)
+        else:
+            self.sset_test.run(**simuset_kwargs)
+    
+    def _get_deviation_data(self, data, ref, dev_columns):
+        """Returns a new pandas DataFrame that holds the relative deviation from
+        the values in `data` to the values in `ref` for each column in 
+        dev_columns. The new data frame contains columns with the same names
+        as given by dev_columns, but with the prefix 'deviation_'.
+        
+        Parameters
+        ----------
+        data : pandas-DataFrame
+            The test data frame.
+        ref : pandas-DataFrame
+            The reference data frame.
+        dev_columns : list
+            List of column names for which to calculate the relative deviation.
+            All elements must be present in the columns of both data frames.
+        """
+        df_ = pd.DataFrame(index=data.index)
+        for dcol in dev_columns:
+            if not (dcol in data.columns and dcol in ref.columns):
+                raise RuntimeError('The column {} for which the '.format(dcol)+
+                                   'relative deviation should be computed is '+
+                                   'Missing in one of the input DataFrames.')
+                return
+            df_['deviation_'+dcol] = utils.relative_deviation(data[dcol].values,
+                                                              ref[dcol])
+        return df_
+    
+    def analyze_convergence_results(self, dev_columns, sort_by=None):
+        """
+        
+        """
+        self.__log_paragraph('Analyzing...')
+        
+        if not utils.is_sequence(dev_columns):
+            dev_columns = [dev_columns]
+        
+        if sort_by is None:
+            sort_by = dev_columns[0]
+        if not sort_by in dev_columns:
+            raise ValueError('{} is not in the dev_columns.'.format(sort_by))
+            return
+        
+        # Open the stores as they may be closed
+        self.open_stores()
+        
+        # Load the data
+        data_test = self.sset_test.get_store_data()
+        data_ref = self.sset_ref.get_store_data()
+        
+        # Calculate the deviations
+        self.logger.debug('Calculating relative deviations for: {}'.format(
+                                                                dev_columns))
+        devs = self._get_deviation_data(data_test, data_ref, dev_columns)
+        
+        # Sort the data and return a full DataFrame including the test data
+        # and the deviations
+        self.logger.debug('Sorting test set results by relative deviation')
+        sort_index = devs.sort_values('deviation_'+sort_by).index
+        data_sorted = data_test.loc[sort_index].copy()
+        # data_sorted = pd.merge([data_sorted, devs])
+        data_sorted = data_sorted.join(devs)
+        self.analyzed_data = data_sorted
+        return data_sorted
+    
+    def write_analyzed_data_to_file(self, file_path=None, mode='CSV', **kwargs):
+        """Writes the data calculated by `analyze_convergence_results` to a CSV 
+        or an Excel file. `mode` must be either 'CSV' or 'Excel'. If `file_path`
+        is None, the default name results.csv/xls in the storage folder is used.
+        `kwargs` are passed to the corresponding pandas functions."""
+        if not hasattr(self, 'analyzed_data'):
+            self.logger.warn('No analyzed data present. Did you run and '+
+                             'analyze this convergence test?')
+            return
+        if not mode in ['CSV', 'Excel']:
+            raise ValueError('Unknown mode: {}. Use CSV or Excel.'.format(mode))
+        if mode=='CSV':
+            if file_path is None:
+                file_path = os.path.join(self.storage_dir, 'results.csv')
+            self.analyzed_data.to_csv(file_path, **kwargs)
+        else:
+            if file_path is None:
+                file_path = os.path.join(self.storage_dir, 'results.xls')
+            writer = pd.ExcelWriter(file_path)
+            self.analyzed_data.to_excel(writer, 'data', **kwargs)
+            writer.save()
+        
 
 
 # Call of the main function
