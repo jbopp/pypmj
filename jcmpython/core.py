@@ -1348,7 +1348,7 @@ class SimulationSet(object):
         n_sims_done_this_round = 0
         n_sims_todo = self.num_sims_to_do()
         
-        # Start the timer
+        # Start the round timer
         t0 = time.time()
          
         # Loop over all simulations
@@ -1385,20 +1385,24 @@ class SimulationSet(object):
                     jobIDs = []
                     ID2simNumber = {}
                     
+                    # Update the global counters
                     n_sims_todo -= n_sims_done_this_round
                     n_sims_done += n_sims_done_this_round
                     
-                    
+                    # Calculate the time that was needed for the 
+                    # `n_sims_done_this_round` simulations
                     t = time.time()-t0
-                    self.logger.info('Performed {} simulations in {}'.format(
+                    self.logger.debug('Performed {} simulations in {}'.format(
                                         n_sims_done_this_round, utils.tForm(t)))
                     t_per_sim = t/n_sims_done_this_round
+                    
+                    # Calculate and inform on the approx. remaining time
                     t_remaining = n_sims_todo*t_per_sim
                     if not t_remaining == 0.:
                         self.logger.info('Approx. remaining time: {}'.format(
                                                       utils.tForm(t_remaining)))
                     
-                    # Reset the round counter
+                    # Reset the round counter and timer
                     n_sims_done_this_round = 0
                     t0 = time.time()
                     
