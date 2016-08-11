@@ -1535,7 +1535,68 @@ class SimulationSet(object):
 
 # =============================================================================
 class ConvergenceTest(object):
-    """
+    """Class to set up, run and analyze convergence tests for JCMsuite projects.
+    A convergence test consists of a reference simulation and (a) test 
+    simulation(s). The reference simulation should be of much higher accuracy
+    than any of the test simulations.
+    
+    This class initializes two SimulationSet instances. All init arguments are
+    the same as for SimulationSet, except that there are two sets of keys.
+    
+    Parameters
+    ----------
+    project : JCMProject, str or tuple/list of the form (specifier, working_dir)
+        JCMProject to use for the simulations. If no JCMProject-instance is 
+        provided, it is created using the given specifier or, if project is of 
+        type tuple, using (specifier, working_dir) (i.e. JCMProject(project[0], 
+        project[1])).
+    keys_test/keys_ref : dict
+        These are keys-dicts as used to initialize a SimulationSet. The 
+        `keys_ref` must correspond to a single simulation. The syntax is the
+        same as for SimulationSet, which we repeat here:
+        There are two possible use cases:
+          1. The keys are the normal keys as defined by JCMsuite, containing
+             all the values that need to passed to parse the JCM-template files.
+             In this case, a single computation is performed using these keys.
+          2. The keys-dict contains at least one of the keys [`constants`,
+             `geometry`, `parameters`] and no additional keys. The values of
+             each of these keys must be of type dict again and contain the keys
+             necessary to parse the JCM-template files. Depending on the 
+             `combination_mode`, loops are performed over any 
+             parameter-sequences provided in `geometry` or `parameters`. JCMgeo
+             is only called if the keys in `geometry` change between consecutive
+             runs. Keys in `constants` are not stored in the HDF5 store! 
+             Consequently, this information is lost, but also adds the 
+             flexibility to path arbitrary data types to JCMsuite that could not
+             be stored in the HDF5 format.
+    duplicate_path_levels : int, default 0
+        For clearly arranged data storage, the folder structure of the current
+        working directory can be replicated up to the level given here. I.e., if
+        the current dir is /path/to/your/jcmpython/ and duplicate_path_levels=2,
+        the subfolders your/jcmpython will be created in the storage base dir
+        (which is controlled using the configuration file). This is not done if
+        duplicate_path_levels=0.
+    storage_folder : str, default 'from_date'
+        Name of the subfolder inside the storage folder in which the final data
+        is stored. If 'from_date' (default), the current date (%y%m%d) is used.
+        Note: in contrast to a single SimulationSet, subfolders 'Test' and
+        'Reference' are created inside the storage folder for the two sets.
+    storage_base : str, default 'from_config'
+        Directory to use as the base storage folder. If 'from_config', the
+        folder set by the configuration option Storage->base is used. 
+    combination_mode : {'product', 'list'}
+        Controls the way in which sequences in the `geometry` or `parameters`
+        keys are treated.
+          * If `product`, all possible combinations of the provided keys are
+            used.
+          * If `list`, all provided sequences need to be of the same length N, 
+            so that N simulations are performed, using the value of the i-th 
+            element of each sequence in simulation i.
+    check_version_match : bool, default True
+        Controls if the versions of JCMsuite and jcmpython are compared to the
+        versions that were used when the HDF5 store was used. This has no effect
+        if no HDF5 is present, i.e. if you are starting with an empty working
+        directory.
     """
     
     def __init__(self, project, keys_test, keys_ref, duplicate_path_levels=0, 
@@ -1579,6 +1640,8 @@ class ConvergenceTest(object):
         self.logger.info('\n\n{}\n'.format(message)+70*'-')
     
     def make_simulation_schedule(self):
+        """Same as for SimulationSet. Calls the `make_simulation_schedule`
+        method for both sets."""
         self.__log_paragraph('Scheduling simulation for the reference set.')
         self.sset_ref.make_simulation_schedule()
         if not self.sset_ref.num_sims == 1:
@@ -1714,8 +1777,11 @@ class ConvergenceTest(object):
         return df_
     
     def analyze_convergence_results(self, dev_columns, sort_by=None):
-        """
-        
+        """Calculates the relative deviations to the reference data for the
+        columns in the `dev_columns`. A new DataFrame containing the test
+        simulation data and the relative deviations is created (as class
+        attribute `analyzed_data`) and returned. It is sorted in ascending
+        order by the first dev_column or by the one specified by `sort_by`.
         """
         self.__log_paragraph('Analyzing...')
         
@@ -1754,7 +1820,8 @@ class ConvergenceTest(object):
         """Writes the data calculated by `analyze_convergence_results` to a CSV 
         or an Excel file. `mode` must be either 'CSV' or 'Excel'. If `file_path`
         is None, the default name results.csv/xls in the storage folder is used.
-        `kwargs` are passed to the corresponding pandas functions."""
+        `kwargs` are passed to the corresponding pandas functions.
+        """
         if not hasattr(self, 'analyzed_data'):
             self.logger.warn('No analyzed data present. Did you run and '+
                              'analyze this convergence test?')
