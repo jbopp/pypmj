@@ -1342,6 +1342,15 @@ class SimulationSet(object):
         # computation.
         force_geo_run = False
         
+        # We frequently count how many simulations we ran, to give an estimate
+        # of the running time
+        n_sims_done = 0
+        n_sims_done_this_round = 0
+        n_sims_todo = self.num_sims_to_do()
+        
+        # Start the timer
+        t0 = time.time()
+         
         # Loop over all simulations
         for sim in self.simulations:
             i = sim.number
@@ -1360,6 +1369,7 @@ class SimulationSet(object):
                                 format(i+1, self.num_sims, sim.jobID))
                 jobIDs.append(jobID)
                 ID2simNumber[jobID] = sim.number
+                n_sims_done_this_round += 1 # it is not yet done :)
             else:
                 # Set `force_geo_run` to True if this finished simulation would
                 # have caused to compute the geometry
@@ -1374,6 +1384,24 @@ class SimulationSet(object):
                     self._wait_for_simulations(jobIDs, ID2simNumber)
                     jobIDs = []
                     ID2simNumber = {}
+                    
+                    n_sims_todo -= n_sims_done_this_round
+                    n_sims_done += n_sims_done_this_round
+                    
+                    
+                    t = time.time()-t0
+                    self.logger.info('Performed {} simulations in {}'.format(
+                                        n_sims_done_this_round, utils.tForm(t)))
+                    t_per_sim = t/n_sims_done_this_round
+                    t_remaining = n_sims_todo*t_per_sim
+                    if not t_remaining == 0.:
+                        self.logger.info('Approx. remaining time: {}'.format(
+                                                      utils.tForm(t_remaining)))
+                    
+                    # Reset the round counter
+                    n_sims_done_this_round = 0
+                    t0 = time.time()
+                    
  
     def _wait_for_simulations(self, ids2waitFor, ID2simNumber):
         """Waits for the job IDS in the list `ids2waitFor` to finish using
