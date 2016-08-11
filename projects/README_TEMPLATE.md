@@ -53,12 +53,12 @@ This function reads out the real part of the electromagnetic energy flux
 computed by the `FluxIntegration` post process and stores it with key `'SCS'`
 in the results dictionary.
 
-    def processing_func_1(pp):
-        results = {} #must be a dict
-        # ... processing steps ...
-        return results
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~ python
+def processing_func_1(pp):
+    results = {} #must be a dict
+    # ... processing steps ...
+    return results
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Notes
-
-
 

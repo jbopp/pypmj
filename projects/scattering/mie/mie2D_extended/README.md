@@ -72,10 +72,12 @@ This function reads out the real part of the electromagnetic energy flux
 computed by the `FluxIntegration` post process and stores it with key `'SCS'`
 in the results dictionary.
 
-    def read_scs(pp):
-        results = {} #must be a dict
-        results['SCS'] = pp[0]['ElectromagneticFieldEnergyFlux'][0][0].real
-        return results
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~ python
+def read_scs(pp):
+    results = {} #must be a dict
+    results['SCS'] = pp[0]['ElectromagneticFieldEnergyFlux'][0][0].real
+    return results
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # Notes
 
