@@ -1121,7 +1121,7 @@ class SimulationSet(object):
         rows in the stored DataFrame. 'unmatched_rows' is a list of row indices
         in the store that don't have a match in the search DataFrame.
         """
-        ckeys = self.get_all_keys()
+        ckeys = self.stored_keys
         if len(ckeys) > 255:
             raise ValueError('Cannot treat more parameters than 255 in the '+
                              'current implementation.')
@@ -1132,13 +1132,14 @@ class SimulationSet(object):
         if data is None:
             return None, None
         
-        # Check if the ckeys are among the columns of the store 
-        # DataFrame
-        if not all([key_ in data.columns for key_ in ckeys]):
-            raise ValueError('The simulation keys have changed compared'+
-                             ' to the results in the store. Valid keys'+
-                             ' are: {}.'.format(list(data.columns)))
-            return
+        # Check if the ckeys are among the columns of the store DataFrame
+        for key_ in ckeys:
+            if not key_ in data.columns:
+                raise ValueError('The simulation keys have changed compared'+
+                                 ' to the results in the store. The key '
+                                 '{} is not in the stored keys, '.format(key_)+
+                                 'which are: {}.'.format(list(data.columns)))
+                return
         
         # Reduce the DataFrame size to the columns that need to be compared
         df_ = data.ix[:,ckeys]
@@ -1153,7 +1154,7 @@ class SimulationSet(object):
             if n_in_store == len(matches):
                 return matches, None
             # Compare this row
-            idx = utils.walk_df(df_, srow._asdict(), keys=ckeys)
+            idx = utils.walk_df(df_, srow._asdict(), keys=deepcopy(ckeys))
             if isinstance(idx, int):
                 matches.append((srow[0], idx))
             elif not idx is None:
