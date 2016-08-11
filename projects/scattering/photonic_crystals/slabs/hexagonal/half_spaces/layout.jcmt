@@ -1,7 +1,7 @@
 <?
 # Imports
 import os
-import pointlist_im_to_re as pl
+from project_utils import pointlist_im_to_re, polyarea
 import numpy as np
 from math import pi
 
@@ -16,7 +16,7 @@ keys['hm'] = keys['h'] / 2.
 # Generate a point-list
 points_cd = ( keys['p'] / 2. / np.cos(np.deg2rad(30)) * 
                 np.exp( 2.j * pi / 6. * np.arange(1,7) ) )
-keys['pointlist_cd'] = pl.pointlist_im_to_re(points_cd)
+keys['pointlist_cd'] = pointlist_im_to_re(points_cd)
 
 dz_des = keys['slc_1']
 
@@ -45,7 +45,7 @@ points_circle_base = 1./2. * np.exp( 1j*angles )
 for i, d in enumerate(diameters):
     # outer boundary of the frame
     points_circle = d * points_circle_base
-    area = pl.polyarea(points_circle.real, points_circle.imag)
+    area = polyarea(points_circle.real, points_circle.imag)
     area_circle = pi * (d/2.)**2
     area_scaling = np.sqrt( area_circle/area )
     horizontal_shape1[i,:] = area_scaling* points_circle

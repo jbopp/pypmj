@@ -1774,6 +1774,9 @@ class ConvergenceTest(object):
                 return
             df_['deviation_'+dcol] = utils.relative_deviation(data[dcol].values,
                                                               ref[dcol])
+        if len(dev_columns) > 1:
+            df_['deviation_mean'] = df_.mean(axis=1)
+        self.deviation_columns = list(df_.columns)
         return df_
     
     def analyze_convergence_results(self, dev_columns, sort_by=None):
@@ -1782,6 +1785,12 @@ class ConvergenceTest(object):
         simulation data and the relative deviations is created (as class
         attribute `analyzed_data`) and returned. It is sorted in ascending
         order by the first dev_column or by the one specified by `sort_by`.
+        A list of all deviation column names is stored in the 
+        `deviation_columns` attribute.
+        
+        If more than 1 `dev_columns` is given, the mean deviation is also
+        calculated and in DataFrame column 'deviation_mean'. It is used to sort
+        the data if `sort_by` is None.
         """
         self.__log_paragraph('Analyzing...')
         
@@ -1789,8 +1798,11 @@ class ConvergenceTest(object):
             dev_columns = [dev_columns]
         
         if sort_by is None:
-            sort_by = dev_columns[0]
-        if not sort_by in dev_columns:
+            if len(dev_columns) > 1:
+                sort_by = 'mean'
+            else:
+                sort_by = dev_columns[0]
+        if not (sort_by in dev_columns or sort_by == 'mean'):
             raise ValueError('{} is not in the dev_columns.'.format(sort_by))
             return
         
