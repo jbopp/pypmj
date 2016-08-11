@@ -1438,9 +1438,22 @@ class SimulationSet(object):
         """Checks if make_simulation_schedule was executed"""
         return hasattr(self, 'simulations')
     
+    def num_sims_to_do(self):
+        """Returns the number of simulations still needs to be solved, i.e. 
+        which are not already in the store."""
+        if not hasattr(self, 'num_sims'):
+            # TODO: check if '_is_scheduled' can be used instead
+            self.logger.info('Cannot count simulations before '+
+                         '`make_simulation_schedule` was executed.')
+            return
+        if not hasattr(self, 'finished_sim_numbers'):
+            return self.num_sims
+        return self.num_sims - len(self.finished_sim_numbers)
+    
     def all_done(self):
         """Checks if all simulations are done, i.e. already in the HDF5 store.
         """
+        # TODO: check if `num_sims_to_do` can be used here
         if (not hasattr(self, 'finished_sim_numbers') or 
             not hasattr(self, 'num_sims')):
             self.logger.info('Cannot check if all simulations are done before '+
