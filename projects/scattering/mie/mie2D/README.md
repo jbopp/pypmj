@@ -3,7 +3,7 @@
 The **mie2D-project** is the default test example of jcmpython. It is also used
 as the example project in the [online JCMsuite python tutorial][JCMtutorial].
 It describes the light scattering off an infinite glass rod The surroundings 
-consists of air. The incoming light field has a vacuum wavelength of
+consist of air. The incoming light field has a vacuum wavelength of
 $\lambda_0=550\,\mathrm{nm}$ and is polarized in $z$-direction with amplitude 
 equal to one. The radius of the glass rod is parametrized. It has a fixed
 refractive index of $n=1.52$. *Please see the online tutorial linked above for

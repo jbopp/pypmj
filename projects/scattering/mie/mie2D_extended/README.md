@@ -1,15 +1,13 @@
 # Description
 
-The **mie2D_extended-project** is the extended version of the mie2D-project,
+The **mie2D_extended-project** is the extended version of the mie2D-project, 
 containing a larger number of parameters, e.g. for convergence testing.
-It describes the light scattering off an infinite glass rod The surroundings 
-consists of air. The incoming light field has a vacuum wavelength of
+It describes the light scattering off an infinite glass rod. The surroundings 
+consist of air. The incoming light field has a vacuum wavelength of
 $\lambda_0=550\,\mathrm{nm}$ and is polarized in $z$-direction with amplitude 
 equal to one. The radius of the glass rod is parametrized. It has a fixed
-refractive index of $n=1.52$. *Please see the online tutorial linked above for
+refractive index of $n=1.52$. *Please see the [online tutorial][JCMtutorial] for
 more information*.
-
-This is the
 
 [JCMtutorial]: http://www.jcmwave.com/JCMsuite/doc/html/PythonInterface/849f4e5b5a742e774b22bb4811574000.html
 
@@ -83,6 +81,8 @@ in the results dictionary.
 
 Please see the *Using jcmpython - the mie2D-project* notebook in the `examples`
 directory shipped with jcmpython. It provides a detailed explanation on how to
-run this project.
+run the mie2D project, which is the less parametrized version of this project.
+A tutorial on running convergence tests can be found in the *Running
+convergence tests* notebook, which uses this project. 
 
 
