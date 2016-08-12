@@ -1198,6 +1198,8 @@ class SimulationSet(object):
         
         # Return the matches plus a list of unmatched results indices in the 
         # store
+        if len(matches) == 0:
+            return [], list(df_.index)
         unmatched = [i for i in list(df_.index) if not i in zip(*matches)[1]]
         return matches, unmatched
     
