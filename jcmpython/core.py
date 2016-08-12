@@ -794,6 +794,7 @@ class SimulationSet(object):
         if precheck == 'Empty':
             self.finished_sim_numbers = []
         if precheck == 'Extended Check':
+            self.logger.info('Running extended check ...')
             self._extended_store_check()
             self.logger.info('Found matches in the extended check of the HDF5 '+
                          'store. Number of stored simulations: {}'.format(
@@ -1066,6 +1067,8 @@ class SimulationSet(object):
         """Runs the extended comparison of current simulations to execute to
         the results in the HDF5 store.
         """
+        self.logger.debug('Assembling search DataFrame from the simulation '+
+                          'parameters...')
         search = pd.concat([sim._get_parameter_DataFrame() \
                                             for sim in self.simulations])
         matches, unmatched = self._compare_to_store(search)
@@ -1085,6 +1088,7 @@ class SimulationSet(object):
             return
         
         # Otherwise, we need to reindex the store
+        self.logger.debug('Reindexing the store data.')
         data = self.get_store_data().copy(deep=True)
         look_up_dict = {t[1]:t[0] for t in matches}
         old_index = list(data.index)
@@ -1092,6 +1096,7 @@ class SimulationSet(object):
         data.index = pd.Index(new_index)
         
         # Replace the data in the store with the new reindexed data
+        self.logger.debug('Replacing store content with reindexed data.')
         self.store.remove(DBASE_TAB)
         self.append_store(data)
         self.store.flush()
@@ -1110,7 +1115,7 @@ class SimulationSet(object):
         # Set the finished_sim_numbers list 
         self.finished_sim_numbers = list(self.get_store_data().index)
     
-    def _compare_to_store(self, search):
+    def _compare_to_store(self, search, t_info_interval=10.):
         """Looks for simulations that are already inside the HDF5 store by
         comparing the values of the columns given by all keys of the current 
         simulations to the values of rows in the store.
@@ -1120,6 +1125,9 @@ class SimulationSet(object):
         (search_row, store_row) identifying rows in the search DataFrame with
         rows in the stored DataFrame. 'unmatched_rows' is a list of row indices
         in the store that don't have a match in the search DataFrame.
+        
+        `t_info_interval` is the time interval in seconds at which remaining
+        time info is printed in case of long comparisons.
         """
         ckeys = self.stored_keys
         if len(ckeys) > 255:
@@ -1147,12 +1155,26 @@ class SimulationSet(object):
         if n_in_store == 0:
             return None, None
         
+        # Inform the user as this may take some time. We print out approx.
+        # every 30 seconds how long it may take to finish the job
+        n_to_search = len(search)
+        self.logger.debug('Beginning to compare {} search'.format(n_to_search)+
+                          ' rows to {} rows in the store.'.format(n_in_store))
+        if ((n_in_store > 500 and n_to_search > 500 ) or
+            n_in_store > 5000 or n_to_search > 5000):
+            self.logger.info('This may take several minutes ...')
+        
         # Do the comparison
+        t0_global = time.time()
+        t_since_info = 0.
+        count = 0
         matches = []
         for srow in search.itertuples():
+            # start the timer
+            t0 = time.time()
             # If all rows in store have matched, we're done
             if n_in_store == len(matches):
-                return matches, None
+                return matches, []
             # Compare this row
             idx = utils.walk_df(df_, srow._asdict(), keys=deepcopy(ckeys))
             if isinstance(idx, int):
@@ -1160,8 +1182,21 @@ class SimulationSet(object):
             elif not idx is None:
                 raise RuntimeError('Fatal error in HDF5 store comparison. '+
                                    'Found multiple matching rows.')
+            count += 1
+            
+            # Time info
+            t_loop = time.time()
+            tdelta = t_loop-t0
+            t_since_info += tdelta
+            if t_since_info >= t_info_interval:
+                t_total = t_loop - t0_global
+                t_per_loop = t_total/float(count)
+                t_remaining = float(n_to_search-count)*t_per_loop
+                self.logger.info('Approx. remaining time: {}'.format(
+                                                utils.tForm(t_remaining)))
+                t_since_info = 0.
         
-        # Return the matches plus a ist of unmatched results indices in the 
+        # Return the matches plus a list of unmatched results indices in the 
         # store
         unmatched = [i for i in list(df_.index) if not i in zip(*matches)[1]]
         return matches, unmatched
@@ -1350,6 +1385,7 @@ class SimulationSet(object):
         
         # Start the round timer
         t0 = time.time()
+        t_per_sim_list = [] # stores the measured times per simulation
          
         # Loop over all simulations
         for sim in self.simulations:
@@ -1394,10 +1430,14 @@ class SimulationSet(object):
                     t = time.time()-t0
                     self.logger.debug('Performed {} simulations in {}'.format(
                                         n_sims_done_this_round, utils.tForm(t)))
-                    t_per_sim = t/n_sims_done_this_round
                     
-                    # Calculate and inform on the approx. remaining time
-                    t_remaining = n_sims_todo*t_per_sim
+                    # Append the average time per simulation to the 
+                    # `t_per_sim_list`
+                    t_per_sim_list.append(t/n_sims_done_this_round)
+                    
+                    # Calculate and inform on the approx. remaining time based
+                    # on the mean of the `t_per_sim_list`
+                    t_remaining = n_sims_todo*np.mean(t_per_sim_list)
                     if not t_remaining == 0.:
                         self.logger.info('Approx. remaining time: {}'.format(
                                                       utils.tForm(t_remaining)))
