@@ -6,6 +6,7 @@ Authors : Carlo Barth
 
 # Append the parent dir to the path in order to import jcmpython
 import ConfigParser
+from datetime import date
 import os
 import sys
 if not 'jcmpython' in os.listdir('..'):
@@ -212,7 +213,8 @@ class Test_JCMbasics(unittest.TestCase):
                               jpy.SimulationSet, *args, **self.DF_ARGS)
          
         # This should work:
-        jpy.SimulationSet(project, {'constants':{}}, **self.DF_ARGS)
+        simuset = jpy.SimulationSet(project, {'constants':{}}, **self.DF_ARGS)
+        simuset.close_store()
     
     def test_simuSet_single_schedule(self):
         project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
@@ -292,9 +294,21 @@ class Test_Run_JCM(unittest.TestCase):
 if __name__ == '__main__':
     logger.info('This is test_base.py')
     
+    # list of all test suites 
     suites = [
         unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
         unittest.TestLoader().loadTestsFromTestCase(Test_Run_JCM)]
     
-    for suite in suites:
-        unittest.TextTestRunner(verbosity=2).run(suite)
+    # Get a log file for the test output
+    log_dir = os.path.abspath('logs')
+    if not os.path.isdir(log_dir):
+        os.makedirs(log_dir)
+    today_fmt = date.today().strftime("%y%m%d")
+    test_log_file = os.path.join(log_dir, today_fmt+'_test.log')
+    logger.info('Writing test logs to: {}'.format(test_log_file))
+    with open(test_log_file, 'w') as f:
+        for suite in suites:
+            unittest.TextTestRunner(f, verbosity=2).run(suite)
+    with open(test_log_file, 'r') as f:
+        content = f.read()
+    logger.info('\n\nTest results:\n'+80*'='+'\n'+content)

@@ -1438,7 +1438,9 @@ class SimulationSet(object):
                 if (n_in_queue != 0 and 
                     (n_in_queue >= N  or  (i+1) == self.num_sims)):
                     self.logger.info('Waiting for {} '.format(n_in_queue) +
-                                     'simulation(s) to finish...')
+                                     'simulation(s) to finish ('+
+                                     '{} remaining in total).'.format(
+                                                                   n_sims_todo))
                     self._wait_for_simulations(jobIDs, ID2simNumber)
                     jobIDs = []
                     ID2simNumber = {}
@@ -1466,7 +1468,6 @@ class SimulationSet(object):
                     
                     # Reset the round counter and timer
                     t0 = time.time()
-                    
  
     def _wait_for_simulations(self, ids2waitFor, ID2simNumber):
         """Waits for the job IDS in the list `ids2waitFor` to finish using
