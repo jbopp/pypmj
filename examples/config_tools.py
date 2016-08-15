@@ -53,6 +53,10 @@ def add_server(config, hostname, login, JCM_root=None, multiplicity_default=1,
         Add additional key-value pairs to pass to the daemon functions (which
         are `add_workstation` and `add_queue`) on your own risk.
     """
+    if hostname=='localhost' and login=='YOUR_USER_NAME_ON_THIS_COMPUTER':
+        raise Exception('Please provide your user name, as the value'+
+                        ' `YOUR_USER_NAME_ON_THIS_COMPUTER` is only a'+
+                        ' fill in for the example notebook :)')
     if not isinstance(config, ConfigParser.RawConfigParser):
         raise ValueError('`config` must be of type RawConfigParser.')
         return

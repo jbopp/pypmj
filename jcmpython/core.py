@@ -161,8 +161,9 @@ class JCMProject(object):
         """
         files = glob(os.path.join(self.source, '*.jcm*'))
         if len(files) == 0:
-            raise Exception('Unable to find files of signature *.jcm* in the '+
-                            'specified project folder {}'.format(self.source))
+            raise ConfigurationError('Unable to find files of signature '+
+                            '*.jcm* in the specified project folder {}'.format(
+                                                                  self.source))
             
     def _check_working_dir(self, working_dir):
         """Checks if the given working directory exists and creates it if not.
@@ -177,7 +178,7 @@ class JCMProject(object):
             if not os.path.isdir(working_dir):
                 self.logger.debug('Creating working directory {}'.format(
                                                                 working_dir))
-                os.makedirs(working_dir)
+#                 os.makedirs(working_dir)
         self.working_dir = working_dir
     
     def copy_to(self, path=None, overwrite=True, sys_append=True):
@@ -865,13 +866,13 @@ class SimulationSet(object):
             Nsims = len(loopList[0])
             for l in loopList:
                 if not len(l) == Nsims:
-                    raise ValueError('In list-mode all parameter-lists need '+
+                    raise ValueError('In `list`-mode all parameter-lists need '+
                                      'to have the same length')
             
             propertyCombinations = []
             for iSim in range(Nsims):
                 propertyCombinations.append(tuple([l[iSim] for l in loopList]))
-
+        
         self.num_sims = len(propertyCombinations) # total num of simulations
         if self.num_sims == 1:
             self.logger.info('Performing a single simulation')
@@ -880,7 +881,7 @@ class SimulationSet(object):
                          'parameter(s): {}'.format(self._loop_props))
             self.logger.info('Total number of simulations: {}'.format(
                                                                 self.num_sims))
-         
+        
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed
         self.logger.debug('Generating the simulation list.')
@@ -895,6 +896,22 @@ class SimulationSet(object):
                                                stored_keys = self.stored_keys,
                                                storage_dir = self.storage_dir,
                                                project_file_name=pfile_path))
+        
+        # We generate a pandas DataFrame that holds all the parameter and
+        # geometry properties for each simulation, with the simulation number
+        # as the index. This is used for extended comparison (if necessary) and
+        # also useful for the user e.g. to find simulation numbers with specific
+        # properties. We do this in the most efficient way, i.e. by creating
+        # the DataFrame at once. This also preserves dtypes.
+        df_dict = {}
+        for i, column in enumerate([k[0] for k in propertyCombinations[0]]):
+            df_dict[column] = [keySet[i][1] for keySet in propertyCombinations]
+        for p in fixedProperties:
+            df_dict[p] = allKeys[p]
+        self.simulation_properties = pd.DataFrame(df_dict,
+                                                  index=range(self.num_sims), 
+                                                  columns=self.stored_keys)
+        self.simulation_properties.index.name = 'number'
 
     def _sort_simulations(self):
         """Sorts the list of simulations in a way that all simulations with 
@@ -949,6 +966,11 @@ class SimulationSet(object):
             self.simulations[i].number = i
             if i in rerunJCMgeo:
                 self.simulations[i].rerun_JCMgeo = True
+        
+        # We also update the index of the simulation property DataFrame
+        self.simulation_properties = self.simulation_properties.ix[sortIndices]
+        self.simulation_properties.index = pd.Index(range(self.num_sims), 
+                                                    name='number')
     
     def __get_version_dframe(self):
         """Returns a pandas DataFrame from the version info of JCMsuite and 
@@ -1067,11 +1089,8 @@ class SimulationSet(object):
         """Runs the extended comparison of current simulations to execute to
         the results in the HDF5 store.
         """
-        self.logger.debug('Assembling search DataFrame from the simulation '+
-                          'parameters...')
-        search = pd.concat([sim._get_parameter_DataFrame() \
-                                            for sim in self.simulations])
-        matches, unmatched = self._compare_to_store(search)
+        # Do the comparison using the simulation_properties DataFrame
+        matches, unmatched = self._compare_to_store(self.simulation_properties)
         
         # Treat the different cases        
         # If unmatched rows have been found, raise an Error
@@ -1108,9 +1127,10 @@ class SimulationSet(object):
             dwdir = _default_sim_wdir(self.storage_dir, idx)
             dir_rename_dict[dwdir] = _default_sim_wdir(self.storage_dir, 
                                                        look_up_dict[idx])
-        self.logger.debug('Renaming directories.')
-        utils.rename_directories(dir_rename_dict)
-        self._wdirs_to_clean = dir_rename_dict.values()
+        if any([os.path.isdir(d_) for d_ in dir_rename_dict]):
+            self.logger.debug('Renaming directories.')
+            utils.rename_directories(dir_rename_dict)
+            self._wdirs_to_clean = dir_rename_dict.values()
         
         # Set the finished_sim_numbers list 
         self.finished_sim_numbers = list(self.get_store_data().index)

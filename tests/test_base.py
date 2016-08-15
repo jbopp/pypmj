@@ -80,14 +80,18 @@ def check_configuration(cnf):
             cnf.get(sec, 'stype')
         
         # Detailed check of important options
+        pdir = cnf.get('Data', 'projects')
+        if not os.path.isdir(pdir):
+            raiseerr('Data->projects must be an existing directory.')
+            return False
         sdir = cnf.get('Storage', 'base')
         if not sdir=='CWD' and not os.path.isdir(sdir):
-            raiseerr('Storage->base must be `CWD` or an existent directory.')
+            raiseerr('Storage->base must be `CWD` or an existing directory.')
             return False
         jcmdir = os.path.join(cnf.get('JCMsuite', 'root'),
                               cnf.get('JCMsuite', 'dir'))
         if not os.path.isdir(jcmdir):
-            raiseerr('JCMsuite->root+dir must be an existent directory.')
+            raiseerr('JCMsuite->root+dir must be an existing directory.')
             return False
         for sub in ['bin', 'include', 'ThirdPartySupport']:
             if not sub in os.listdir(jcmdir):
@@ -109,8 +113,8 @@ _config.optionxform = str # this is needed for case sensitive options
 try:
     _config.read(_CONFIG_FILE)
 except:
-    raise ConfigurationError('Unable to parse the configuration file {}'.format(
-                                                                _CONFIG_FILE))
+    raise OSError('Unable to parse the configuration file {}'.format(
+                                                                  _CONFIG_FILE))
 
 # Do the check
 if not check_configuration(_config):
@@ -118,6 +122,7 @@ if not check_configuration(_config):
 
 # Import jcmpython
 import jcmpython as jpy
+from jcmpython.internals import ConfigurationError
 jpy.load_extension('materials')
 EXT_MATERIALS_LOADED = hasattr(jpy, 'MaterialData')
 
@@ -129,7 +134,6 @@ from shutil import rmtree
 import unittest
 logger = logging.getLogger(__name__)
 
-
 # Globals
 CWD = os.getcwd()
 DEFAULT_PROJECT = 'scattering/mie/mie2D'
@@ -138,6 +142,27 @@ MIE_KEYS_SINGLE = {'constants' :{}, 'parameters': {},
 MIE_KEYS = {'constants' :{}, 
             'parameters': {},
             'geometry': {'radius':np.linspace(0.3, 0.4, 6)}}
+
+# Check if the project base is properly configured, i.e. contains the mie2D
+# project
+PROJECT_BASE = _config.get('Data', 'projects')
+try:
+    jpy.JCMProject(DEFAULT_PROJECT)
+except (OSError, ConfigurationError) as e:
+    logger.warn('Could not load the example project mie2D from your'+
+                ' configured project base. The error raised by JCMProject is'+
+                '\n\t{}'.format(e))
+    logger.info('Looking for a valid project base in the parent directory...')
+    PROJECT_BASE = os.path.abspath('../projects')
+    if os.path.isdir(PROJECT_BASE):
+        DEFAULT_PROJECT = os.path.join(PROJECT_BASE, DEFAULT_PROJECT)
+        try:
+            jpy.JCMProject(DEFAULT_PROJECT)
+        except (OSError, ConfigurationError) as e:
+            logger.exception('Unable to find a valid project base in your'+
+                             ' configuration and in the parent directory. '+
+                             'Please check your configuration file! Error '+
+                             'message:\n\t{}'.format(e))
 
 def DEFAULT_PROCESSING_FUNC(pp):
     results = {}
@@ -273,7 +298,3 @@ if __name__ == '__main__':
     
     for suite in suites:
         unittest.TextTestRunner(verbosity=2).run(suite)
-        
-    # Remove the logs folder
-    if os.path.exists(os.path.abspath('logs')):
-        rmtree(os.path.abspath('logs'))
