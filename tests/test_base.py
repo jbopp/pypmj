@@ -292,7 +292,8 @@ class Test_Run_JCM(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    logger.info('This is test_base.py')
+    this_test = os.path.splitext(os.path.basename(__file__))[0]
+    logger.info('This is {}'.format(this_test))
     
     # list of all test suites 
     suites = [
@@ -304,7 +305,8 @@ if __name__ == '__main__':
     if not os.path.isdir(log_dir):
         os.makedirs(log_dir)
     today_fmt = date.today().strftime("%y%m%d")
-    test_log_file = os.path.join(log_dir, today_fmt+'_test.log')
+    test_log_file = os.path.join(log_dir, '{}_{}.log'.format(today_fmt, 
+                                                             this_test))
     logger.info('Writing test logs to: {}'.format(test_log_file))
     with open(test_log_file, 'w') as f:
         for suite in suites:
