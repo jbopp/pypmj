@@ -1402,7 +1402,6 @@ class SimulationSet(object):
         # We frequently count how many simulations we ran, to give an estimate
         # of the running time
         n_sims_done = 0
-        n_sims_done_this_round = 0
         n_sims_todo = self.num_sims_to_do()
         
         # Start the round timer
@@ -1427,7 +1426,6 @@ class SimulationSet(object):
                                 format(i+1, self.num_sims, sim.jobID))
                 jobIDs.append(jobID)
                 ID2simNumber[jobID] = sim.number
-                n_sims_done_this_round += 1 # it is not yet done :)
             else:
                 # Set `force_geo_run` to True if this finished simulation would
                 # have caused to compute the geometry
@@ -1435,27 +1433,29 @@ class SimulationSet(object):
                     force_geo_run = True
                 
             # wait for N simulations to finish
-            if len(jobIDs) != 0:
-                if (divmod(i+1, N)[1] == 0) or ((i+1) == self.num_sims):
-                    self.logger.info('Waiting for {} '.format(len(jobIDs)) +
-                                  'simulation(s) to finish...')
+            n_in_queue = len(jobIDs)
+            if n_in_queue != 0:
+                if (n_in_queue != 0 and 
+                    (n_in_queue >= N  or  (i+1) == self.num_sims)):
+                    self.logger.info('Waiting for {} '.format(n_in_queue) +
+                                     'simulation(s) to finish...')
                     self._wait_for_simulations(jobIDs, ID2simNumber)
                     jobIDs = []
                     ID2simNumber = {}
                     
                     # Update the global counters
-                    n_sims_todo -= n_sims_done_this_round
-                    n_sims_done += n_sims_done_this_round
+                    n_sims_todo -= n_in_queue
+                    n_sims_done += n_in_queue
                     
                     # Calculate the time that was needed for the 
-                    # `n_sims_done_this_round` simulations
+                    # `n_in_queue` simulations
                     t = time.time()-t0
                     self.logger.debug('Performed {} simulations in {}'.format(
-                                        n_sims_done_this_round, utils.tForm(t)))
+                                      n_in_queue, utils.tForm(t)))
                     
                     # Append the average time per simulation to the 
                     # `t_per_sim_list`
-                    t_per_sim_list.append(t/n_sims_done_this_round)
+                    t_per_sim_list.append(t/n_in_queue)
                     
                     # Calculate and inform on the approx. remaining time based
                     # on the mean of the `t_per_sim_list`
@@ -1465,7 +1465,6 @@ class SimulationSet(object):
                                                       utils.tForm(t_remaining)))
                     
                     # Reset the round counter and timer
-                    n_sims_done_this_round = 0
                     t0 = time.time()
                     
  
