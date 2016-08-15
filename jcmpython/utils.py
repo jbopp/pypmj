@@ -350,7 +350,7 @@ def run_simusets_in_save_mode(simusets, Ntrials=5, **run_kwargs):
     for sset in simusets:
         # dirty check if this is a SimulationSet instance
         if not hasattr(sset, 'STORE_META_GROUPS'):
-            raise ValueError('All simusets must be of type SimulatuionSet.')
+            raise ValueError('All simusets must be of type SimulationSet.')
             return
         if not sset._is_scheduled():
             raise RuntimeError('{} is not scheduled yet.'.format(sset))

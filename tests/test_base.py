@@ -128,7 +128,6 @@ jpy.load_extension('materials')
 EXT_MATERIALS_LOADED = hasattr(jpy, 'MaterialData')
 
 # Import remaining modules
-from copy import deepcopy
 import logging
 import numpy as np
 from shutil import rmtree
