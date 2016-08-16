@@ -243,6 +243,29 @@ def rename_directories(renaming_dict):
     for dir_ in valid_dict:
         os.rename(tmp_dict[dir_], valid_dict[dir_])
 
+def rm_empty_directory_tail(path, stop_at=None):
+    """Removes all empty directories of a path recursively, starting
+    at the tail, until a non empty directory is found or `path` is
+    the same directory given in `stop_at`."""
+    if stop_at is not None:
+        if not isinstance(stop_at, (str, unicode)):
+            raise TypeError('`stop_at` must be a path.')
+            return
+        if not os.path.isdir(stop_at):
+            raise TypeError('`stop_at` must be a path.')
+            return
+        if (os.path.normcase(os.path.normpath(path)) ==
+            os.path.normcase(os.path.normpath(stop_at))):
+            return
+    if not os.path.isdir(path):
+        return
+    if not os.listdir(path):
+        try:
+            os.rmdir(path)
+            rm_empty_directory_tail(os.path.dirname(path), stop_at=stop_at)
+        except:
+            return
+
 def split_path_to_parts(path):
     """Splits a path to its parts, so that os.path.join(*parts) gives
     the input path again."""
@@ -312,6 +335,36 @@ def relative_deviation(sample, reference):
                 rel_dev_real(sample.imag, reference.imag))/2.
     else:
         return rel_dev_real(sample, reference.real)
+
+def query_yes_no(question, default="yes"):
+    """Ask a yes/no question via raw_input() and return their answer.
+
+    "question" is a string that is presented to the user.
+    "default" is the presumed answer if the user just hits <Enter>.
+        It must be "yes" (the default), "no" or None (meaning
+        an answer is required of the user).
+    """
+    valid = {"yes": True, "y": True, "ye": True,
+             "no": False, "n": False}
+    if default is None:
+        prompt = " [y/n] "
+    elif default == "yes":
+        prompt = " [Y/n] "
+    elif default == "no":
+        prompt = " [y/N] "
+    else:
+        raise ValueError("invalid default answer: '%s'" % default)
+
+    while True:
+        sys.stdout.write(question + prompt)
+        choice = raw_input().lower()
+        if default is not None and choice == '':
+            return valid[default]
+        elif choice in valid:
+            return valid[choice]
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no' "
+                             "(or 'y' or 'n').\n")
 
 class DisableLogger(object):
     """Context manager to disable all logging events below specific level.""" 

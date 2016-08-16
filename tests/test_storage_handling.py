@@ -136,12 +136,20 @@ logger = logging.getLogger(__name__)
 
 # Globals
 CWD = os.getcwd()
+TMP_DIR = os.path.abspath('tmp')
+SFOLDER = 'tmp_sub_folder'
+TMP_SBASE = os.path.abspath('tmp_storage_folder')
+TMP_TBASE = os.path.abspath('tmp_transitional_folder')
 DEFAULT_PROJECT = 'scattering/mie/mie2D'
 MIE_KEYS_SINGLE = {'constants' :{}, 'parameters': {},
                    'geometry': {'radius':0.3}}
+
+MIE_KEYS_INCOMPLETE = {'constants' :{}, 
+                       'parameters': {},
+                       'geometry': {'radius':np.linspace(0.3, 0.4, 3)[0]}}
 MIE_KEYS = {'constants' :{}, 
             'parameters': {},
-            'geometry': {'radius':np.linspace(0.3, 0.4, 6)}}
+            'geometry': {'radius':np.linspace(0.3, 0.4, 3)}}
 
 # Check if the project base is properly configured, i.e. contains the mie2D
 # project
@@ -171,123 +179,134 @@ def DEFAULT_PROCESSING_FUNC(pp):
 
 
 # ==============================================================================
-class Test_JCMbasics(unittest.TestCase):
-    tmpDir = os.path.abspath('tmp')
-    DF_ARGS = {'duplicate_path_levels':0,
-               'storage_folder':'tmp_storage_folder',
-               'storage_base':CWD}
-    
-    def tearDown(self):
-        if os.path.exists(self.tmpDir):
-            rmtree(self.tmpDir)
-        if os.path.exists('tmp_storage_folder'):
-            rmtree('tmp_storage_folder')
-    
-    def test_0_print_info(self):
-        jpy.jcm_license_info()
-    
-    def test_project_loading(self):
-        specs =[DEFAULT_PROJECT,
-                jpy.utils.split_path_to_parts(DEFAULT_PROJECT)]
-        for s in specs:
-            project = jpy.JCMProject(s, working_dir=self.tmpDir)
-            project.copy_to(overwrite=True)
-            project.remove_working_dir()
+class Test_Storage_Handling(unittest.TestCase):
 
-    def test_parallelization_add_localhost(self):
-        jpy.resources['localhost'].add_repeatedly()
-        jpy.daemon.shutdown()
-    
-    def test_simuSet_basic(self):
-        project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
-        
-        # Wrong project and keys specifications
-        arg_tuples = [('non_existent_dir', {}),
-                      (('a', 'b', 'c'), {}),
-                      (project, {}),
-                      (project, {'constants':None}),
-                      (project, {'geometry':[]})]
-        for args in arg_tuples:
-            self.assertRaises(ValueError, 
-                              jpy.SimulationSet, *args, **self.DF_ARGS)
-         
-        # This should work:
-        simuset = jpy.SimulationSet(project, {'constants':{}}, **self.DF_ARGS)
-        simuset.close_store()
-    
-    def test_simuSet_single_schedule(self):
-        project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, MIE_KEYS_SINGLE, **self.DF_ARGS)
-        simuset.make_simulation_schedule()
-        self.assertEqual(simuset.num_sims, 1)
-        simuset.close_store()
-    
-    def test_simuSet_multi_schedule(self):
-        self.tmpDir = os.path.abspath('tmp')
-        project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
-        simuset = jpy.SimulationSet(project, MIE_KEYS, **self.DF_ARGS)
-        simuset.make_simulation_schedule()
-        self.assertEqual(simuset.num_sims, 6)
-        
-        # Test the correct sort order
-        allGeoKeys = []
-        for s in simuset.simulations:
-            allGeoKeys.append({k: s.keys[k] for k in simuset.geometry.keys()})
-        for i,s in enumerate(simuset.simulations):
-            if s.rerun_JCMgeo:
-                gtype = allGeoKeys[i]
-            else:
-                self.assertDictEqual(gtype, allGeoKeys[i])
-        simuset.close_store()
-
-
-# ==============================================================================
-class Test_Run_JCM(unittest.TestCase):
-    
-    tmpDir = os.path.abspath('tmp')
     DF_ARGS = {'duplicate_path_levels':0,
                'storage_folder':'tmp_storage_folder',
                'storage_base':CWD}
     
     def setUp(self):
-        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=self.tmpDir)
-        self.sset = jpy.SimulationSet(self.project, MIE_KEYS, **self.DF_ARGS)
-        self.sset.make_simulation_schedule()
-        self.sset.use_only_resources('localhost')
-        self.assertEqual(self.sset.num_sims, 6)
-        self.assertTrue(self.sset.is_store_empty())
+        for fold in [TMP_SBASE, TMP_TBASE]:
+            if not os.path.exists(fold):
+                os.makedirs(fold)
     
     def tearDown(self):
-        self.sset.close_store()
-        if os.path.exists(self.tmpDir):
-            rmtree(self.tmpDir)
-        if os.path.exists('tmp_storage_folder'):
-            rmtree('tmp_storage_folder')
+        for fold in [TMP_DIR, TMP_SBASE, TMP_TBASE]:
+            if os.path.exists(fold):
+                rmtree(fold)
     
-    def test_compute_geometry(self):
-        self.sset.compute_geometry(0)
-        self.assertTrue('grid.jcm' in os.listdir(self.sset.get_project_wdir()))
-    
-    def test_single_simulation(self):
-        sim = self.sset.simulations[0]
-        _, _ = self.sset.solve_single_simulation(sim)
-        self.assertTrue(hasattr(sim, 'fieldbag_file'))    
-    
-    def test_plain_run(self):
-        self.sset.run()
-    
-    def test_run_and_proc(self):
+    def test_standard(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=TMP_DIR)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS,
+                                      duplicate_path_levels=0,
+                                      storage_folder=SFOLDER,
+                                      storage_base=TMP_SBASE)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
         self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
-        self.assertTrue('SCS' in self.sset.simulations[0]._results_dict)
+     
+    def test_transitional_empty(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=TMP_DIR)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS,
+                                      duplicate_path_levels=0,
+                                      storage_folder=SFOLDER,
+                                      storage_base=TMP_SBASE,
+                                      transitional_storage_base=TMP_TBASE)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+     
+    def test_transitional_empty_with_duplicate_path_level(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=TMP_DIR)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS,
+                                      duplicate_path_levels=1,
+                                      storage_folder=SFOLDER,
+                                      storage_base=TMP_SBASE,
+                                      transitional_storage_base=TMP_TBASE)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+ 
+    def test_transitional_target_not_empty(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=TMP_DIR)
+         
+        # We fill the target directory with incomplete data
+        ckwargs = dict(duplicate_path_levels=2, storage_folder=SFOLDER,
+                       storage_base=TMP_SBASE)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS_INCOMPLETE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+        self.sset.close_store()
+        del self.sset
+         
+        # And now we set up a simuset with a transitional base, but pointing
+        # at the non-empty storage folder
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS,
+                                      transitional_storage_base=TMP_TBASE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+ 
+    def test_transitional_source_not_empty(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=TMP_DIR)
+         
+        # We fill the source directory with incomplete data
+        ckwargs = dict(duplicate_path_levels=2, storage_folder=SFOLDER)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS_INCOMPLETE,
+                                      storage_base=TMP_TBASE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+        self.sset.close_store()
+        del self.sset
+         
+        # And now we set up a simuset with a non-empty transitional folder
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS,
+                                      storage_base=TMP_SBASE,
+                                      transitional_storage_base=TMP_TBASE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+
+    def test_transitional_both_not_empty(self):
+        self.project = jpy.JCMProject(DEFAULT_PROJECT, working_dir=TMP_DIR)
         
-        # CSV export
-        self.sset.write_store_data_to_file()
-        try:
-            self.sset.write_store_data_to_file(
-                        os.path.join(self.sset.storage_dir,'results_excel.xls'),
-                        mode='Excel')
-        except ImportError as e:
-            logger.warn('Export to Excel format not working: {}'.format(e))
+        # We fill the source directory with incomplete data
+        ckwargs = dict(duplicate_path_levels=2, storage_folder=SFOLDER)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS_INCOMPLETE,
+                                      storage_base=TMP_TBASE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+        self.sset.close_store()
+        del self.sset
+        
+        # We fill the target directory with incomplete data
+        ckwargs = dict(duplicate_path_levels=2, storage_folder=SFOLDER)
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS_INCOMPLETE,
+                                      storage_base=TMP_SBASE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
+        self.sset.close_store()
+        del self.sset
+        
+        # And now we set up a simuset with a non-empty transitional folder and
+        # a non empty target folder
+        self.sset = jpy.SimulationSet(self.project, MIE_KEYS,
+                                      storage_base=TMP_SBASE,
+                                      transitional_storage_base=TMP_TBASE,
+                                      **ckwargs)
+        self.sset.make_simulation_schedule()
+        self.sset.use_only_resources('localhost')
+        self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
 
 
 if __name__ == '__main__':
@@ -296,8 +315,7 @@ if __name__ == '__main__':
     
     # list of all test suites 
     suites = [
-        unittest.TestLoader().loadTestsFromTestCase(Test_JCMbasics),
-        unittest.TestLoader().loadTestsFromTestCase(Test_Run_JCM)]
+        unittest.TestLoader().loadTestsFromTestCase(Test_Storage_Handling)]
     
     # Get a log file for the test output
     log_dir = os.path.abspath('logs')

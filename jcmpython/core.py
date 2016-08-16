@@ -16,7 +16,7 @@ from glob import glob
 import inspect
 from itertools import product
 import numpy as np
-from shutil import copytree, rmtree
+from shutil import copytree, rmtree, move
 import os
 import pandas as pd
 import sys
@@ -515,10 +515,13 @@ class SimulationSet(object):
     storage_base : str, default 'from_config'
         Directory to use as the base storage folder. If 'from_config', the
         folder set by the configuration option Storage->base is used.
-    transitional_storage_directory: str, default 'from_config'
-        Use this directory as the real storage directory during the execution,
-        and move all files the path configured using `storage_base` and 
-        `storage_folder` afterwards. (TODO: not yet implemented)
+    transitional_storage_base: str, default None
+        Use this directory as the "real" storage_base during the execution,
+        and move all files to the path configured using `storage_base` and 
+        `storage_folder` afterwards. This is useful if you have a fast drive
+        which you want to use to accelerate the simulations, but which you do
+        not want to use as your global storage for simulation data, e.g. because
+        it is to small.
     combination_mode : {'product', 'list'}
         Controls the way in which sequences in the `geometry` or `parameters`
         keys are treated.
@@ -540,7 +543,7 @@ class SimulationSet(object):
     
     def __init__(self, project, keys, duplicate_path_levels=0, 
                  storage_folder='from_date', storage_base='from_config',
-                 transitional_storage_directory=None,
+                 transitional_storage_base=None,
                  combination_mode='product', check_version_match=True):
         self.logger = logging.getLogger('core.'+self.__class__.__name__)
         
@@ -553,8 +556,15 @@ class SimulationSet(object):
         
         # Load the project and set up the folders
         self._load_project(project)
-        self._set_up_folders(duplicate_path_levels, storage_folder, 
-                             storage_base, transitional_storage_directory)
+        self.storage_dir = self._set_up_folders(duplicate_path_levels, 
+                                                storage_folder, 
+                                                storage_base)
+        self._copying_needed = False
+        if transitional_storage_base is not None:
+            self._set_up_transitional_store(duplicate_path_levels, 
+                                            storage_folder,
+                                            transitional_storage_base)
+        self.transitional_storage_base = transitional_storage_base
         
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
@@ -645,15 +655,13 @@ class SimulationSet(object):
         return storage_folder
 
     def _set_up_folders(self, duplicate_path_levels, storage_folder,
-                        storage_base, transitional_storage_directory):
+                        storage_base):
         """Reads storage specific parameters from the configuration and prepares
         the folder used for storage as desired.
         
         See the description of the parameters `` and `` in the SimulationSet 
         documentation for further reference.
         """
-        if transitional_storage_directory is not None:
-            raise NotImplementedError('This is on the TODO list.')
         # Read storage base from configuration
         if storage_base == 'from_config':
             base = _config.get('Storage', 'base')
@@ -673,16 +681,60 @@ class SimulationSet(object):
             base = os.path.join(base, *cfolders[-duplicate_path_levels:])
         
         storage_folder = self.__get_storage_folder(storage_folder)
-        self.storage_dir = os.path.join(base, storage_folder)
+        storage_dir = os.path.join(base, storage_folder)
         
         # Create the necessary directories
-        if not os.path.exists(self.storage_dir):
+        if not os.path.exists(storage_dir):
             self.logger.debug('Creating non-existent storage folder {}'.format(
-                                                            self.storage_dir))
-            os.makedirs(self.storage_dir)
+                                                                   storage_dir))
+            os.makedirs(storage_dir)
         
-        self.logger.info('Using folder {} for '.format(self.storage_dir)+ 
-                     'data storage.')
+        self.logger.info('Using folder {} for '.format(storage_dir)+ 
+                         'data storage.')
+        return storage_dir
+    
+    def _set_up_transitional_store(self, duplicate_path_levels, storage_folder,
+                                   transitional_storage_base):
+        """
+        """
+        # Check the current storage_dir as the final storage_dir for later
+        fsd = self.storage_dir
+        
+        # Set up the transitional storage_dir
+        with utils.DisableLogger(logging.WARN):
+            tsd = self._set_up_folders(duplicate_path_levels, storage_folder,
+                                       transitional_storage_base)
+        self.logger.info('Using folder {} '.format(tsd)+ 
+                         'as the transitional data storage directory.')
+        
+        # Check if the folders already have content
+        tsd_empty = not os.listdir(tsd)
+        fsd_empty = not os.listdir(fsd)
+        if (not tsd_empty) and (not fsd_empty): # both dirs are not empty
+            q1 = 'The storage directory and the transitional directory are '+\
+                 'both not empty. May I use the storage directory content?'
+            q2 = 'May I use the transitional directory content instead?'
+            ans = utils.query_yes_no(q1, default='no')
+            if ans:
+                rmtree(tsd)
+                copytree(fsd, tsd)
+            else:
+                ans2 = utils.query_yes_no(q2, default='no')
+                if ans2:
+                    rmtree(fsd)
+                    copytree(tsd, fsd)
+                else:
+                    raise Exception('Please clean up the directories yourself.')
+                    return
+        elif not fsd_empty:
+            if os.path.isdir(tsd):
+                os.rmdir(tsd)
+            copytree(fsd, tsd)
+        
+        # Set the class attribute for later use
+        self._copying_needed = True
+        self._final_storage_dir = fsd
+        self.storage_dir = tsd
     
     def _initialize_store(self, check_version_match):
         """Initializes the HDF5 store and sets the `store` attribute. The
@@ -1643,9 +1695,34 @@ class SimulationSet(object):
                 if os.path.isdir(dir_):
                     rmtree(dir_)
         
+        # Copy the data if a transitional storage base was set
+        self._copy_from_transitional_dir()
+        
         self.logger.info('Total time for all simulations: {}'.format(
                                                 utils.tForm(time.time()-t0)))
 
+    def _copy_from_transitional_dir(self):
+        if not self._copying_needed:
+            return
+        try:
+            if os.path.isdir(self._final_storage_dir):
+                rmtree(self._final_storage_dir)
+            self.logger.debug('Moving transitional directory to target.')
+            move(self.storage_dir, self._final_storage_dir)
+        except Exception as e:
+            self.logger.warn('Unable to move the transitional directory to the'+
+                             ' target storage location, i.e. {} -> {}'.format(
+                                    self.storage_dir, self._final_storage_dir)+
+                             ' The Exception was: {}'.format(e))
+            return
+        # Remove the empty tail of the transitional folder, if there is any
+        utils.rm_empty_directory_tail(os.path.dirname(self.storage_dir), 
+                                      self.transitional_storage_base)
+        
+        # Clean up the attributes
+        self.storage_dir = self._final_storage_dir
+        del self._final_storage_dir
+        self._copying_needed = False
 
 # =============================================================================
 class ConvergenceTest(object):
@@ -1697,7 +1774,14 @@ class ConvergenceTest(object):
         'Reference' are created inside the storage folder for the two sets.
     storage_base : str, default 'from_config'
         Directory to use as the base storage folder. If 'from_config', the
-        folder set by the configuration option Storage->base is used. 
+        folder set by the configuration option Storage->base is used.
+    transitional_storage_base: str, default None
+        Use this directory as the "real" storage_base during the execution,
+        and move all files to the path configured using `storage_base` and 
+        `storage_folder` afterwards. This is useful if you have a fast drive
+        which you want to use to accelerate the simulations, but which you do
+        not want to use as your global storage for simulation data, e.g. because
+        it is to small.
     combination_mode : {'product', 'list'}
         Controls the way in which sequences in the `geometry` or `parameters`
         keys are treated.
@@ -1714,9 +1798,10 @@ class ConvergenceTest(object):
     """
     
     def __init__(self, project, keys_test, keys_ref, duplicate_path_levels=0, 
-        storage_folder='from_date', storage_base='from_config', 
-        combination_mode='product', check_version_match=True):
-        self.logger = logging.getLogger('core.'+self.__class__.__name__)
+        storage_folder='from_date', storage_base='from_config',
+        transitional_storage_base=None, combination_mode='product',
+        check_version_match=True): 
+        self.logger=logging.getLogger('core.'+self.__class__.__name__)
         
         # Get appropriate storage folders for the two simulation sets
         storage_folder_test = self.__get_storage_folder(storage_folder, 'Test')
@@ -1727,10 +1812,12 @@ class ConvergenceTest(object):
         self.logger.info('Initializing the reference simulation set.')
         self.sset_ref= SimulationSet(project, keys_ref, duplicate_path_levels,
                                      storage_folder_ref, storage_base,
+                                     transitional_storage_base,
                                      combination_mode, check_version_match)
         self.logger.info('Initializing the test simulation set.')
         self.sset_test=SimulationSet(project, keys_test, duplicate_path_levels,
                                      storage_folder_test, storage_base,
+                                     transitional_storage_base,
                                      combination_mode, check_version_match)
         self.simulation_sets = [self.sset_ref, self.sset_test]
         self.storage_dir = os.path.dirname(self.sset_ref.storage_dir)
