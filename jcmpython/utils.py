@@ -6,6 +6,8 @@ Authors : Carlo Barth
 from jcmpython.internals import _config, daemon
 from cStringIO import StringIO
 from datetime import timedelta
+import inspect
+from itertools import combinations
 import logging
 from numbers import Number
 import numpy as np
@@ -81,6 +83,49 @@ def is_sequence(obj):
     """Checks if a given object is a sequence by checking if it is not a string
     or dict, but has a __len__-method. This might fail!"""
     return not isinstance(obj, (str,unicode, dict)) and hasattr(obj, '__len__')
+
+def lists_overlap(list_1, list_2):
+    """Checks if two lists have no common elements."""
+    return not set(list_1).isdisjoint(list_2)
+
+def assign_kwargs_to_functions(functions, kwargs, ignore_unmatched=True):
+    """Uses `inspect` to assign which argument in `kwargs` belongs
+    to which of the functions in the `functions` list. If functions
+    have any common argument names, an Error is raised. If 
+    `ignore_unmatched` is True, unassigned arguments are ignored.
+    Returns a list of kwargs-dictionaries, one for each function."""
+    # Check proper types
+    if not isinstance(functions, list):
+        raise TypeError('`functions` must be a list of callables.')
+        return
+    elif not all([callable(func) for func in functions]):
+        raise TypeError('`functions` must be a list of callables.')
+        return
+    
+    # Try to inspect the input arguments of the functions
+    try:
+        input_args = [inspect.getargspec(func)[0] for func in functions]
+    except Exception as e:
+        raise RuntimeError('Unable to inspect the input arguments of'+
+                           ' the provided functions. Esception: {}'.format(e))
+        return
+    for combo in combinations(input_args, 2):
+        if lists_overlap(combo[0], combo[1]):
+            raise RuntimeError('Cannot assign kwargs to functions, as '+
+                               'functions have common input arguments.')
+            return
+    assigned_kwargs = [{} for i in range(len(functions))]
+    for kw in kwargs:
+        match = False
+        for i, ia in enumerate(input_args):
+            if kw in ia:
+                assigned_kwargs[i][kw] = kwargs[kw]
+                match = True
+        if (not match) and (not ignore_unmatched):
+            raise Exception('Could not assign `{}` to any of the '.format(kw)+
+                            'functions. Set `ignore_unmatched=True` to ignore'+
+                            ' such arguments.')
+    return assigned_kwargs
 
 def get_len_of_parameter_dict(d):
     """Given a dict, returns the length of the longest sequence in its 
@@ -297,7 +342,8 @@ class Capturing(list):
         sys.stdout = self._stdout
 
 
-def send_status_email(text):
+def send_status_email(text, subject='JCMwave Simulation Information',
+                      subject_prefix='', subject_suffix=''):
     """
     Tries to send a status e-mail with the given `text` using the configured
     e-mail server and address.
@@ -312,7 +358,7 @@ def send_status_email(text):
         # me == the sender's email address
         # you == the recipient's email address
         me = 'noreply@jcmsuite.automail.de'
-        msg['Subject'] = 'JCMwave Simulation Information'
+        msg['Subject'] = subject_prefix+subject+subject_suffix
         msg['From'] = me
         msg['To'] = EMAIL_ADDRESS # <- config.py
     
@@ -337,11 +383,13 @@ def __prepare_SimulationSet_after_fail(simuset):
     except:
         pass
 
-def run_simusets_in_save_mode(simusets, Ntrials=5, **run_kwargs):
+def run_simusets_in_save_mode(simusets, Ntrials=5, **kwargs):
     """Given a list of SimulationSets, tries to run each SimulationSet 
     `Ntrials` times, starting at the point where it was terminated by an 
-    unwanted error. The `run_kwargs` are passed to the run-method of each
-    set. Status e-mails are sent if configured in the configuration file."""
+    unwanted error. The `kwargs` are passed to the run-method of each
+    set or to the `send_status_email` utility function. They are automatically
+    assigned. Status e-mails are sent if configured in the configuration
+    file."""
     
     if not is_sequence(simusets):
         simusets = [simusets]
@@ -356,13 +404,25 @@ def run_simusets_in_save_mode(simusets, Ntrials=5, **run_kwargs):
             raise RuntimeError('{} is not scheduled yet.'.format(sset))
             return
     
+    # Assign the kwargs
+    try:
+        run_kw, mail_kw = assign_kwargs_to_functions([simusets[0].run, 
+                                                      send_status_email], 
+                                                     kwargs)
+    except Exception as e:
+        logger.warn('An error occured when trying to assign the kwargs to the'+
+                    ' `run` and `send_status_email` functions: {}'.format(e)+
+                    ' Assuming all kwargs are for the `run`-method.')
+        run_kw = kwargs
+        mail_kw = {}
+    
     # Start
     Nsets = len(simusets)
     ti0 = time.time()
     for i, sset in enumerate(simusets):
         trials = 0
         msg = 'Starting SimulationSet {0} of {1}'.format(i+1, Nsets)
-        if SEND_MAIL: send_status_email(msg)
+        if SEND_MAIL: send_status_email(msg, **mail_kw)
              
         # Run the simulations
         while trials < Ntrials:
@@ -371,7 +431,7 @@ def run_simusets_in_save_mode(simusets, Ntrials=5, **run_kwargs):
                 if trials > 0:
                     # Set up this simuset again after the error
                     __prepare_SimulationSet_after_fail(sset)
-                sset.run(**run_kwargs)
+                sset.run(**run_kw)
             except KeyboardInterrupt:
                 # Allow keyboard interrupts
                 return
@@ -380,17 +440,17 @@ def run_simusets_in_save_mode(simusets, Ntrials=5, **run_kwargs):
                 msg = 'SimulationSet {0} failed at trial {1} of {2}'.\
                       format(i+1, trials, Ntrials)
                 msg += '\n\n***Error Message:\n'+traceback.format_exc()+'\n***'
-                if SEND_MAIL: send_status_email(msg)
+                if SEND_MAIL: send_status_email(msg, **mail_kw)
                 continue
             break
         ttend = tForm(time.time() - tt0)
         msg = 'Finished SimulationSet {0} of {1}. Runtime: {2}'.\
               format(i+1, Nsets, ttend)
-        if SEND_MAIL: send_status_email(msg)
+        if SEND_MAIL: send_status_email(msg, **mail_kw)
           
     tend = tForm(time.time() - ti0)
     msg = 'All simulations finished after {0}'.format(tend)
              
-    if SEND_MAIL: send_status_email(msg)
+    if SEND_MAIL: send_status_email(msg, **mail_kw)
 
 

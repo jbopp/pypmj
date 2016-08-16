@@ -514,7 +514,11 @@ class SimulationSet(object):
         is stored. If 'from_date' (default), the current date (%y%m%d) is used.
     storage_base : str, default 'from_config'
         Directory to use as the base storage folder. If 'from_config', the
-        folder set by the configuration option Storage->base is used. 
+        folder set by the configuration option Storage->base is used.
+    transitional_storage_directory: str, default 'from_config'
+        Use this directory as the real storage directory during the execution,
+        and move all files the path configured using `storage_base` and 
+        `storage_folder` afterwards. (TODO: not yet implemented)
     combination_mode : {'product', 'list'}
         Controls the way in which sequences in the `geometry` or `parameters`
         keys are treated.
@@ -536,6 +540,7 @@ class SimulationSet(object):
     
     def __init__(self, project, keys, duplicate_path_levels=0, 
                  storage_folder='from_date', storage_base='from_config',
+                 transitional_storage_directory=None,
                  combination_mode='product', check_version_match=True):
         self.logger = logging.getLogger('core.'+self.__class__.__name__)
         
@@ -549,7 +554,7 @@ class SimulationSet(object):
         # Load the project and set up the folders
         self._load_project(project)
         self._set_up_folders(duplicate_path_levels, storage_folder, 
-                             storage_base)
+                             storage_base, transitional_storage_directory)
         
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
@@ -640,13 +645,15 @@ class SimulationSet(object):
         return storage_folder
 
     def _set_up_folders(self, duplicate_path_levels, storage_folder,
-                        storage_base):
+                        storage_base, transitional_storage_directory):
         """Reads storage specific parameters from the configuration and prepares
         the folder used for storage as desired.
         
         See the description of the parameters `` and `` in the SimulationSet 
         documentation for further reference.
         """
+        if transitional_storage_directory is not None:
+            raise NotImplementedError('This is on the TODO list.')
         # Read storage base from configuration
         if storage_base == 'from_config':
             base = _config.get('Storage', 'base')
