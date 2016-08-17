@@ -3,8 +3,12 @@
 Authors : Carlo Barth
 """
 
-from jcmpython.internals import _config, daemon
-from cStringIO import StringIO
+from jcmpython.internals import _config, daemon, _IS_PYTHON3
+import collections
+if _IS_PYTHON3:
+    from io import StringIO
+else:
+    from cStringIO import StringIO
 from datetime import timedelta
 import inspect
 from itertools import combinations
@@ -13,6 +17,7 @@ from numbers import Number
 import numpy as np
 import os
 import pandas as pd
+from six import string_types
 import sys
 from tempfile import mktemp
 import time
@@ -26,7 +31,16 @@ SEND_MAIL = _config.get('Logging', 'send_mail')
 MAIL_SERVER = _config.get('Logging', 'mail_server')
 EMAIL_ADDRESS = _config.get('User', 'email')
 
+def is_callable(obj):
+    """Return whether the object is callable (i.e., some kind of function).
+    Note that classes are callable, as are instances with a __call__() method.
+    """
+    if _IS_PYTHON3:
+        return isinstance(obj, collections.Callable)
+    return callable(obj)
+
 def tForm(t1):
+    """Returns a well formated time string."""
     return str( timedelta(seconds = t1) )
 
 def walk_df(df, col_vals, keys=None):
@@ -53,7 +67,7 @@ def walk_df(df, col_vals, keys=None):
         present in col_vals. If keys is None, all keys of col_vals are used.
     """
     if keys is None:
-        keys = col_vals.keys()
+        keys = list(col_vals.keys())
     if len(keys) == 0:
         # No keys are left for comparison, but len(df)>1. This means, all
         # remaining rows are matches
@@ -82,7 +96,7 @@ def walk_df(df, col_vals, keys=None):
 def is_sequence(obj):
     """Checks if a given object is a sequence by checking if it is not a string
     or dict, but has a __len__-method. This might fail!"""
-    return not isinstance(obj, (str,unicode, dict)) and hasattr(obj, '__len__')
+    return not isinstance(obj, (string_types, dict)) and hasattr(obj, '__len__')
 
 def lists_overlap(list_1, list_2):
     """Checks if two lists have no common elements."""
@@ -98,7 +112,7 @@ def assign_kwargs_to_functions(functions, kwargs, ignore_unmatched=True):
     if not isinstance(functions, list):
         raise TypeError('`functions` must be a list of callables.')
         return
-    elif not all([callable(func) for func in functions]):
+    elif not all([is_callable(func) for func in functions]):
         raise TypeError('`functions` must be a list of callables.')
         return
     
@@ -132,7 +146,7 @@ def get_len_of_parameter_dict(d):
     values."""
     if not isinstance(d, dict):
         raise ValueError('Need a dict object for get_len_of_parameter_dict.')
-    cols = d.keys()
+    cols = list(d.keys())
     length = 0
     for c in cols:
         val = d[c]
@@ -181,7 +195,7 @@ def obj_to_fixed_length_Series(obj, length):
                                                             length, len(obj)))
         return
     obj = np.array(obj, dtype=dtype)
-    series = pd.Series(index=range(length), dtype=dtype)
+    series = pd.Series(index=list(range(length)), dtype=dtype)
     series.loc[:len(obj)-1] = obj
     return series
 
@@ -212,7 +226,7 @@ def computational_costs_to_flat_dict(ccosts, _sub=False):
             if is_sequence(val):
                 if len(val) == 1:
                     val = val[0]
-            if isinstance(val, (str, unicode, Number)):
+            if isinstance(val, (string_types, Number)):
                 converted[key] = val
             elif isinstance(val, dict):
                 subdict = computational_costs_to_flat_dict(val, _sub=True)
@@ -248,7 +262,7 @@ def rm_empty_directory_tail(path, stop_at=None):
     at the tail, until a non empty directory is found or `path` is
     the same directory given in `stop_at`."""
     if stop_at is not None:
-        if not isinstance(stop_at, (str, unicode)):
+        if not isinstance(stop_at, string_types):
             raise TypeError('`stop_at` must be a path.')
             return
         if not os.path.isdir(stop_at):
@@ -357,7 +371,10 @@ def query_yes_no(question, default="yes"):
 
     while True:
         sys.stdout.write(question + prompt)
-        choice = raw_input().lower()
+        if _IS_PYTHON3:
+            choice = input().lower()
+        else:
+            choice = raw_input().lower()
         if default is not None and choice == '':
             return valid[default]
         elif choice in valid:

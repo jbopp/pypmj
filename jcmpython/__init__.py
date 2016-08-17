@@ -32,11 +32,11 @@ if missing_dependencies:
 from jcmpython.internals import _config, jcm, daemon
 
 # Configure the logging
-import log as __log
+from . import log as __log
 import logging as __logging
 __logger = __logging.getLogger('init')
 
-from parallelization import read_resources_from_config, DaemonResource
+from .parallelization import read_resources_from_config, DaemonResource
 # initialize the daemon resources and load them into the namespace
 __logger.debug('Initializing resources from configuration.')
 resources = read_resources_from_config()
@@ -69,8 +69,8 @@ if matches is None:
 else:
     __jcm_version__ = matches.group().split(' ')[1]
 
-from core import JCMProject, Simulation, SimulationSet, ConvergenceTest
-import utils
+from .core import JCMProject, Simulation, SimulationSet, ConvergenceTest
+from . import utils
 
 # Function to load extensions
 extensions = ['materials']
@@ -83,7 +83,7 @@ def load_extension(ext_name):
     if ext_name == 'materials':
         try:
             global MaterialData
-            from materials import MaterialData
+            from .materials import MaterialData
             __logger.info('Loaded extension: {}'.format(ext_name))
         except Exception as e:
             __logger.warn('Unable to load extension `{}`: {}'.format(ext_name,

@@ -8,6 +8,7 @@ Authors : Carlo Barth
 from jcmpython.internals import _config, daemon, JCM_KERNEL, ConfigurationError
 import logging
 import os
+from six import string_types
 import time
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class DaemonError(Exception):
 
 def savely_convert_config_value(value):
     exc_msg = 'Unable to convert configuration value: {}.'.format(value)
-    if not isinstance(value, (str,unicode)):
+    if not isinstance(value, string_types):
         raise ConfigurationError(exc_msg)
         return
     if value.isdigit():
@@ -228,7 +229,7 @@ class ResourceDict(dict):
         """Sets a key value pair if input is of proper type. Tries to add the
         key as an attribute."""
         # Check proper types
-        if not isinstance(key, (str, unicode)):
+        if not isinstance(key, string_types):
             raise ValueError('Keys must be of type str or unicode in a '+
                              'ResourceDict. Your key is of type {}'.format(
                                                                 type(key)))
@@ -251,34 +252,34 @@ class ResourceDict(dict):
     
     def get_resource_names(self):
         """Just a more meaningful name for the keys()-method"""
-        return self.keys()
+        return list(self.keys())
     
     def get_resources(self):
         """Just a more meaningful name for the values()-method"""
-        return self.values()
+        return list(self.values())
     
     def get_all_workstations(self):
         """Returns a list of all resources with stype=='Workstation'"""
-        return [r for r in self.values() if r.stype == 'Workstation']
+        return [r for r in list(self.values()) if r.stype == 'Workstation']
     
     def get_all_queues(self):
         """Returns a list of all resources with stype=='Queue'"""
-        return [r for r in self.values() if r.stype == 'Queue']
+        return [r for r in list(self.values()) if r.stype == 'Queue']
     
     def set_m_n_for_all(self, m, n):
         """Shorthand for setting multiplicity and n_threads for all
         resources."""
-        for resource in self.values():
+        for resource in list(self.values()):
             resource.set_m_n(m,n)
     
     def add_all(self):
         """Calls the `add` method for all resources."""
-        for r in self.values():
+        for r in list(self.values()):
             r.add_all()
     
     def add_all_repeatedly(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Calls the `add_repeatedly` method for all resources."""
-        for r in self.values():
+        for r in list(self.values()):
             r.add_repeatedly(n_shots, wait_seconds, ignore_fail)
     
     def get_resource_with_most_cores(self):
@@ -287,7 +288,7 @@ class ResourceDict(dict):
         """
         names = []
         cores = []
-        for r in self.values():
+        for r in list(self.values()):
             names.append(r.nickname)
             cores.append(r.get_available_cores())
         max_cores = max(cores)

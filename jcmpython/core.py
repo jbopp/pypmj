@@ -19,9 +19,11 @@ import numpy as np
 from shutil import copytree, rmtree, move
 import os
 import pandas as pd
+from six import string_types
 import sys
 import time
-import utils
+from . import utils
+import collections
 
 # Get special logger instances for output which is captured from JCMgeo and
 # JCMsolve/JCMdaemon. The remaining logging in the core.module is done by
@@ -82,7 +84,7 @@ class JCMProject(object):
         if project_file_name is None:
             self.project_file_name = self._find_project_file()
         else:
-            if (not isinstance(project_file_name, (str, unicode)) or
+            if (not isinstance(project_file_name, string_types) or
                 not os.path.splitext(project_file_name)[1] in ['.jcmp',
                                                                '.jcmpt']):
                 raise ValueError('`project_file_name` must be a project '+
@@ -99,7 +101,7 @@ class JCMProject(object):
         the `projects` path specified in the configuration or an absolute path.
         """
         # Check whether the path is absolute
-        if isinstance(specifier, (str, unicode)):
+        if isinstance(specifier, string_types):
             if os.path.isabs(specifier):
                 if not os.path.exists(specifier):
                     raise OSError('The absolute path {} does not exist.'.format(
@@ -119,7 +121,6 @@ class JCMProject(object):
         except:
             raise OSError(err_msg)
         if not os.path.isdir(source_folder):
-            print source_folder
             raise OSError(err_msg)
         return source_folder
     
@@ -394,7 +395,7 @@ class Simulation(object):
             return
         
         # Otherwise, processing_func must be a callable
-        if not callable(processing_func):
+        if not utils.is_callable(processing_func):
             self.logger.warn('`processing_func` must be callable of one input '+
                          'Please consult the docs of `process_results`.')
             return
@@ -424,7 +425,7 @@ class Simulation(object):
         
         # Warn the user if she/he used a key that is already present due to the
         # stored computational costs
-        for key in eres.keys():
+        for key in eres:
             if key in self._results_dict:
                 self.logger.warn('The key {} is already present due to'.format(
                                                                            key)+
@@ -592,7 +593,7 @@ class SimulationSet(object):
         
         # If none of the `loop_indication` keys is in the dict, case 1 is 
         # assumed
-        keys_rest = [_k for _k in keys.keys() if not _k in loop_indication]
+        keys_rest = [_k for _k in keys if not _k in loop_indication]
         if len(keys_rest) > 0:
             self.constants = []
             self.geometry = []
@@ -605,7 +606,7 @@ class SimulationSet(object):
                              ' {} or all the keys '.format(loop_indication) +
                              'necessary to compile the JCM-template files.')
         for _k in loop_indication:
-            if _k in keys.keys():
+            if _k in keys:
                 if not isinstance(keys[_k], dict):
                     raise ValueError('The values for the keys {}'.format(
                                      loop_indication) + ' must be of type '+
@@ -616,13 +617,13 @@ class SimulationSet(object):
         
     def get_all_keys(self):
         """Returns a list of all keys that are passed to JCMsolve."""
-        return self.parameters.keys() + \
-               self.geometry.keys() + \
-               self.constants.keys()
+        return list(self.parameters.keys()) + \
+               list(self.geometry.keys()) + \
+               list(self.constants.keys())
     
     def _load_project(self, project):
         """Loads the specified project as a JCMProject-instance."""
-        if isinstance(project, (str,unicode)):
+        if isinstance(project, string_types):
             self.project = JCMProject(project)
         elif isinstance(project, (tuple, list)):
             if not len(project) == 2:
@@ -880,7 +881,7 @@ class SimulationSet(object):
         self._loop_props = []
         loopList = []
         fixedProperties = []
-        for p in self.parameters.keys():
+        for p in self.parameters:
             pSet = self.parameters[p]
             if isinstance(pSet, list):
                 pSet = np.array(pSet)
@@ -890,7 +891,7 @@ class SimulationSet(object):
                 loopList.append([(p, item) for item in pSet])
             else:
                 fixedProperties.append(p)
-        for g in self.geometry.keys():
+        for g in self.geometry:
             gSet = self.geometry[g]
             if isinstance(gSet, list):
                 gSet = np.array(gSet)
@@ -900,18 +901,20 @@ class SimulationSet(object):
                 loopList.append([(g, item) for item in gSet])
             else:
                 fixedProperties.append(g)
-        for c in self.constants.keys():
+        for c in self.constants:
             fixedProperties.append(c)
          
         # Now that the keys are separated into fixed and varying properties,
         # the three dictionaries can be combined for easier lookup
-        allKeys = dict( self.parameters.items() + self.geometry.items() + 
-                        self.constants.items() )
+        allKeys = dict(list(self.parameters.items()) + 
+                       list(self.geometry.items()) + 
+                       list(self.constants.items()))
         
         # For saving the results it needs to be known which properties should
         # be recorded. As a default, all parameters and all geometry-info is
         # used.
-        self.stored_keys = self.parameters.keys() + self.geometry.keys()
+        self.stored_keys = list(self.parameters.keys()) + \
+                           list(self.geometry.keys())
          
         # Depending on the combination mode, a list of all key-combinations is
         # generated, so that all simulations can be executed in a single loop.
@@ -968,8 +971,8 @@ class SimulationSet(object):
         for p in fixedProperties:
             df_dict[p] = allKeys[p]
         self.simulation_properties = pd.DataFrame(df_dict,
-                                                  index=range(self.num_sims), 
-                                                  columns=self.stored_keys)
+                                        index=list(range(self.num_sims)), 
+                                        columns=self.stored_keys)
         self.simulation_properties.index.name = 'number'
 
     def _sort_simulations(self):
@@ -984,7 +987,7 @@ class SimulationSet(object):
         allGeoKeys = []
         geometryTypes = np.zeros((self.num_sims), dtype=int)
         for s in self.simulations:
-            allGeoKeys.append({k: s.keys[k] for k in self.geometry.keys()})
+            allGeoKeys.append({k: s.keys[k] for k in self.geometry})
          
         # Find the number of different geometries and a list where each entry
         # corresponds to the geometry-type of the simulation. The types are
@@ -1028,8 +1031,8 @@ class SimulationSet(object):
         
         # We also update the index of the simulation property DataFrame
         self.simulation_properties = self.simulation_properties.ix[sortIndices]
-        self.simulation_properties.index = pd.Index(range(self.num_sims), 
-                                                    name='number')
+        self.simulation_properties.index = pd.Index(
+                                                list(range(self.num_sims)), name='number')
     
     def __get_version_dframe(self):
         """Returns a pandas DataFrame from the version info of JCMsuite and 
@@ -1053,7 +1056,7 @@ class SimulationSet(object):
                                                 format(self.STORE_META_GROUPS))
             return
         d_ = getattr(self, which)
-        cols = d_.keys()
+        cols = list(d_.keys())
         n_rows = utils.get_len_of_parameter_dict(d_)
         df_dict = {c:utils.obj_to_fixed_length_Series(d_[c], n_rows) \
                    for c in cols}
@@ -1114,7 +1117,7 @@ class SimulationSet(object):
         meta = {g:self.__restore_from_meta_dframe(g) for g in groups}
         
         # Check if the current keys match the keys in the store
-        klist = [v.keys() for v in meta.values()]
+        klist = [list(v.keys()) for v in list(meta.values())]
         # all keys in store:
         meta_keys = [item for sublist in klist for item in sublist]
         if not set(self.stored_keys) == set(meta_keys):
@@ -1189,7 +1192,7 @@ class SimulationSet(object):
         if any([os.path.isdir(d_) for d_ in dir_rename_dict]):
             self.logger.debug('Renaming directories.')
             utils.rename_directories(dir_rename_dict)
-            self._wdirs_to_clean = dir_rename_dict.values()
+            self._wdirs_to_clean = list(dir_rename_dict.values())
         
         # Set the finished_sim_numbers list 
         self.finished_sim_numbers = list(self.get_store_data().index)
@@ -1299,7 +1302,7 @@ class SimulationSet(object):
         Names that are unknown are ignored. If no valid name is present, the
         default configuration will remain untouched.
         """
-        if isinstance(names, (str, unicode)):
+        if isinstance(names, string_types):
             names = [names]
         valid = []
         for n in names:
@@ -1906,7 +1909,7 @@ class ConvergenceTest(object):
         if run_ref_with_max_cores == 'AUTO':
             nick, N = self.sset_ref.resources.get_resource_with_most_cores()
             change_resource_configuration = True
-        elif isinstance(run_ref_with_max_cores, (str, unicode)):
+        elif isinstance(run_ref_with_max_cores, string_types):
             if nick in self.sset_ref.resources:
                 nick = run_ref_with_max_cores
                 N = self.sset_ref.resources[nick].get_available_cores()

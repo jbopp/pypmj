@@ -5,10 +5,14 @@ Authors : Carlo Barth
 """
 
 # Append the parent dir to the path in order to import jcmpython
-import ConfigParser
+import sys
+if sys.version_info >= (3, 0):
+    from configparser import ConfigParser, NoOptionError
+else:
+    from ConfigParser import ConfigParser, NoOptionError
+
 from datetime import date
 import os
-import sys
 if not 'jcmpython' in os.listdir('..'):
     raise OSError('Unable to find the jcmpython module in the parent directory'+
                   '. Make sure that the `test` folder is in the same directory'+
@@ -103,13 +107,13 @@ def check_configuration(cnf):
             raiseerr('{} is not an allowed logging level'.format(
                                                 cnf.get('Logging', 'level')))
             return False
-    except ConfigParser.NoOptionError as e:
+    except NoOptionError as e:
         raiseerr(e.message+'.')
         return False
     return True
 
 # Load the configuration
-_config = ConfigParser.ConfigParser()
+_config = ConfigParser()
 _config.optionxform = str # this is needed for case sensitive options
 try:
     _config.read(_CONFIG_FILE)

@@ -26,7 +26,7 @@ import numpy as np
 import os
 from scipy.interpolate import pchip
 from scipy.interpolate import UnivariateSpline
-import refractiveIndexInfo as rii
+from . import refractiveIndexInfo as rii
 import logging
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ class MaterialData(object):
             return
         
         # If a fixed refractive index is given as material
-        if isinstance(material, (int, long, float, complex)):
+        if isinstance(material, (int, float, complex)):
             self.fixedN = True
             self.totalWvlRange = ( -np.inf, np.inf )
             self.n = material
@@ -238,11 +238,11 @@ class MaterialData(object):
 
 
     def getKnownDatabases(self):
-        return self.databases.keys()
+        return list(self.databases.keys())
 
 
     def getKnownMaterials(self):
-        return self.materials.keys()
+        return list(self.materials.keys())
 
 
     def convertWvl(self, wavelengths):
@@ -284,14 +284,14 @@ class MaterialData(object):
         given material
         """
         
-        if not self.material in self.materials.keys():
+        if not self.material in list(self.materials.keys()):
             raise Exception('Material is specified. Known materials are:' +\
                             '\n\t{0}\n'.format(self.getKnownMaterials()) +\
                             'Please specify shelf, book and ymlFile instead.')
         
         mat = self.materials[self.material]
         if self.db == 'filmetrics':
-            if not 'fimetricsFile' in mat.keys():
+            if not 'fimetricsFile' in list(mat.keys()):
                 raise Exception('No filmetrics data available for {0}'.format(
                                 self.material))
                 return
@@ -309,7 +309,7 @@ class MaterialData(object):
         for s in sets:
             yamlf = self.getYML(shelf, book, s)
             setMaxVals.append( np.max(rii.getRange(yamlf)) )
-        sortIdx = sorted(range(len(setMaxVals)), key=lambda k: setMaxVals[k])
+        sortIdx = sorted(list(range(len(setMaxVals))), key=lambda k: setMaxVals[k])
         
         # Loop over sorted sets
         for i in sortIdx:
@@ -387,22 +387,25 @@ class MaterialData(object):
         """
         
         if self.fixedN:
-            print '*** Using fixed refractive index of {0} ***'.format(self.n)
+            logger.info('*** Using fixed refractive index of {0} ***'.format(
+                                                                        self.n))
             return
         
-        if not self.material in self.materials.keys():
-            raise Exception('Material is specified. Known materials are:' +\
-                            '\n\t{0}\n'.format(self.getKnownMaterials()) +\
+        if not self.material in list(self.materials.keys()):
+            raise Exception('Material is specified. Known materials are:' +
+                            '\n\t{0}\n'.format(self.getKnownMaterials()) +
                             'Please specify shelf, book and ymlFile instead.')
         mat = self.materials[self.material]
         
         if self.db == 'filmetrics':
-            print '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}nm:'.\
-                    format(self.fullName, self.totalWvlRange)
-            print '\tNo reference data available for filmetrics files yet.'
-            print '\tPlease see', \
-                  r'http://www.filmetrics.de/refractive-index-database'
-            print '***\n'
+            logger.info(
+                   '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}nm:'.\
+                                      format(self.fullName, self.totalWvlRange))
+            logger.info('\tNo reference data available for filmetrics files'+
+                        ' yet.')
+            logger.info('\tPlease see'+
+                        r'http://www.filmetrics.de/refractive-index-database')
+            logger.info('***\n')
             return
         
         shelf = mat['shelf']
@@ -412,15 +415,16 @@ class MaterialData(object):
             yamlf = self.getYML(shelf, book, s)
             thisRange = rii.getRange(yamlf)
             info = self.getYMLinfo(shelf, book, s)
-            print '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}µm:'.\
-                    format(yamlf, thisRange)
+            logger.info(
+                   '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}µm:'.\
+                                                       format(yamlf, thisRange))
             if 'REFERENCES' in info:
-                print '\n\tReferences:'
-                print '\t', info['REFERENCES']
+                logger.info('\n\tReferences:')
+                logger.info('\t ' + info['REFERENCES'])
             if 'COMMENTS' in info:
-                print '\n\tComments:'
-                print '\t', info['COMMENTS']
-            print '***\n'
+                logger.info('\n\tComments:')
+                logger.info('\t ' + info['COMMENTS'])
+            logger.info('***\n')
 
 
     def checkIfSet(self):
@@ -482,7 +486,7 @@ class MaterialData(object):
 
     def extrapolate(self, wavelengths, data2extrapolate):
         wvls = np.array(self.totalWvlRange)
-        if isinstance(wavelengths, (int, long, float, complex)):
+        if isinstance(wavelengths, (int, float, complex)):
             if wavelengths < wvls[0]:
                 return self.limits[0]
             else:
@@ -548,7 +552,7 @@ class MaterialData(object):
             plt.plot(knownDataWindow['wvl'], knownDataWindow['n'], 'o', 
                      color='b', label='$n$')
         plt.autoscale(enable = True, axis='x', tight=True)
-        plt.ylabel(u'n')
+        plt.ylabel('n')
         plt.legend(frameon=False, loc='best')
         
         plt.subplot(2, 1, 2)
@@ -558,8 +562,8 @@ class MaterialData(object):
         if plotKnownValues:
             plt.plot(knownDataWindow['wvl'], knownDataWindow['k'], 'o', 
                      color='g', label='$k$')
-        plt.xlabel(u'wavelength in µm')
-        plt.ylabel(u'k')
+        plt.xlabel('wavelength in µm')
+        plt.ylabel('k')
         plt.autoscale(enable = True, axis='x', tight=True)
         plt.legend(frameon=False, loc='best')
         plt.suptitle('Material: {0}, Database: {1}'.format(

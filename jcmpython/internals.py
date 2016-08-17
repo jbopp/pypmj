@@ -4,9 +4,16 @@ Authors : Carlo Barth
 """
 
 # Imports
-import ConfigParser
 import os
 import sys
+
+# Check if the current python version is python 3
+_IS_PYTHON3 = sys.version_info >= (3, 0)
+
+if _IS_PYTHON3:
+    from configparser import ConfigParser
+else:
+    from ConfigParser import ConfigParser
 
 
 # A custom exception for configuration errors
@@ -42,7 +49,7 @@ if not os.path.isfile(_CONFIG_FILE):
                   ' present in the current working directory and named ' +
                   '`config.cfg` or specify the path in the environment ' +
                   'variable `JCMPYTHON_CONFIG_FILE`.')
-_config = ConfigParser.ConfigParser()
+_config = ConfigParser()
 _config.optionxform = str # this is needed for case sensitive options
 try:
     _config.read(_CONFIG_FILE)
