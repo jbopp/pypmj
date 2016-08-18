@@ -25,8 +25,20 @@ for dependency in hard_dependencies:
         missing_dependencies.append(dependency)
 
 if missing_dependencies:
-    raise ImportError("Missing required dependencies {0}".format(
-        missing_dependencies))
+    raise ImportError('Missing required dependencies {0}'.
+                      format(missing_dependencies))
+
+def __version_to_tuple(version):
+    """Returns a tuple of integers, given a `version` string. The version is
+    assumed to be of the form: 'int.int.int...'."""
+    return tuple([int(num_) for num_ in version.split('.') if num_.isdigit()])
+
+# Check if dependencies have a supported version
+import pandas as pd
+if not __version_to_tuple(pd.__version__) > (0,17,0):
+    raise ImportError('Your pandas version is {}, which is too old.'.
+                      format(pd.__version__) +
+                      'jcmpython needs version 0.17.0 or higher.')
 
 # Start up by parsing the configuration file and importing jcmwave
 from jcmpython.internals import _config, jcm, daemon
