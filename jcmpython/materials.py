@@ -4,10 +4,11 @@
 appropriate data bases.
 
 Authors : Carlo Barth
+
 """
 
 # Let users know if they're missing any of our hard dependencies
-# (this is section is copied from the pandas __init__.py) 
+# (this is section is copied from the pandas __init__.py)
 hard_dependencies = ('parse', 'yaml')
 missing_dependencies = []
 
@@ -19,7 +20,7 @@ for dependency in hard_dependencies:
 
 if missing_dependencies:
     raise ImportError("Missing required dependencies {0}".format(
-                                                        missing_dependencies))
+        missing_dependencies))
 
 from jcmpython.internals import _config, ConfigurationError
 import numpy as np
@@ -34,14 +35,14 @@ logger = logging.getLogger(__name__)
 RI_DBASE = _config.get('Data', 'refractiveIndexDatabase')
 
 # Check if the configured refractiveIndexDatabase is valid
-_err_msg = 'The configured refractiveIndexDatabase {} does'.format(RI_DBASE)+\
+_err_msg = 'The configured refractiveIndexDatabase {} does'.format(RI_DBASE) +\
            ' not seem to be an appropriate data base for this module.'
 if not os.path.isdir(RI_DBASE):
     raise ConfigurationError(_err_msg)
 content = os.listdir(RI_DBASE)
-for sub in ['filmetrics','glass','main','organic','other','library.yml']:
-    if not sub in content:
-        raise ConfigurationError(_err_msg+' Missing: {}'.format(sub))
+for sub in ['filmetrics', 'glass', 'main', 'organic', 'other', 'library.yml']:
+    if sub not in content:
+        raise ConfigurationError(_err_msg + ' Missing: {}'.format(sub))
 
 
 # =============================================================================
@@ -49,13 +50,13 @@ class MaterialData(object):
     """
     Class MaterialData
     --------------------------
-    
-    Makes different refractive index databases accessible with Python, currently
-    RefractiveIndex.info and Filmetrics.
-    
+
+    Makes different refractive index databases accessible with Python,
+    currently RefractiveIndex.info and Filmetrics.
+
     Usage:
     ------
-    Create an instance for the desired material, e.g. silicon, using 
+    Create an instance for the desired material, e.g. silicon, using
         >> refInfo = MaterialData( material = 'silicon' )
     You can easily calculate the refractive index data at desired wavelength
     using
@@ -64,12 +65,12 @@ class MaterialData(object):
         >> refInfo.getAllInfo()
     and plot the known data using
         >> refInfo.plotData() # you can also provide desired wavelengths here
-    
+
     Further, you can get a list of knownMaterials by
         >> refInfo = MaterialData()
         >> print refInfo.getKnownMaterials()
-    
-    
+
+
     Extending the data:
     -------------------
     To add new materials, simply add a value to the "materials" dictionary
@@ -88,7 +89,7 @@ class MaterialData(object):
     unitOfLength : float, default 1.
         multiplier for the wavelengths you will provide (e.g.: 1. = meter,
         1.e-9 = nanometer).
-    database {'RefractiveIndex.info', 'filmetrics', 'preferred'}, 
+    database {'RefractiveIndex.info', 'filmetrics', 'preferred'},
              default 'preferred'
         The database to use. 'preferred' makes use of the 'preferredDbase'
         key in the materials-dictionary.
@@ -100,7 +101,7 @@ class MaterialData(object):
     NformulaSampleVals: int, default: 1000
         Number of (logspaced) values for sampling of formula-based data.
     """
-    
+
     materials = {
         'air': {
             'fixedN': 1.
@@ -184,230 +185,214 @@ class MaterialData(object):
             'fixedN': 1.42
         }
     }
-    
-    databases = {'RefractiveIndex.info': { 'wavelengthUnit': 1.e6 },
-                 'filmetrics': { 'wavelengthUnit': 1.e9 }}
+
+    databases = {'RefractiveIndex.info': {'wavelengthUnit': 1.e6},
+                 'filmetrics': {'wavelengthUnit': 1.e9}}
     dtype = [('wvl', np.float64), ('n', np.float64), ('k', np.float64)]
 
-    
-    def __init__(self, material = None, unitOfLength = 1., 
-                 database = 'preferred', interpolater = 'pchip', 
-                 splineDegree = 3, NformulaSampleVals = 1000):
-        
-        if material == None:
+    def __init__(self, material=None, unitOfLength=1.,
+                 database='preferred', interpolater='pchip',
+                 splineDegree=3, NformulaSampleVals=1000):
+
+        if material is None:
             return
-        
+
         # If a fixed refractive index is given as material
         if isinstance(material, (int, float, complex)):
             self.fixedN = True
-            self.totalWvlRange = ( -np.inf, np.inf )
+            self.totalWvlRange = (-np.inf, np.inf)
             self.n = material
             self.name = 'CostumMaterial'
             return
         else:
             self.fixedN = False
             self.name = material
-        
+
         # If the material dictionary has the key fixedN
         if material in self.materials:
             if 'fixedN' in self.materials[material]:
                 self.fixedN = True
                 self.n = self.materials[material]['fixedN']
                 return
-        
+
         self.NformulaSampleVals = NformulaSampleVals
         self.db = database
         if material is not None:
             if database == 'preferred':
                 self.db = self.materials[material]['preferredDbase']
-        
+
         self.knownInterpolaters = ['pchip', 'spline']
         self.interpolater = interpolater
         self.splineDegree = splineDegree
         assert interpolater in self.knownInterpolaters,\
-        'The interpolater {0} is unknown. Known interpolaters are: {1}.'.format(
-                                        interpolater, self.knownInterpolaters)
+            'The interpolater {0} is unknown. Known interpolaters are: {1}.'.\
+            format(interpolater, self.knownInterpolaters)
         assert self.db in self.getKnownDatabases(),\
-               'The database {0} is unknown. Known databases are: {1}.'.format(
-                                            self.db, self.getKnownDatabases())
-        
+            'The database {0} is unknown. Known databases are: {1}.'.format(
+            self.db, self.getKnownDatabases())
+
         self.unitOfLength = unitOfLength
         self.interpolaterSet = False
         self.material = material
         self.getData4Material()
 
-
     def getKnownDatabases(self):
         return list(self.databases.keys())
-
 
     def getKnownMaterials(self):
         return list(self.materials.keys())
 
-
     def convertWvl(self, wavelengths):
-        """ converts to database specific wavelength unit """
+        """converts to database specific wavelength unit."""
         if self.fixedN:
             return wavelengths
         return wavelengths * self.databases[self.db]['wavelengthUnit'] * \
-                self.unitOfLength
-
+            self.unitOfLength
 
     def getYML(self, shelf, book, fname):
-        """ composes a valid YML-filename for RefractiveIndex.info database """
+        """composes a valid YML-filename for RefractiveIndex.info database."""
         return os.path.join(RI_DBASE,
                             shelf, book, fname)
 
-
     def getYMLinfo(self, shelf, book, fname):
-        """ returns the references and comments provided in the YML files """
-        return rii.getInfo( self.getYML(shelf, book, fname ) )
-    
-    
-    def getFilmetricsData(self, filename, returnNameOnly = False):
-        """ 
-        produces a numpy-structured array from the data provided in the
-        Filemetrics-file
-        """
+        """returns the references and comments provided in the YML files."""
+        return rii.getInfo(self.getYML(shelf, book, fname))
+
+    def getFilmetricsData(self, filename, returnNameOnly=False):
+        """produces a numpy-structured array from the data provided in the
+        Filemetrics-file."""
         self.fullName = os.path.join(RI_DBASE, 'filmetrics', filename)
         data = np.loadtxt(self.fullName)
-        structuredData = np.zeros( (len(data[:,0])), self.dtype )
+        structuredData = np.zeros((len(data[:, 0])), self.dtype)
         cols = [c[0] for c in self.dtype]
         for dim in range(data.shape[1]):
             structuredData[cols[dim]] = data[:, dim]
         return structuredData
 
-
     def getData4Material(self):
-        """
-        produces a numpy-structured array from all valid datafiles for the
-        given material
-        """
-        
-        if not self.material in list(self.materials.keys()):
-            raise Exception('Material is specified. Known materials are:' +\
-                            '\n\t{0}\n'.format(self.getKnownMaterials()) +\
+        """produces a numpy-structured array from all valid datafiles for the
+        given material."""
+
+        if self.material not in list(self.materials.keys()):
+            raise Exception('Material is specified. Known materials are:' +
+                            '\n\t{0}\n'.format(self.getKnownMaterials()) +
                             'Please specify shelf, book and ymlFile instead.')
-        
+
         mat = self.materials[self.material]
         if self.db == 'filmetrics':
-            if not 'fimetricsFile' in list(mat.keys()):
+            if 'fimetricsFile' not in list(mat.keys()):
                 raise Exception('No filmetrics data available for {0}'.format(
                                 self.material))
                 return
-            self.setInterpolater( self.getFilmetricsData(mat['fimetricsFile'] ))
+            self.setInterpolater(self.getFilmetricsData(mat['fimetricsFile']))
             return
-        
+
         # This code is only executed if database == "RefractiveIndex.info"
         shelf = mat['shelf']
         book = mat['book']
         sets = mat['sets']
-        
+
         # Determine the sorting indices of the sets, to use them in ascending
-        # wavelength order 
+        # wavelength order
         setMaxVals = []
         for s in sets:
             yamlf = self.getYML(shelf, book, s)
-            setMaxVals.append( np.max(rii.getRange(yamlf)) )
-        sortIdx = sorted(list(range(len(setMaxVals))), key=lambda k: setMaxVals[k])
-        
+            setMaxVals.append(np.max(rii.getRange(yamlf)))
+        sortIdx = sorted(list(range(len(setMaxVals))),
+                         key=lambda k: setMaxVals[k])
+
         # Loop over sorted sets
         for i in sortIdx:
             s = sets[i]
             yamlf = self.getYML(shelf, book, s)
             thisRange = rii.getRange(yamlf)
             returnedData = rii.getData(yamlf, thisRange[0],
-                                       returnExistingDataOnly = True)
-            
-            if hasattr(returnedData, '__call__'): # data in form of formula
-                wvl = np.logspace(np.log10(thisRange[0]), 
+                                       returnExistingDataOnly=True)
+
+            if hasattr(returnedData, '__call__'):  # data in form of formula
+                wvl = np.logspace(np.log10(thisRange[0]),
                                   np.log10(thisRange[1]),
                                   self.NformulaSampleVals)
                 if i == 0:
-                    data = np.zeros( (len(wvl)), self.dtype )
+                    data = np.zeros((len(wvl)), self.dtype)
                     data['wvl'] = wvl
                     data['n'] = returnedData(wvl)
                 else:
-                    newData = np.zeros( (len(wvl)), self.dtype )
+                    newData = np.zeros((len(wvl)), self.dtype)
                     newData['wvl'] = wvl
                     newData['n'] = returnedData(wvl)
-                    
+
                     # Avoid overlap
-                    idx = np.where( newData['wvl'] > np.max(data['wvl']) )
+                    idx = np.where(newData['wvl'] > np.max(data['wvl']))
                     data = np.append(data, newData[idx])
-                
-            elif len(returnedData) == 3: # data in form of tabulated values
-                
+
+            elif len(returnedData) == 3:  # data in form of tabulated values
+
                 wvl, dataN, dataK = returnedData
                 if i == 0:
-                    data = np.zeros( (len(wvl)), self.dtype )
+                    data = np.zeros((len(wvl)), self.dtype)
                     data['wvl'] = wvl
                     data['n'] = dataN
                     data['k'] = dataK
                 else:
-                    newData = np.zeros( (len(wvl)), self.dtype )
+                    newData = np.zeros((len(wvl)), self.dtype)
                     newData['wvl'] = wvl
                     newData['n'] = dataN
                     newData['k'] = dataK
-                    
+
                     # Avoid overlap
-                    idx = np.where( newData['wvl'] > np.max(data['wvl']) )
+                    idx = np.where(newData['wvl'] > np.max(data['wvl']))
                     data = np.append(data, newData[idx])
-        
+
         # All data is loaded, now the interpolaters can be set
         self.setInterpolater(data)
 
-    
     def setInterpolater(self, data):
-        """ Initialzes the desired interpolater """
+        """Initialzes the desired interpolater."""
         order = np.argsort(data, order='wvl')
         self.knownData = data[order]
-        self.totalWvlRange = ( np.min(data['wvl']), np.max(data['wvl']) )
-        self.limits = [self.knownData['n'][0] +1.j*self.knownData['k'][0],
-                       self.knownData['n'][-1]+1.j*self.knownData['k'][-1]]
-        
+        self.totalWvlRange = (np.min(data['wvl']), np.max(data['wvl']))
+        self.limits = [self.knownData['n'][0] + 1.j * self.knownData['k'][0],
+                       self.knownData['n'][-1] + 1.j * self.knownData['k'][-1]]
+
         # spline
         if self.interpolater == 'spline':
             self.nInterp = UnivariateSpline(data['wvl'], data['n'], s=0,
-                                            k = self.splineDegree)
+                                            k=self.splineDegree)
             self.kInterp = UnivariateSpline(data['wvl'], data['k'], s=0,
-                                            k = self.splineDegree)
+                                            k=self.splineDegree)
         # pchip
         elif self.interpolater == 'pchip':
             self.nInterp = pchip(data['wvl'], data['n'])
             self.kInterp = pchip(data['wvl'], data['k'])
         self.interpolaterSet = True
 
-
     def getAllInfo(self):
-        """ 
-        prints out all available accompanying data (wavelength range, 
-        references, comments)
-        
-        """
-        
+        """prints out all available accompanying data (wavelength range,
+        references, comments)"""
+
         if self.fixedN:
             logger.info('*** Using fixed refractive index of {0} ***'.format(
-                                                                        self.n))
+                self.n))
             return
-        
-        if not self.material in list(self.materials.keys()):
+
+        if self.material not in list(self.materials.keys()):
             raise Exception('Material is specified. Known materials are:' +
                             '\n\t{0}\n'.format(self.getKnownMaterials()) +
                             'Please specify shelf, book and ymlFile instead.')
         mat = self.materials[self.material]
-        
+
         if self.db == 'filmetrics':
             logger.info(
-                   '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}nm:'.\
-                                      format(self.fullName, self.totalWvlRange))
-            logger.info('\tNo reference data available for filmetrics files'+
+                '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}nm:'.
+                format(self.fullName, self.totalWvlRange))
+            logger.info('\tNo reference data available for filmetrics files' +
                         ' yet.')
-            logger.info('\tPlease see'+
+            logger.info('\tPlease see' +
                         r'http://www.filmetrics.de/refractive-index-database')
             logger.info('***\n')
             return
-        
+
         shelf = mat['shelf']
         book = mat['book']
         sets = mat['sets']
@@ -416,8 +401,8 @@ class MaterialData(object):
             thisRange = rii.getRange(yamlf)
             info = self.getYMLinfo(shelf, book, s)
             logger.info(
-                   '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}µm:'.\
-                                                       format(yamlf, thisRange))
+                '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}µm:'.
+                format(yamlf, thisRange))
             if 'REFERENCES' in info:
                 logger.info('\n\tReferences:')
                 logger.info('\t ' + info['REFERENCES'])
@@ -426,44 +411,43 @@ class MaterialData(object):
                 logger.info('\t ' + info['COMMENTS'])
             logger.info('***\n')
 
-
     def checkIfSet(self):
-        if self.fixedN: return
+        if self.fixedN:
+            return
         if not self.interpolaterSet:
             raise Exception('No valid interpolater set.')
             return
 
-
-    def getNKdata(self, wavelengths, absorption = True, convert = True,
-                  extrapolation = True, suppressWarnings = True):
+    def getNKdata(self, wavelengths, absorption=True, convert=True,
+                  extrapolation=True, suppressWarnings=True):
         self.checkIfSet()
-        
+
         if self.fixedN:
             return self.n
-        
+
         if convert:
             wavelengths = self.convertWvl(wavelengths)
-        
+
         extrapolationNeeded = False
         informedAboutExtrapolation = False
-        if not (self.totalWvlRange[0] <= np.min(wavelengths) and 
-                            self.totalWvlRange[1] >= np.max(wavelengths)):
+        if not (self.totalWvlRange[0] <= np.min(wavelengths) and
+                self.totalWvlRange[1] >= np.max(wavelengths)):
             extrapolationNeeded = True
             if extrapolation:
                 if not informedAboutExtrapolation:
                     if not suppressWarnings:
                         logger.info('Found wavelengths for which no data ' +
-                              'is known. Using extrapolation.')
+                                    'is known. Using extrapolation.')
                     informedAboutExtrapolation = True
             else:
                 raise Exception('Given wavelength is outside known ' +
-                        'wavelength data range. Known Range: {0}µm'.format(
-                                                self.totalWvlRange) + \
-                        ' Your range is ({0}, {1})µm'.format(
-                                np.min(wavelengths), np.max(wavelengths)))
-        
+                                'wavelength data range. Known Range: {0}µm'.
+                                format(self.totalWvlRange) +
+                                ' Your range is ({0}, {1})µm'.format(
+                                    np.min(wavelengths), np.max(wavelengths)))
+
         if absorption:
-            res = self.nInterp(wavelengths) + 1.j* self.kInterp(wavelengths)
+            res = self.nInterp(wavelengths) + 1.j * self.kInterp(wavelengths)
             if extrapolation and extrapolationNeeded:
                 return self.extrapolate(wavelengths, res)
             else:
@@ -474,15 +458,13 @@ class MaterialData(object):
                 return np.real(self.extrapolate(wavelengths, res))
             else:
                 return res
-    
-    
-    def getPermittivity(self, wavelengths, absorption = True, convert = True,
-                        extrapolation = True ):
-        return np.square( self.getNKdata(wavelengths, 
-                                         absorption, 
-                                         convert,
-                                         extrapolation) )
-    
+
+    def getPermittivity(self, wavelengths, absorption=True, convert=True,
+                        extrapolation=True):
+        return np.square(self.getNKdata(wavelengths,
+                                        absorption,
+                                        convert,
+                                        extrapolation))
 
     def extrapolate(self, wavelengths, data2extrapolate):
         wvls = np.array(self.totalWvlRange)
@@ -492,38 +474,36 @@ class MaterialData(object):
             else:
                 return self.limits[1]
         else:
-            minIdx = np.where( wavelengths < wvls[0] )
-            maxIdx = np.where( wavelengths > wvls[1] )
+            minIdx = np.where(wavelengths < wvls[0])
+            maxIdx = np.where(wavelengths > wvls[1])
             extrapolatedResult = data2extrapolate
             extrapolatedResult[minIdx] = self.limits[0]
             extrapolatedResult[maxIdx] = self.limits[1]
             return extrapolatedResult
-    
-    
-    def getMinMaxPermittivityInWavelengthRange( self, wvlRange, 
-                                                convert = True,
-                                                Nsamples = 1e3 ):
+
+    def getMinMaxPermittivityInWavelengthRange(self, wvlRange,
+                                               convert=True,
+                                               Nsamples=1e3):
         if not isinstance(wvlRange, np.ndarray):
             wvlRange = np.array(wvlRange)
         if convert:
             wvlRange = self.convertWvl(wvlRange)
         wvls = self.totalWvlRange
-        rangeOfInterest = np.array( [ max([wvls[0], wvlRange[0]]),
-                                      min([wvls[1], wvlRange[1]]) ] )
-        wavelengths = np.linspace( rangeOfInterest[0], rangeOfInterest[1], 
-                                   Nsamples )
-        perms = self.getPermittivity( wavelengths, 
-                                      absorption = False, 
-                                      convert = False )
-        return np.array( [ np.min(perms), np.max(perms) ] )
-    
+        rangeOfInterest = np.array([max([wvls[0], wvlRange[0]]),
+                                    min([wvls[1], wvlRange[1]])])
+        wavelengths = np.linspace(rangeOfInterest[0], rangeOfInterest[1],
+                                  Nsamples)
+        perms = self.getPermittivity(wavelengths,
+                                     absorption=False,
+                                     convert=False)
+        return np.array([np.min(perms), np.max(perms)])
 
-    def plotData(self, wavelengths = None, wvlRange = None, Nvals = 1000,
-                 convert = False, plotKnownValues = False, show = True):
+    def plotData(self, wavelengths=None, wvlRange=None, Nvals=1000,
+                 convert=False, plotKnownValues=False, show=True):
         self.checkIfSet()
         import matplotlib.pyplot as plt
         plt.switch_backend('TkAgg')
-        
+
         if self.fixedN:
             self.getAllInfo()
             logger.debug('-> Nothing to plot.')
@@ -533,65 +513,65 @@ class MaterialData(object):
         elif wvlRange:
             wvls = np.linspace(wvlRange[0], wvlRange[1], Nvals)
         else:
-            wvls = np.linspace(self.totalWvlRange[0], self.totalWvlRange[1], 
+            wvls = np.linspace(self.totalWvlRange[0], self.totalWvlRange[1],
                                Nvals)
         if convert:
             wvls = self.convertWvl(wvls)
-        interp = self.getNKdata(wvls, convert = False)
-        
+        interp = self.getNKdata(wvls, convert=False)
+
         windowIdx = np.where(
-                        np.logical_and(
-                            np.min(wvls) <= self.knownData['wvl'],
-                            self.knownData['wvl'] <= np.max(wvls)))
+            np.logical_and(
+                np.min(wvls) <= self.knownData['wvl'],
+                self.knownData['wvl'] <= np.max(wvls)))
         knownDataWindow = self.knownData[windowIdx]
-        
+
         plt.subplot(2, 1, 1)
-        plt.plot(wvls, interp.real, '-', color='b', 
+        plt.plot(wvls, interp.real, '-', color='b',
                  label='$n$ interpolated', lw=2)
         if plotKnownValues:
-            plt.plot(knownDataWindow['wvl'], knownDataWindow['n'], 'o', 
+            plt.plot(knownDataWindow['wvl'], knownDataWindow['n'], 'o',
                      color='b', label='$n$')
-        plt.autoscale(enable = True, axis='x', tight=True)
+        plt.autoscale(enable=True, axis='x', tight=True)
         plt.ylabel('n')
         plt.legend(frameon=False, loc='best')
-        
+
         plt.subplot(2, 1, 2)
         plt.plot(wvls, interp.imag, '-', color='g',
                  label='$k$ interpolated', lw=2)
-        plt.autoscale(enable = True, axis='x', tight=True)
+        plt.autoscale(enable=True, axis='x', tight=True)
         if plotKnownValues:
-            plt.plot(knownDataWindow['wvl'], knownDataWindow['k'], 'o', 
+            plt.plot(knownDataWindow['wvl'], knownDataWindow['k'], 'o',
                      color='g', label='$k$')
         plt.xlabel('wavelength in µm')
         plt.ylabel('k')
-        plt.autoscale(enable = True, axis='x', tight=True)
+        plt.autoscale(enable=True, axis='x', tight=True)
         plt.legend(frameon=False, loc='best')
         plt.suptitle('Material: {0}, Database: {1}'.format(
-                                                    self.material, self.db))
-        if show: plt.show()
-        
-        
+            self.material, self.db))
+        if show:
+            plt.show()
+
 
 if __name__ == '__main__':
-    
+
     d = MaterialData('silicon')
     d.plotData()
-    
+
     # Wavelength parameters
-    wavelength_start = 400.e-9 
-    wavelength_end   = 1500.e-9 
+    wavelength_start = 400.e-9
+    wavelength_end = 1500.e-9
     wavelength_stepSize = 1.e-9
     wvl = np.arange(wavelength_start, wavelength_end + wavelength_stepSize,
                     wavelength_stepSize)
-    
+
 #     data1 = MaterialData(database = 'RefractiveIndex.info',
 #                                material = 'gallium_arsenide')
 #     data1.getAllInfo()
-#       
+#
 #     data2 = MaterialData(database = 'filmetrics',
 #                                 material = 'gallium_arsenide')
 #     data2.getAllInfo()
-#     
+#
 #     plt.figure(1)
 #     data1.plotData(wavelengths = wvl, convert=True, show=False)
 # #     data1.plotData()
@@ -599,16 +579,13 @@ if __name__ == '__main__':
 #     data2.plotData(wavelengths = wvl, convert=True, show=False)
 #     plt.show()
 #     quit()
-    
+
     mats = MaterialData().getKnownMaterials()
     mats = ['silver']
     for m in mats:
         try:
             logger.debug(m)
-            refInfo = MaterialData(material = m)
-            refInfo.plotData(wavelengths = wvl, convert=True)
+            refInfo = MaterialData(material=m)
+            refInfo.plotData(wavelengths=wvl, convert=True)
         except:
             pass
-
-    
-    

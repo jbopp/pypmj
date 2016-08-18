@@ -1,6 +1,7 @@
 """Startup utilities for config file parsing and import of jcmwave.
 
 Authors : Carlo Barth
+
 """
 
 # Imports
@@ -27,35 +28,36 @@ class ConfigurationError(Exception):
         Input expression in which the error occurred.
     message : str
         Explanation of the error.
+
     """
 
     def __init__(self, message):
         self.message = message + ' Please check your configuration file.'
-    
+
     def __str__(self):
         return self.message
 # =============================================================================
 
 
 # Parsing of the configuration file `config.cfg`. This file must be present in
-# the current working directory or the path must be set in the environment 
+# the current working directory or the path must be set in the environment
 # variable `JCMPYTHON_CONFIG_FILE`
 if 'JCMPYTHON_CONFIG_FILE' in os.environ:
     _CONFIG_FILE = os.environ['JCMPYTHON_CONFIG_FILE']
 else:
     _CONFIG_FILE = os.path.abspath('config.cfg')
 if not os.path.isfile(_CONFIG_FILE):
-    raise OSError('The configuration file could not be found. Make sure it is' +
-                  ' present in the current working directory and named ' +
+    raise OSError('The configuration file could not be found. Make sure it' +
+                  ' is present in the current working directory and named ' +
                   '`config.cfg` or specify the path in the environment ' +
                   'variable `JCMPYTHON_CONFIG_FILE`.')
 _config = ConfigParser()
-_config.optionxform = str # this is needed for case sensitive options
+_config.optionxform = str  # this is needed for case sensitive options
 try:
     _config.read(_CONFIG_FILE)
 except:
-    raise ConfigurationError('Unable to parse the configuration file {}'.format(
-                                                                _CONFIG_FILE))
+    raise ConfigurationError('Unable to parse the configuration file {}'.
+                             format(_CONFIG_FILE))
 
 # Try to read the keys relevant for import of the jcmwave-module and its
 # configuration
@@ -88,10 +90,9 @@ import jcmwave as jcm
 import jcmwave.daemon as daemon
 
 # Start up jcmwave
-if jcm.__private.JCMsolve is None: 
+if jcm.__private.JCMsolve is None:
     jcm.startup()
 
 
 if __name__ == '__main__':
     pass
-

@@ -4,7 +4,7 @@ This module defines classes and functions to extend the python interface
 of JCMwave.
 
 Copyright(C) 2016 Carlo Barth.
-*** This software project is controlled using git *** 
+*** This software project is controlled using git ***
 """
 __author__ = 'Carlo Barth'
 __copyright__ = 'Copyright 2016'
@@ -14,7 +14,7 @@ __maintainer__ = 'Carlo Barth'
 __status__ = 'Production'
 
 # Let users know if they're missing any of our hard dependencies
-# (this is section is copied from the pandas __init__.py) 
+# (this is section is copied from the pandas __init__.py)
 hard_dependencies = ('numpy', 'pandas', 'scipy', 'tables')
 missing_dependencies = []
 
@@ -26,7 +26,7 @@ for dependency in hard_dependencies:
 
 if missing_dependencies:
     raise ImportError("Missing required dependencies {0}".format(
-                                                        missing_dependencies))
+        missing_dependencies))
 
 # Start up by parsing the configuration file and importing jcmwave
 from jcmpython.internals import _config, jcm, daemon
@@ -43,6 +43,8 @@ resources = read_resources_from_config()
 __logger.debug('Found resources: {}'.format(resources))
 
 # Some extra functionality
+
+
 def jcm_version_info(log=True, return_output=False):
     out, _, _ = jcm.__private.call_tool(jcm.__private.JCMsolve, '--version')
     if log:
@@ -51,8 +53,9 @@ def jcm_version_info(log=True, return_output=False):
     if return_output:
         return out.strip()
 
+
 def jcm_license_info(log=True, return_output=False):
-    out, _, _ = jcm.__private.call_tool(jcm.__private.JCMsolve, 
+    out, _, _ = jcm.__private.call_tool(jcm.__private.JCMsolve,
                                         '--license_info')
     if log:
         for line in out.splitlines():
@@ -62,7 +65,7 @@ def jcm_license_info(log=True, return_output=False):
 
 # Parse the version of JCMsuite
 from re import search
-matches = search('Version\s*\d*\\.\d*\\.\d*', jcm_version_info(False,True))
+matches = search('Version\s*\d*\\.\d*\\.\d*', jcm_version_info(False, True))
 if matches is None:
     __jcm_version__ = None
     __logger.warn('Unable to parse the version of JCMsuite.')
@@ -74,10 +77,15 @@ from . import utils
 
 # Function to load extensions
 extensions = ['materials']
+
+
 def load_extension(ext_name):
-    """Loads the specified extension of jcmpython. See `jcmpython.extensions`
-    for a list of extensions."""
-    if not ext_name in extensions:
+    """Loads the specified extension of jcmpython.
+
+    See `jcmpython.extensions` for a list of extensions.
+
+    """
+    if ext_name not in extensions:
         __logger.warn('Unknown extension: {}'.format(ext_name))
         return
     if ext_name == 'materials':
