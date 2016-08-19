@@ -55,7 +55,7 @@ def main():
     
     try:
         import jcmpython as jpy
-    except:
+    except Exception as e:
         fout.write(fmt('jcmpython->ImportError', e))
         fout.write('\nLeaving.')
         fout.close()
