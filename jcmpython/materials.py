@@ -367,7 +367,7 @@ class MaterialData(object):
             self.kInterp = pchip(data['wvl'], data['k'])
         self.interpolaterSet = True
 
-    def getAllInfo(self):
+    def getAllInfo(self, log=True, return_output=False):
         """prints out all available accompanying data (wavelength range,
         references, comments)"""
 
@@ -381,16 +381,17 @@ class MaterialData(object):
                             '\n\t{0}\n'.format(self.getKnownMaterials()) +
                             'Please specify shelf, book and ymlFile instead.')
         mat = self.materials[self.material]
-
+        op_lines = []
         if self.db == 'filmetrics':
-            logger.info(
-                '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}nm:'.
+            op_lines.append(
+                u'\n***\nInfo for file: {0}\nwith wavelength range: {1}nm:'.
                 format(self.fullName, self.totalWvlRange))
-            logger.info('\tNo reference data available for filmetrics files' +
-                        ' yet.')
-            logger.info('\tPlease see' +
-                        r'http://www.filmetrics.de/refractive-index-database')
-            logger.info('***\n')
+            op_lines.append(u'No reference data available for filmetrics' +
+                            u' files yet.')
+            op_lines.append(u'Please see' +
+                            ur'http://www.filmetrics.de/'+
+                            u'refractive-index-database')
+            op_lines.append(u'***')
             return
 
         shelf = mat['shelf']
@@ -400,16 +401,21 @@ class MaterialData(object):
             yamlf = self.getYML(shelf, book, s)
             thisRange = rii.getRange(yamlf)
             info = self.getYMLinfo(shelf, book, s)
-            logger.info(
-                '***\nInfo for file:\n\t{0}\nwith wavelength range: {1}µm:'.
+            op_lines.append(
+                u'\n***\nInfo for file: {0}\nwith wavelength range: {1}µm:'.
                 format(yamlf, thisRange))
             if 'REFERENCES' in info:
-                logger.info('\n\tReferences:')
-                logger.info('\t ' + info['REFERENCES'])
+                op_lines.append(u'\nReferences:\n----------\n')
+                op_lines.append(info['REFERENCES'])
             if 'COMMENTS' in info:
-                logger.info('\n\tComments:')
-                logger.info('\t ' + info['COMMENTS'])
-            logger.info('***\n')
+                op_lines.append(u'\nComments:\n----------\n')
+                op_lines.append(info['COMMENTS'])
+            op_lines.append(u'***')
+        output = u'\n'.join(op_lines)
+        if log:
+            logger.info(output)
+        if return_output:
+            return output
 
     def checkIfSet(self):
         if self.fixedN:
@@ -499,10 +505,9 @@ class MaterialData(object):
         return np.array([np.min(perms), np.max(perms)])
 
     def plotData(self, wavelengths=None, wvlRange=None, Nvals=1000,
-                 convert=False, plotKnownValues=False, show=True):
+                 convert=True, plotKnownValues=False, show=True):
         self.checkIfSet()
         import matplotlib.pyplot as plt
-        plt.switch_backend('TkAgg')
 
         if self.fixedN:
             self.getAllInfo()
@@ -515,7 +520,7 @@ class MaterialData(object):
         else:
             wvls = np.linspace(self.totalWvlRange[0], self.totalWvlRange[1],
                                Nvals)
-        if convert:
+        if convert and (wavelengths is not None or wvlRange is not None):
             wvls = self.convertWvl(wvls)
         interp = self.getNKdata(wvls, convert=False)
 
@@ -542,7 +547,7 @@ class MaterialData(object):
         if plotKnownValues:
             plt.plot(knownDataWindow['wvl'], knownDataWindow['k'], 'o',
                      color='g', label='$k$')
-        plt.xlabel('wavelength in µm')
+        plt.xlabel(u'wavelength in µm')
         plt.ylabel('k')
         plt.autoscale(enable=True, axis='x', tight=True)
         plt.legend(frameon=False, loc='best')
