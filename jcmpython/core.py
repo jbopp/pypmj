@@ -1758,7 +1758,9 @@ class SimulationSet(object):
         # Try to add the resources
         if not self._resources_ready():
             self.add_resources()
-        self._start_simulations(N=N, processing_func=processing_func)
+        self._start_simulations(N=N, processing_func=processing_func,
+                                jcm_geo_kwargs=jcm_geo_kwargs,
+                                jcm_solve_kwargs=jcm_solve_kwargs)
         if len(self.failed_simulations) > 0:
             self.logger.warn('The following simulations failed: {}'.format(
                 [sim.number for sim in self.failed_simulations]))
