@@ -72,7 +72,10 @@ def read_resources_from_config():
             hostname = _config.get(ssec, 'hostname')
             JCM_root = _config.get(ssec, 'JCM_root')
             if JCM_root == 'AS_LOCAL':
-                JCM_root = os.path.join(_config.get('JCMsuite', 'root'),
+                JCM_root = os.path.join(_config.get('JCMsuite', 'root'), 
+                                        _config.get('JCMsuite', 'dir'))
+            else:
+                JCM_root = os.path.join(JCM_root, 
                                         _config.get('JCMsuite', 'dir'))
             login = _config.get(ssec, 'login')
             multiplicity_default = _config.getint(ssec, 'multiplicity_default')
