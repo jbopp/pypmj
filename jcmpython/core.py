@@ -374,7 +374,7 @@ class Simulation(object):
 
         """
 
-        if self.status in ['Pending', 'Failed']:
+        if self.status in ['Pending', 'Failed', 'Skipped']:
             self.logger.warn('Unable to process the results, as the status ' +
                              'of the simulation is: {}'.format(self.status))
             return
@@ -1562,6 +1562,9 @@ class SimulationSet(object):
                 # have caused to compute the geometry
                 if sim.rerun_JCMgeo:
                     force_geo_run = True
+                
+                # Set the simulation status to `Skipped`
+                sim.status = 'Skipped'
 
             # wait for N simulations to finish
             n_in_queue = len(jobIDs)
@@ -1726,6 +1729,9 @@ class SimulationSet(object):
 
         """
         if self.all_done():
+            # Set the status for all simulations to 'Skipped'
+            for sim in self.simulations:
+                sim.status = 'Skipped'
             self.logger.info('Nothing to run: all simulations finished.')
             return
 
