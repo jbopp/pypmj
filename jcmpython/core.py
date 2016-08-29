@@ -29,6 +29,7 @@ import collections
 # Get special logger instances for output which is captured from JCMgeo and
 # JCMsolve/JCMdaemon. The remaining logging in the core.module is done by
 # class specific loggers.
+logger = logging.getLogger(__name__)
 logger_JCMgeo = logging.getLogger('JCMgeo')
 logger_JCMsolve = logging.getLogger('JCMsolve')
 
@@ -40,6 +41,9 @@ DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
 # Global defaults
 SIM_DIR_FMT = 'simulation{0:06d}'
 STANDARD_DATE_FORMAT = '%y%m%d'
+NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
+if not NEW_DAEMON_DETECTED:
+    logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
 
 
 def _default_sim_wdir(storage_dir, sim_number):
@@ -307,20 +311,36 @@ class Simulation(object):
             os.makedirs(wdir)
 
         # Start to solve
-        self.jobID = jcm.solve(self.project_file_name, keys=self.keys,
-                               working_dir=wdir, **jcm_kwargs)
-        return self.jobID
+        self.job_id = jcm.solve(self.project_file_name, keys=self.keys,
+                                working_dir=wdir, **jcm_kwargs)
+        return self.job_id
 
-    def _set_jcm_results_and_logs(self, results, logs):
+    def _set_jcm_results_and_logs(self, results, logs=None):
         """Set the logs, error message, exit code and results as returned by
         JCMsolve.
 
         This also sets the status to `Failed` or `Finished`.
 
         """
-        self.logs = logs['Log']
-        self.exit_code = logs['ExitCode']
-        self.jcm_results = results
+        if NEW_DAEMON_DETECTED:
+            if logs is not None:
+                self.logger.warning('`logs` should be None if using the ' +
+                                    'new daemon, otherwise problems may ' +
+                                    'occur.')
+            self.logs = results['logs']['Log']
+            self.exit_code = results['logs']['ExitCode']
+            self.jcm_results = results['results']
+            self.resource_id = results['resource_id']
+        else:
+            if logs is None:
+                raise ValueError('`logs` can only be None if the new daemon ' +
+                                 'implementation was detected. But this is ' +
+                                 'not true on your current '+
+                                 'system/configuration.')
+            self.logs = logs['Log']
+            self.exit_code = logs['ExitCode']
+            self.jcm_results = results
+            self.resource_id = 'unknown'
 
         # Treat failed simulations
         if self.exit_code != 0:
@@ -330,18 +350,19 @@ class Simulation(object):
         # If the solve did not fail, the results dict must contain a dict with
         # the key 'computational_costs' in the topmost level. Otherwise,
         # something must be wrong.
-        if len(results) < 1:
+        if len(self.jcm_results) < 1:
             raise RuntimeError('Did not receive results from JCMsolve ' +
                                'although the exit status is 0.')
             self.status = 'Failed'
             return
-        if not isinstance(results[0], dict):
+        if not isinstance(self.jcm_results[0], dict):
             raise RuntimeError('Expecting a dict as the first element of the' +
                                ' results list, but the type is {}'.format(
-                                   type(results[0])))
+                                   type(self.jcm_results[0])))
             self.status = 'Failed'
             return
-        if 'computational_costs' not in results[0] and 'file' in results[0]:
+        if ('computational_costs' not in self.jcm_results[0] and 
+            'file' in self.jcm_results[0]):
             raise RuntimeError('Could not find info on computational costs ' +
                                'in the JCM results.')
             self.status = 'Failed'
@@ -349,7 +370,7 @@ class Simulation(object):
 
         # Everything is fine if we arrive here. We also read the fieldbag file
         # path from the results
-        self.fieldbag_file = results[0]['file']
+        self.fieldbag_file = self.jcm_results[0]['file']
         self.status = 'Finished'
 
     def process_results(self, processing_func=None, overwrite=False):
@@ -396,7 +417,6 @@ class Simulation(object):
         # Process the computational costs
         self._results_dict = utils.computational_costs_to_flat_dict(
             self.jcm_results[0]['computational_costs'])
-#         self._results_dict['fieldbag_file'] = self.fieldbag_file
         self.status = 'Finished and processed'
 
         # Stop here if processing_func is None
@@ -1486,6 +1506,16 @@ class SimulationSet(object):
 
         # Solve the simulation and wait for it to finish. Output is captured
         # and passed to the logger
+        # ---
+        # This is the new daemon style version
+        if NEW_DAEMON_DETECTED:
+            simulation.solve(**jcm_solve_kwargs)
+            results = daemon.wait(return_style='new')
+            result = results.values()[0]
+            simulation._set_jcm_results_and_logs(result)
+            return result['results'], result['logs']
+        
+        # This is the old daemon style version
         with utils.Capturing() as output:
             simulation.solve(**jcm_solve_kwargs)
             results, logs = daemon.wait()
@@ -1511,8 +1541,8 @@ class SimulationSet(object):
         """
         self.logger.info('Starting to solve.')
 
-        jobIDs = []
-        ID2simNumber = {}  # dict to find the simulation number from the job ID
+        job_ids = []
+        ids_to_sim_number = {}  # dict to find the sim-number from the job id
         self.failed_simulations = []
         self.processing_func = processing_func
 
@@ -1551,12 +1581,12 @@ class SimulationSet(object):
                     force_geo_run = False
 
                 # Start to solve the simulation and receive a job ID
-                jobID = sim.solve(**jcm_solve_kwargs)
+                job_id = sim.solve(**jcm_solve_kwargs)
                 self.logger.debug(
-                    'Queued simulation {0} of {1} with jobID {2}'.
-                    format(i + 1, self.num_sims, sim.jobID))
-                jobIDs.append(jobID)
-                ID2simNumber[jobID] = sim.number
+                    'Queued simulation {0} of {1} with job_id {2}'.
+                    format(i + 1, self.num_sims, sim.job_id))
+                job_ids.append(job_id)
+                ids_to_sim_number[job_id] = sim.number
             else:
                 # Set `force_geo_run` to True if this finished simulation would
                 # have caused to compute the geometry
@@ -1567,17 +1597,17 @@ class SimulationSet(object):
                 sim.status = 'Skipped'
 
             # wait for N simulations to finish
-            n_in_queue = len(jobIDs)
+            n_in_queue = len(job_ids)
             if n_in_queue != 0:
                 if (n_in_queue != 0 and
                         (n_in_queue >= N or (i + 1) == self.num_sims)):
                     self.logger.info('Waiting for {} '.format(n_in_queue) +
                                      'simulation(s) to finish (' +
-                                     '{} remaining in total).'.format(
-                        n_sims_todo))
-                    self._wait_for_simulations(jobIDs, ID2simNumber)
-                    jobIDs = []
-                    ID2simNumber = {}
+                                     '{} remaining in total).'.
+                                     format(n_sims_todo))
+                    self._wait_for_simulations(job_ids, ids_to_sim_number)
+                    job_ids = []
+                    ids_to_sim_number = {}
 
                     # Update the global counters
                     n_sims_todo -= n_in_queue
@@ -1602,29 +1632,100 @@ class SimulationSet(object):
 
                     # Reset the round counter and timer
                     t0 = time.time()
-
-    def _wait_for_simulations(self, ids2waitFor, ID2simNumber):
-        """Waits for the job IDS in the list `ids2waitFor` to finish using
-        daemon.wait.
+    
+    def _wait_for_simulations(self, ids_to_wait_for, ids_to_sim_number):
+        """Waits for the job ids in the list `ids_to_wait_for` to finish using
+        daemon.wait by passing to `_wait_for_simulations_new` or 
+        `_wait_for_simulations_old`, depending on whether the new or the old
+        daemon interface was detected on the system.
 
         Failed simulations are appended to the list
         `self.failed_simulations`, while successful simulations are
         processed and stored.
-
+        
+        Parameters
+        ----------
+        ids_to_wait_for : sequence
+            List of job ids to wait for execution. These ids are passed to the
+            `daemon.wait()`-method.
+        ids_to_sim_number : dict
+            Dictionary that connects job id and simulation number. 
+        
+        """       
+        if NEW_DAEMON_DETECTED:
+            self._wait_for_simulations_new(ids_to_wait_for, ids_to_sim_number)
+        else:
+            self._wait_for_simulations_old(ids_to_wait_for, ids_to_sim_number)
+    
+    def _wait_for_simulations_new(self, ids_to_wait_for, ids_to_sim_number):
+        """Waits for the job IDS in the list `ids_to_wait_for` to finish using
+        daemon.wait and the *new* daemon interface.
+        
+        See the `_wait_for_simulations`-method for details.
         """
         # Wait for all simulations using daemon.wait with
         # break_condition='any'. In each loop, the results are directly
         # processed and saved
         nFinished = 0
-        nTotal = len(ids2waitFor)
-        self.logger.debug('Waiting for jobIDs: {}'.format(ids2waitFor))
+        nTotal = len(ids_to_wait_for)
+        self.logger.debug('Waiting for job_ids: {}'.format(ids_to_wait_for))
         while nFinished < nTotal:
-            # wait till any simulations are finished
-            # deepcopy is needed to protect ids2waitFor from being modified
-            # by daemon.wait
+            # wait until any of the simulations is finished
+            results = daemon.wait(ids_to_wait_for, break_condition='any',
+                                  return_style='new')
+
+            # Get lists for the IDs of the finished jobs and the corresponding
+            # simulation numbers
+            finished_ids = list(results.keys())
+            for id_ in finished_ids:
+                sim_number = ids_to_sim_number[id_]
+                sim = self.simulations[sim_number]
+                # Add the computed results to the Simulation-instance, ...
+                sim._set_jcm_results_and_logs(results[id_])
+                # Check whether the simulation failed
+                if sim.status == 'Failed':
+                    self.failed_simulations.append(sim)
+                else:
+                    # process them, ...
+                    sim.process_results(self.processing_func)
+                    # and append them to the HDF5 store
+                    self.append_store(sim._get_DataFrame())
+
+                # Remove/zip all working directories of the finished 
+                # simulations if wdir_mode is 'zip'/'delete'
+                if self._wdir_mode in ['zip', 'delete']:
+                    # Zip the working_dir if the simulation did not fail
+                    if (self._wdir_mode == 'zip' and
+                            sim not in self.failed_simulations):
+                        utils.append_dir_to_zip(sim.working_dir(),
+                                                self._zip_file_path)
+                    sim.remove_working_directory()
+
+            # Update the number of finished jobs and the list with ids_to_wait_for
+            nFinished += len(finished_ids)
+            ids_to_wait_for = [id_ for id_ in ids_to_wait_for
+                               if id_ not in finished_ids]
+
+    def _wait_for_simulations_old(self, ids_to_wait_for, ids_to_sim_number):
+        """Waits for the job IDS in the list `ids_to_wait_for` to finish using
+        daemon.wait and the *old* daemon interface.
+
+        See the `_wait_for_simulations`-method for details.
+        """
+        # Wait for all simulations using daemon.wait with
+        # break_condition='any'. In each loop, the results are directly
+        # processed and saved
+        nFinished = 0
+        nTotal = len(ids_to_wait_for)
+        self.logger.debug('Waiting for job_ids: {}'.format(ids_to_wait_for))
+        while nFinished < nTotal:
+            # wait until any of the simulations is finished
+            # deepcopy is needed to protect ids_to_wait_for from being modified
+            # by the old daemon.wait implementation
             with utils.Capturing() as output:
-                indices, thisResults, logs = daemon.wait(deepcopy(ids2waitFor),
-                                                         break_condition='any')
+                indices, thisResults, logs = daemon.wait(
+                                                    deepcopy(ids_to_wait_for),
+                                                    break_condition='any')
             for line in output:
                 logger_JCMsolve.debug(line)
 
@@ -1633,8 +1734,8 @@ class SimulationSet(object):
             finishedIDs = []
             finishedSimNumbers = []
             for ind in indices:
-                ID = ids2waitFor[ind]
-                iSim = ID2simNumber[ID]
+                ID = ids_to_wait_for[ind]
+                iSim = ids_to_sim_number[ID]
                 finishedIDs.append(ID)
                 finishedSimNumbers.append(iSim)
 
@@ -1662,9 +1763,11 @@ class SimulationSet(object):
                                                 self._zip_file_path)
                     sim.remove_working_directory()
 
-            # Update the number of finished jobs and the list with ids2waitFor
+            # Update the number of finished jobs and the list with 
+            # ids_to_wait_for
             nFinished += len(indices)
-            ids2waitFor = [ID for ID in ids2waitFor if ID not in finishedIDs]
+            ids_to_wait_for = [ID for ID in ids_to_wait_for 
+                               if ID not in finishedIDs]
 
     def _is_scheduled(self):
         """Checks if make_simulation_schedule was executed."""

@@ -288,7 +288,7 @@ class Test_Run_JCM(unittest.TestCase):
     def test_run_and_proc(self):
         self.sset.run(processing_func=DEFAULT_PROCESSING_FUNC)
         self.assertTrue('SCS' in self.sset.simulations[0]._results_dict)
-
+ 
         # CSV export
         self.sset.write_store_data_to_file()
         try:
