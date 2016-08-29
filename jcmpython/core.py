@@ -900,6 +900,9 @@ class SimulationSet(object):
         checks the HDF5 store for simulation data which is already known."""
         self._get_simulation_list()
         self._sort_simulations()
+        
+        # Init the failed simulation list
+        self.failed_simulations = []
 
         # We perform the pre-check to see the state of our HDF5 store.
         #   * If it is empty, we store the current metadata and are ready to
@@ -910,6 +913,7 @@ class SimulationSet(object):
         #     missing ones
         #   * If the status is 'Extended Check', we will need to compare the
         #     stored data to the one we want to compute currently
+        
         precheck = self._precheck_store()
         self.logger.debug('Result of the store pre-check: {}'.format(precheck))
         if precheck == 'Empty':
@@ -1526,30 +1530,46 @@ class SimulationSet(object):
         simulation._set_jcm_results_and_logs(results[0], logs[0])
         return results[0], logs[0]
 
-    def _start_simulations(self, N='all', processing_func=None,
-                           jcm_geo_kwargs={}, jcm_solve_kwargs={}):
+    def _start_simulations(self, N='all', processing_func=None, 
+                           jcm_geo_kwargs=None, jcm_solve_kwargs=None):
         """Starts all simulations, `N` at a time, waits for them to finish
         using `_wait_for_simulations` and processes the results using the
         `processing_func`.
-
-        `jcm_geo_kwargs` and `jcm_solve_kwargs` are dicts of keyword
-        arguments which are directly passed to jcm.geo and jcm.solve,
-        respectively. Please consult the docs of the Simulation
-        .process_results-method for info on how to use the
-        processing_func.
+        
+        Parameters
+        ----------
+        N : int or 'all', default 'all'
+            Number of simulations that will be pushed to the jcm.daemon at a
+            time. If 'all', all simulations will be pushed at once. If many
+            simulations are pushed to the daemon, the number of files and the
+            size on disk can grow dramatically. This can be avoided by using
+            this parameter, while deleting or zipping the working directories
+            at the same time using the `wdir_mode` parameter.
+        processing_func : callable or NoneType, default None
+            Function for result processing. If None, only a standard processing
+            will be executed. See the docs of the
+            Simulation.process_results-method for more info on how to use this
+            parameter.
+        jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
+            Keyword arguments which are directly passed to jcm.geo and
+            jcm.solve, respectively.
 
         """
         self.logger.info('Starting to solve.')
 
         job_ids = []
         ids_to_sim_number = {}  # dict to find the sim-number from the job id
-        self.failed_simulations = []
         self.processing_func = processing_func
 
         if N == 'all':
             N = self.num_sims
         if not isinstance(N, int):
             raise ValueError('`N` must be an integer or "all"')
+        
+        if jcm_geo_kwargs is None:
+            jcm_geo_kwargs = {}
+        if jcm_solve_kwargs is None:
+            jcm_solve_kwargs = {}
 
         # We only want to compute the geometry if necessary, which is
         # controlled using the `rerun_JCMgeo`-attribute of the Simulation-
@@ -1593,8 +1613,11 @@ class SimulationSet(object):
                 if sim.rerun_JCMgeo:
                     force_geo_run = True
                 
-                # Set the simulation status to `Skipped`
-                sim.status = 'Skipped'
+                # If the simulation was not finished (and processed), it was
+                # already in the HDF5 store and we set tits status to
+                # `Skipped`. 
+                if not sim.status in ['Finished', 'Finished and processed']:
+                    sim.status = 'Skipped'
 
             # wait for N simulations to finish
             n_in_queue = len(job_ids)
@@ -1684,8 +1707,12 @@ class SimulationSet(object):
                 sim._set_jcm_results_and_logs(results[id_])
                 # Check whether the simulation failed
                 if sim.status == 'Failed':
-                    self.failed_simulations.append(sim)
+                    if not sim in self.failed_simulations:
+                        self.failed_simulations.append(sim)
                 else:
+                    if sim in self.failed_simulations:
+                        self.failed_simulations.remove(sim)
+                    self.finished_sim_numbers.append(sim.number)
                     # process them, ...
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
@@ -1796,14 +1823,15 @@ class SimulationSet(object):
             return False
         return set(range(self.num_sims)) == set(self.finished_sim_numbers)
 
-    def run(self, processing_func=None, N='all', wdir_mode='keep',
-            zip_file_path=None, jcm_geo_kwargs={}, jcm_solve_kwargs={}):
+    def run(self, processing_func=None, N='all', auto_rerun_failed=1,
+            wdir_mode='keep', zip_file_path=None, jcm_geo_kwargs=None,
+            jcm_solve_kwargs=None):
         """Convenient function to add the resources, run all necessary
         simulations and save the results to the HDF5 store.
 
         Parameters
         ----------
-        processing_func : callable or None, default None
+        processing_func : callable or NoneType, default None
             Function for result processing. If None, only a standard processing
             will be executed. See the docs of the
             Simulation.process_results-method for more info on how to use this
@@ -1815,6 +1843,10 @@ class SimulationSet(object):
             size on disk can grow dramatically. This can be avoided by using
             this parameter, while deleting or zipping the working directories
             at the same time using the `wdir_mode` parameter.
+        auto_rerun_failed : int or bool, default 1
+            Controls whether/how often a simulation which failed is
+            automatically rerun. If False or 0, no automatic rerunning
+            will be done.
         wdir_mode : {'keep', 'zip', 'delete'}, default 'keep'
             The way in which the working directories of the simulations are
             treated. If 'keep', they are left on disk. If 'zip', they are
@@ -1826,9 +1858,9 @@ class SimulationSet(object):
             Path to the zip file if `wdir_mode` is 'zip'. The file is created
             if it does not exist. If None, the default file name
             'working_directories.zip' in the current `storage_dir` is used.
-
-        `jcm_geo_kwargs` and `jcm_solve_kwargs` are dicts of keyword arguments
-        which are directly passed to jcm.geo and jcm.solve, respectively.
+        jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
+            Keyword arguments which are directly passed to jcm.geo and
+            jcm.solve, respectively.
 
         """
         if self.all_done():
@@ -1852,7 +1884,12 @@ class SimulationSet(object):
         if wdir_mode not in ['keep', 'zip', 'delete']:
             raise ValueError('Unknown wdir_mode: {}'.format(wdir_mode))
             return
-
+        
+        if jcm_geo_kwargs is None:
+            jcm_geo_kwargs = {}
+        if jcm_solve_kwargs is None:
+            jcm_solve_kwargs = {}
+        
         # Add class attributes for `_wait_for_simulations`
         self._wdir_mode = wdir_mode
         self._zip_file_path = zip_file_path
@@ -1866,11 +1903,22 @@ class SimulationSet(object):
         # Try to add the resources
         if not self._resources_ready():
             self.add_resources()
-        self._start_simulations(N=N, processing_func=processing_func,
-                                jcm_geo_kwargs=jcm_geo_kwargs,
-                                jcm_solve_kwargs=jcm_solve_kwargs)
-        if len(self.failed_simulations) > 0:
-            self.logger.warn('The following simulations failed: {}'.format(
+        
+        # Start the simulations until all simulations are finished or the
+        # maximum `auto_rerun_failed` is exceeded
+        n_trials = -1
+        while n_trials < auto_rerun_failed:
+            if n_trials > -1:
+                self.logger.info('Rerunning failed simulations: trial {}/{}'.
+                                 format(n_trials+1,int(auto_rerun_failed)))
+            self._start_simulations(N=N, processing_func=processing_func,
+                                    jcm_geo_kwargs=jcm_geo_kwargs,
+                                    jcm_solve_kwargs=jcm_solve_kwargs)
+            n_trials += 1
+            if len(self.failed_simulations) == 0:
+                break
+            else:
+                self.logger.warn('The following simulations failed: {}'.format(
                 [sim.number for sim in self.failed_simulations]))
 
         # Delete/zip working directories from previous runs if needed
