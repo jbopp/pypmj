@@ -318,8 +318,7 @@ class Simulation(object):
         This also sets the status to `Failed` or `Finished`.
 
         """
-        self.logs = logs['Log']['Out']
-        self.error_message = logs['Log']['Error']
+        self.logs = logs['Log']
         self.exit_code = logs['ExitCode']
         self.jcm_results = results
 
