@@ -578,10 +578,10 @@ class SimulationSet(object):
             so that N simulations are performed, using the value of the i-th
             element of each sequence in simulation i.
     check_version_match : bool, default True
-        Controls if the versions of JCMsuite and jcmpython are compared to the
-        versions that were used when the HDF5 store was used. This has no
-        effect if no HDF5 is present, i.e. if you are starting with an empty
-        working directory.
+        Controls whether the versions of JCMsuite and jcmpython are compared
+        to the versions that were used when the HDF5 store was created. This
+        has no effect if no HDF5 store is present, i.e. if you are starting
+        with an empty working directory.
 
     """
 
