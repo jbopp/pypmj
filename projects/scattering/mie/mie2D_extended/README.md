@@ -5,7 +5,7 @@ containing a larger number of parameters, e.g. for convergence testing.
 It describes the light scattering off an infinite glass rod. The surroundings 
 consist of air. The incoming light field has a vacuum wavelength of
 $\lambda_0=550\,\mathrm{nm}$ and is polarized in $z$-direction with amplitude 
-equal to one. The radius of the glass rod is parametrized. It has a fixed
+equal to one. The radius of the glass rod is parameterized. It has a fixed
 refractive index of $n=1.52$. *Please see the [online tutorial][JCMtutorial] for
 more information*.
 
@@ -46,14 +46,14 @@ electric field strength.*
 ## Project specific
 
 - `fem_degree_max`: The maximum FEM degree used in the adaptive approach
-- `precision_field_energy`: `PrecisionFieldEnergy` termination criterion of the
-adaptive refinement
+- `precision_field_energy`: `Precision` parameter in Scattering->Accuracy section,
+controlling the numerical accuracy of the near field.
 
 ## Geometry specific
 
 - `radius`: The radius of the glass sphere in µm.
-- `slc_domain`: Side length constraint of air surrounding the glass rod
-- `slc_circle`: Side length constraint of the glass rod
+- `slc_domain`: Maximum side length of air surrounding the glass rod
+- `slc_circle`: Maximum side length of the glass rod
 - `refine_all_circle`: Number of subsequent segmentations of the glass rod
 
 ## Material specific
@@ -83,7 +83,7 @@ def read_scs(pp):
 
 Please see the *Using jcmpython - the mie2D-project* notebook in the `examples`
 directory shipped with jcmpython. It provides a detailed explanation on how to
-run the mie2D project, which is the less parametrized version of this project.
+run the mie2D project, which is the less parameterized version of this project.
 A tutorial on running convergence tests can be found in the *Running
 convergence tests* notebook, which uses this project. 
 

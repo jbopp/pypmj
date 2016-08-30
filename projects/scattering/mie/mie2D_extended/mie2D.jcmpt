@@ -4,17 +4,15 @@ Project = {
     TimeHarmonic {
       Scattering {
         FieldComponents = Electric
-        Accuracy{
-            FiniteElementDegree{
-                Adaptive{
-	                MaximumDegree=%(fem_degree_max)i
-	            }
-	        }
-	    }
-        Refinement = {
-          Adaptivity = yes
-          Termination {
-            PrecisionFieldEnergy = %(precision_field_energy)e
+        Accuracy {
+          FiniteElementDegree {
+            Adaptive{
+              MaximumDegree = %(fem_degree_max)i
+            }
+          }
+          Precision = %(precision_field_energy)e
+          Refinement {
+            Adaptivity = yes
           }
         }
       }
@@ -22,7 +20,7 @@ Project = {
   }
 }
 
-# computes the energy flux of the scattered field into the exterior domain
+# Computes the energy flux of the scattered field into the exterior domain
 PostProcess {
   FluxIntegration {
     FieldBagPath = "./mie2D_results/fieldbag.jcm"
@@ -31,6 +29,5 @@ PostProcess {
     InterfaceType = ExteriorDomain
   }
 }
-
 
 

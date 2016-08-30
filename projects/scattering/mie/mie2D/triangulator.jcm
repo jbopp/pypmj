@@ -1,7 +1,0 @@
-GeoControl {
-  Triangulator {
-    MinimumAngle = 15.0
-  }
-}
-
-

@@ -7,18 +7,16 @@ Project {
       Scattering {
         FieldComponents = Electric 
         Accuracy{
-	  FiniteElementDegree{
-	    Adaptive{
-          MinimumDegree= %(fem_degree_min)i
-	      MaximumDegree= %(fem_degree_max)i
-	    }
-	  }
-	}
-        Refinement {
-          Adaptivity = yes
-          MaxNumberSteps = %(n_refinement_steps)i
-          Termination {
-            PrecisionFieldEnergy = %(precision_field_energy)e
+          Precision = %(precision_field_energy)e
+    	  FiniteElementDegree{
+    	    Adaptive{
+              MinimumDegree= %(fem_degree_min)i
+    	      MaximumDegree= %(fem_degree_max)i
+    	    }
+    	  }
+          Refinement {
+            Adaptivity = yes
+            MaxNumberSteps = %(n_refinement_steps)i
           }
         }
         PML {
