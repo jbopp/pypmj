@@ -1,5 +1,6 @@
-"""The core functionality of jcmpython. Defines the classes JCMProject,
-Simulation and SimulationSet.
+"""Defines the centerpiece class `SimulationSet` of jcmpython and the
+abstraction layers for projects, single simulations. Also, more specialized
+simulation sets such as the `ConvergenceTest`-class are defined here.
 
 Authors : Carlo Barth
 

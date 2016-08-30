@@ -1,10 +1,26 @@
+"""
+jcmpython
+=========
 
-__doc__ = """
-This module defines classes and functions to extend the python interface
-of JCMwave.
+The jcmpython package extends the python interface shipped with the finite
+element Maxwell solver JCMsuite, distributed by the JCMwave GmbH.
+
+It simplifies the setup, execution and data storage of JCMsuite simulations.
+Some of the main advantages are:
+  - The JCMsuite installation directory, the preferred storage directories and
+    computation resources can be set up using a configuration file. 
+  - Projects can be collected in one place as a project library and used from
+    there.
+  - Parameter scans can be efficiently executed and evaluated using the
+    `SimulationSet` class. Different combinations of input parameter lists
+    make nested loops unnecessary.
+  - User defined processing of post process results.
+  - Computational costs and user results are efficiently stored in an HDF5
+    data base.
+  - Automatic detection of known results in the database.
 
 Copyright(C) 2016 Carlo Barth.
-*** This software project is controlled using git ***
+(* This software project is controlled using git *)
 """
 __author__ = 'Carlo Barth'
 __copyright__ = 'Copyright 2016'

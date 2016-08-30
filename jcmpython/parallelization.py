@@ -1,5 +1,8 @@
-"""Class definitions for convenient usage of the jcmwave.daemon, used to run
-jobs in parallel.
+"""Definitions classes for convenient usage of the jcmwave.daemon to run
+jobs in parallel. The class `DaemonResource` gives eaccess to both,
+workstations and queues and eases their configuration. The
+`ResourceDict`-class serves as a set of such resources and provides methods
+to set their properties all at once.
 
 Authors : Carlo Barth
 
@@ -39,6 +42,10 @@ class DaemonError(Exception):
 
 
 def savely_convert_config_value(value):
+    """Tries to convert a configuration value from a string type to int.
+    If `value` is not a string type,  a `ConfigurationError` is raised.
+    If `value` does not consist of digits only, the input string is
+    returned."""
     exc_msg = 'Unable to convert configuration value: {}.'.format(value)
     if not isinstance(value, string_types):
         raise ConfigurationError(exc_msg)

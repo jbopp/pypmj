@@ -1,4 +1,6 @@
-"""Utility functions.
+"""Defines functions and classes which are internally used in all parts of
+jcmpython, but may also be relevant to the user. Most importantly, the
+functions `run_simusets_in_save_mode` and `send_status_email` are defined here.
 
 Authors : Carlo Barth
 
