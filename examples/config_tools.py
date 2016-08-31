@@ -24,8 +24,9 @@ def get_config_parser():
     config.set('DEFAULTS', 'database_tab_name', 'data')
     return config
 
-def add_server(config, hostname, login, JCM_root=None, multiplicity_default=1, 
-               n_threads_default=1, stype='Workstation', nickname=None, 
+def add_server(config, hostname, login='', JCM_root=None,
+               multiplicity_default=1, n_threads_default=1, 
+               stype='Workstation', nickname=None, 
                **kwargs):
     """Adds a server section to the configuration file.
     
@@ -35,12 +36,12 @@ def add_server(config, hostname, login, JCM_root=None, multiplicity_default=1,
         The config parser to which the server section should be added.
     hostname : str
         Hostname of the server as it would be used for e.g. ssh. Use `localhost`
-        for the local computer. 
+        for the local computer.
+    login : str, default ''
+        The username used for login (a password-free login is required)
     JCM_root : str (path), default None
         Path to the JCMsuite root installation folder. If None, the same path
         as on the local computer is assumed.
-    login : str
-        The username used for login (a password-free login is required)
     multiplicity_default : int
         The default number of CPUs to use on this server.
     n_threads_default : int
