@@ -6,7 +6,8 @@ Authors : Carlo Barth
 
 """
 
-from jcmpython.internals import _config, daemon, _IS_PYTHON3
+from jcmpython import _config, daemon
+from jcmpython.internals import _IS_PYTHON3
 import collections
 if _IS_PYTHON3:
     from io import StringIO

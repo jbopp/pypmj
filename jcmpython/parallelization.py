@@ -59,7 +59,7 @@ def savely_convert_config_value(value):
     return value
 
 
-def read_resources_from_config():
+def read_resources_from_config(daemon_):
     """Reads all server configurations from the configuration file.
 
     It is assumed that each server is in a section starting with
@@ -101,8 +101,8 @@ def read_resources_from_config():
                          for o in manual_options}
 
         # Initialize the DaemonResource instance
-        resources[nickname] = DaemonResource(hostname, login, JCM_root,
-                                             multiplicity_default,
+        resources[nickname] = DaemonResource(daemon_, hostname, login,
+                                             JCM_root, multiplicity_default,
                                              n_threads_default,
                                              stype, nickname, **manual_kwargs)
     return resources
@@ -110,10 +110,45 @@ def read_resources_from_config():
 
 # =============================================================================
 class DaemonResource(object):
-    """"""
+    """
+    Computation resource that can be used by the daemon-module of the JCMsuite
+    python interface. This can be a workstation or a queue.
+    
+    Holds all properties which are necessary to call the `add_workstation` or
+    `add_queue` methods of the `jcmwave.daemon`. Frequently changed attributes
+    like the multiplicity and the number of threads can be changed by
+    convenient methods. Default values for these properties can be restored,
+    just as every other state can be saved and restored.
+    
+    Parameters
+    ----------
+    daemon_ : module
+        The `daemon` submodule of the `jcmwave` package delivered with your
+        JCMsuite installation.
+    hostname : str
+        Hostname of the server as it would be used for e.g. ssh. Use `localhost`
+        for the local computer. 
+    JCM_root : str (path), default None
+        Path to the JCMsuite root installation folder. If None, the same path
+        as on the local computer is assumed.
+    login : str
+        The username used for login (a password-free login is required)
+    multiplicity_default : int
+        The default number of CPUs to use on this server.
+    n_threads_default : int
+        The default number of threads per CPU to use on this server.
+    stype : {'Workstation', 'Queue'}
+        Type of the resource to use in the JCMsuite daemon utility.
+    nickname : str, default None
+        Shorthand name to use for this server. If None, the `hostname` is used.
+    **kwargs
+        Add additional key-value pairs to pass to the daemon functions (which
+        are `add_workstation` and `add_queue`) on your own risk.
+    """
 
-    def __init__(self, hostname, login, JCM_root, multiplicity_default,
+    def __init__(self, daemon_, hostname, login, JCM_root, multiplicity_default,
                  n_threads_default, stype, nickname, **kwargs):
+        self.daemon = daemon_
         self.hostname = hostname
         self.login = login
         self.JCM_root = JCM_root
@@ -180,9 +215,9 @@ class DaemonResource(object):
     def _add_type_dependent(self):
         """Adds the current ressource depending on the stype."""
         if self.stype == 'Workstation':
-            func = daemon.add_workstation
+            func = self.daemon.add_workstation
         else:
-            func = daemon.add_queue
+            func = self.daemon.add_queue
         try:
             IDs = func(Hostname=self.hostname,
                        JCMROOT=self.JCM_root,

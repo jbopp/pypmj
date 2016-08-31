@@ -9,8 +9,8 @@ Authors : Carlo Barth
 # Imports
 # =============================================================================
 import logging
-from jcmpython.internals import jcm, daemon, _config, ConfigurationError
-from jcmpython import resources, __version__, __jcm_version__
+from jcmpython import (jcm, daemon, resources, __version__, __jcm_version__,
+                       _config, ConfigurationError)
 from jcmpython.parallelization import ResourceDict
 from copy import deepcopy
 from datetime import date
@@ -25,7 +25,6 @@ from six import string_types
 import sys
 import time
 from . import utils
-import collections
 
 # Get special logger instances for output which is captured from JCMgeo and
 # JCMsolve/JCMdaemon. The remaining logging in the core.module is done by

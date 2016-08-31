@@ -65,7 +65,8 @@ if not __version_to_tuple(pd.__version__) > (0,17,0):
 # ==============================================================================
 
 # Start up by setting up the configuration
-from jcmpython.internals import _config, ConfigurationError
+from jcmpython.internals import (_config, ConfigurationError,
+                                 _JCMPNotLoadedExceptionRaiser)
 __jcm_version__ = None
 jcm = None
 daemon = None
@@ -79,7 +80,15 @@ __logger = __logging.getLogger('init')
 # Further imports
 from .parallelization import (read_resources_from_config, DaemonResource, 
                               ResourceDict)
-resources = ResourceDict()
+from . import utils
+
+# Placeholders for not yet accessible attributes. These will be overwritten
+# if jcmwave is imported.
+resources = _JCMPNotLoadedExceptionRaiser('resources')
+JCMProject = _JCMPNotLoadedExceptionRaiser('JCMProject')
+Simulation = _JCMPNotLoadedExceptionRaiser('Simulation')
+SimulationSet = _JCMPNotLoadedExceptionRaiser('SimulationSet')
+ConvergenceTest = _JCMPNotLoadedExceptionRaiser('ConvergenceTest')
 
 
 # Module methods for info, jcmwave import and configuration/logging set-up
@@ -162,7 +171,17 @@ def import_jcmwave(jcm_install_path=None):
                   format(_config.read_jcm_install_dir()))
     
     # Set up the resources
-    _set_up_resources()
+    _set_up_resources(daemon)
+    
+    # Update the daemon object in utils
+    utils.daemon = daemon
+    
+    # Import the core classes
+    global JCMProject
+    global Simulation
+    global SimulationSet
+    global ConvergenceTest
+    from .core import JCMProject, Simulation, SimulationSet, ConvergenceTest
 
 def set_log_file(directory='logs', filename='from_date'):
     """Sets up the logging to a log-file if this is not already configured.
@@ -193,7 +212,7 @@ def load_config_file(filepath):
 # Resource handling
 # ==============================================================================
 
-def _set_up_resources():
+def _set_up_resources(daemon_):
     """Reads the resource information from the current configuration and
     sets the module attribute `resources`. `resources` is a `ResourceDict`
     which holds references to and manages all workstations and queues (incl.
@@ -203,7 +222,7 @@ def _set_up_resources():
                            'imported.')
     __logger.debug('Initializing resources from configuration.')
     global resources
-    resources = read_resources_from_config()
+    resources = read_resources_from_config(daemon_)
     __logger.debug('Found resources: {}'.format(resources))
 
 
@@ -230,26 +249,14 @@ def load_extension(ext_name):
             __logger.warn('Unable to load extension `{}`: {}'.format(ext_name,
                                                                      e))
 
-# ==============================================================================
-
+# =============================================================================
 
 # Import jcmwave here if the configuration is complete
 if _config.ready:
     import_jcmwave()
 
-#  
-# from .parallelization import read_resources_from_config, DaemonResource
-# # initialize the daemon resources and load them into the namespace
-# __logger.debug('Initializing resources from configuration.')
-# resources = read_resources_from_config()
-# __logger.debug('Found resources: {}'.format(resources))
-  
  
-
- 
-# from .core import JCMProject, Simulation, SimulationSet, ConvergenceTest
-# from . import utils
- 
-
+if __name__ == '__main__':
+    pass
 
 

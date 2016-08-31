@@ -18,8 +18,29 @@ else:
     from ConfigParser import ConfigParser
 
 
-# A custom exception for configuration errors
+# Classes
 # =============================================================================
+
+
+class NotSetUpError(Exception):
+    """Exception raised if `jcmpython` is not fully set up.
+
+    Attributes
+    ----------
+    expression
+        Input expression in which the error occurred.
+    message : str
+        Explanation of the error.
+
+    """
+
+    def __init__(self, message):
+        self.message = '`jcmpython` is not ready to run. ' + message
+
+    def __str__(self):
+        return self.message
+
+
 class ConfigurationError(Exception):
     """Exception raised for errors in the configuration.
 
@@ -39,10 +60,36 @@ class ConfigurationError(Exception):
         return self.message
 
 
-# A custom class for the jcmpython configuration
-# =============================================================================
+class _JCMPNotLoadedExceptionRaiser(object):
+    """
+    Placeholder class for module classes which are not yet accessible due to
+    an incomplete set-up of `jcmpython`. This is the case if jcmwave is not
+    properly imported. If an instance of this class is called, it raises a
+    `NotSetUpError`.
+    """
+    
+    def __init__(self, name):
+        self.name = name
+    
+    def __repr__(self):
+        return 'Unloaded module attribute with name "{}"'.format(self.name)
+    
+    def __call__(self, *args, **kwargs):
+        raise NotSetUpError('The class "{}" is not yet accessible, as '.
+                            format(self.name) +
+                            'jcmwave is not imported properly.')
+
+
 class JCMPConfiguration(ConfigParser):
     """
+    A custom configuration parser based on the `ConfigParser`.
+    
+    This configuration parser automatically looks for a configuration file on
+    init in the environment variable 'JCMPYTHON_CONFIG_FILE' or otherwise in
+    the current directory (must be named 'config.cfg'). A default configuration
+    for jcmpython is generated and, if a config file was found, updated with
+    present values in the config file. Setting a config file is also possible
+    after initialization using the `set_config_file`-method.
     
     """
     
@@ -57,59 +104,6 @@ class JCMPConfiguration(ConfigParser):
         self.optionxform = str # this is needed for case sensitive options
         self.ready = False
         self.init_config()
-
-#     def getint(self, section, option):
-#         """Overrides method `getint` from `RawConfigParser` to avoid
-#         problems with dynamically created configurations, i.e. which are not
-#         read from a config file.
-#         
-#         Doc from RawConfigParser:
-#         -------------------------
-#         A convenience method which coerces the `option` in the specified
-#         `section` to an integer.
-#         
-#         """
-#         value = self.get(section, option)
-#         print 'Here:', value, isinstance(value, int)
-#         if isinstance(value, int):
-#             return value
-#         return ConfigParser.getint(self, section, option)
-# 
-#     def getfloat(self, section, option):
-#         """Overrides method `getfloat` from `RawConfigParser` to avoid
-#         problems with dynamically created configurations, i.e. which are not
-#         read from a config file.
-#         
-#         Doc from RawConfigParser:
-#         -------------------------
-#         A convenience method which coerces the `option` in the specified
-#         `section` to a floating point number.
-#         
-#         """
-#         value = self.get(section, option)
-#         if isinstance(value, float):
-#             return value
-#         return ConfigParser.getfloat(self, section, option)
-# 
-#     def getboolean(self, section, option):
-#         """Overrides method `getboolean` from `RawConfigParser` to avoid
-#         problems with dynamically created configurations, i.e. which are not
-#         read from a config file.
-#         
-#         Doc from RawConfigParser:
-#         -------------------------
-#         A convenience method which coerces the `option` in the specified
-#         `section` to a Boolean value. Note that the accepted values for the
-#         option are "1", "yes", "true", and "on", which cause this method to
-#         return `True`, and "0", "no", "false", and "off", which cause it to
-#         return `False`. These string values are checked in a case-insensitive
-#         manner. Any other value will cause it to raise ValueError.
-#         
-#         """
-#         value = self.get(section, option)
-#         if isinstance(value, bool):
-#             return value
-#         return ConfigParser.getboolean(self, section, option)
     
     def remove_all_sections(self):
         """Removes all sections."""
@@ -277,6 +271,9 @@ class JCMPConfiguration(ConfigParser):
                                          'ThirdPartySupport', 
                                          'Python')
         sys.path.append(self.JCMWAVE_PATH)
+
+
+# Module instances 
 # =============================================================================
 
 # Initialize the configuration
