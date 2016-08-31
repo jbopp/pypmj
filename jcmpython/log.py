@@ -134,7 +134,8 @@ class JCMPLogging(object):
                     'console': {
                         'level': self.log_level,
                         'class': 'logging.StreamHandler',
-                        'formatter': 'standard'
+                        'formatter': 'standard',
+                        'stream': 'ext://sys.stdout'
                     },
                     'file': {
                         'level': self.log_level,
