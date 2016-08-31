@@ -148,6 +148,7 @@ class JCMPLogging(object):
     def apply_configuration(self):
         """Updates the logging configuration with the current settings."""
         logging.config.dictConfig(self._get_config_dict())
+        self._apply_blacklist()
     
     def set_up(self):
         """Sets up the logging configuration as configured in the

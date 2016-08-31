@@ -29,6 +29,10 @@ __version__ = '2.1.1'
 __maintainer__ = 'Carlo Barth'
 __status__ = 'Production'
 
+
+# Dependency handling
+# ==============================================================================
+
 # Let users know if they're missing any of our hard dependencies
 # (this is section is copied from the pandas __init__.py)
 hard_dependencies = ('numpy', 'pandas', 'scipy', 'tables')
@@ -56,9 +60,15 @@ if not __version_to_tuple(pd.__version__) > (0,17,0):
                       format(pd.__version__) +
                       'jcmpython needs version 0.17.0 or higher.')
 
+
+# Configuration and logging initialization
+# ==============================================================================
+
 # Start up by setting up the configuration
-from jcmpython.internals import _config
+from jcmpython.internals import _config, ConfigurationError
 __jcm_version__ = None
+jcm = None
+daemon = None
 jcmwave_imported = False
 
 # # Configure the logging
@@ -66,14 +76,14 @@ from .log import _jcmpy_logging
 import logging as __logging
 __logger = __logging.getLogger('init')
 
-#  
-# from .parallelization import read_resources_from_config, DaemonResource
-# # initialize the daemon resources and load them into the namespace
-# __logger.debug('Initializing resources from configuration.')
-# resources = read_resources_from_config()
-# __logger.debug('Found resources: {}'.format(resources))
-  
-# Some extra functionality
+# Further imports
+from .parallelization import (read_resources_from_config, DaemonResource, 
+                              ResourceDict)
+resources = ResourceDict()
+
+
+# Module methods for info, jcmwave import and configuration/logging set-up
+# ==============================================================================
 
 def jcm_version_info(log=True, return_output=False):
     """Prints and/or returns the current JCMsuite version information. Returns
@@ -114,6 +124,10 @@ def import_jcmwave(jcm_install_path=None):
         is invalid.
     
     """
+    global jcmwave_imported
+    if jcmwave_imported:
+        __logger.info('jcmwave is already imported.')
+        return
     
     # Update the configuration with the JCMsuite installation directory
     if jcm_install_path is not None:
@@ -132,7 +146,6 @@ def import_jcmwave(jcm_install_path=None):
     jcm.startup()
     
     # Update the jcmwave_imported module attribute
-    global jcmwave_imported
     jcmwave_imported = True
     
     # Parse the version of JCMsuite
@@ -147,6 +160,9 @@ def import_jcmwave(jcm_install_path=None):
     # Info
     __logger.info('Imported jcmwave from: {}'.
                   format(_config.read_jcm_install_dir()))
+    
+    # Set up the resources
+    _set_up_resources()
 
 def set_log_file(directory='logs', filename='from_date'):
     """Sets up the logging to a log-file if this is not already configured.
@@ -173,16 +189,29 @@ def load_config_file(filepath):
     _config.set_config_file(filepath)
     _jcmpy_logging.set_up()
 
- 
-if _config.ready:
-    import_jcmwave()
- 
-# from .core import JCMProject, Simulation, SimulationSet, ConvergenceTest
-# from . import utils
- 
-# Function to load extensions
-extensions = ['materials']
- 
+
+# Resource handling
+# ==============================================================================
+
+def _set_up_resources():
+    """Reads the resource information from the current configuration and
+    sets the module attribute `resources`. `resources` is a `ResourceDict`
+    which holds references to and manages all workstations and queues (incl.
+    the localhost)."""
+    if jcmwave_imported is False:
+        raise RuntimeError('Cannot set up resources if jcmwave is not '+
+                           'imported.')
+    __logger.debug('Initializing resources from configuration.')
+    global resources
+    resources = read_resources_from_config()
+    __logger.debug('Found resources: {}'.format(resources))
+
+
+# Extension handling
+# ==============================================================================
+
+extensions = ['materials'] # Lists all known extensions
+
 def load_extension(ext_name):
     """Loads the specified extension of jcmpython.
  
@@ -200,4 +229,27 @@ def load_extension(ext_name):
         except Exception as e:
             __logger.warn('Unable to load extension `{}`: {}'.format(ext_name,
                                                                      e))
+
+# ==============================================================================
+
+
+# Import jcmwave here if the configuration is complete
+if _config.ready:
+    import_jcmwave()
+
+#  
+# from .parallelization import read_resources_from_config, DaemonResource
+# # initialize the daemon resources and load them into the namespace
+# __logger.debug('Initializing resources from configuration.')
+# resources = read_resources_from_config()
+# __logger.debug('Found resources: {}'.format(resources))
+  
+ 
+
+ 
+# from .core import JCMProject, Simulation, SimulationSet, ConvergenceTest
+# from . import utils
+ 
+
+
 

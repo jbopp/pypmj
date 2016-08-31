@@ -8,7 +8,7 @@ Authors : Carlo Barth
 
 """
 
-from jcmpython.internals import _config, daemon, JCM_KERNEL, ConfigurationError
+from jcmpython import _config, ConfigurationError, daemon
 import logging
 import os
 from six import string_types
@@ -88,9 +88,10 @@ def read_resources_from_config():
             multiplicity_default = _config.getint(ssec, 'multiplicity_default')
             n_threads_default = _config.getint(ssec, 'n_threads_default')
             stype = _config.get(ssec, 'stype')
-        except:
+        except Exception as e:
             raise ConfigurationError('Unable to parse configuration for ' +
-                                     'server: {}.'.format(ssec))
+                                     'server: {}. Exception: {}.'.
+                                     format(ssec, e))
             return
 
         # Treat the manually provided options

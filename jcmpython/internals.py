@@ -57,26 +57,59 @@ class JCMPConfiguration(ConfigParser):
         self.optionxform = str # this is needed for case sensitive options
         self.ready = False
         self.init_config()
-    
-    def getboolean(self, section, option):
-        """Overrides method `getboolean` from `RawConfigParser` to avoid
-        problems with dynamically created configurations, i.e. which are not
-        read from a config file.
-        
-        Doc from RawConfigParser:
-        -------------------------
-        A convenience method which coerces the `option` in the specified
-        `section` to a Boolean value. Note that the accepted values for the
-        option are "1", "yes", "true", and "on", which cause this method to
-        return `True`, and "0", "no", "false", and "off", which cause it to
-        return `False`. These string values are checked in a case-insensitive
-        manner. Any other value will cause it to raise ValueError.
-        
-        """
-        value = self.get(section, option)
-        if isinstance(value, bool):
-            return value
-        return ConfigParser.getboolean(self, section, option)
+
+#     def getint(self, section, option):
+#         """Overrides method `getint` from `RawConfigParser` to avoid
+#         problems with dynamically created configurations, i.e. which are not
+#         read from a config file.
+#         
+#         Doc from RawConfigParser:
+#         -------------------------
+#         A convenience method which coerces the `option` in the specified
+#         `section` to an integer.
+#         
+#         """
+#         value = self.get(section, option)
+#         print 'Here:', value, isinstance(value, int)
+#         if isinstance(value, int):
+#             return value
+#         return ConfigParser.getint(self, section, option)
+# 
+#     def getfloat(self, section, option):
+#         """Overrides method `getfloat` from `RawConfigParser` to avoid
+#         problems with dynamically created configurations, i.e. which are not
+#         read from a config file.
+#         
+#         Doc from RawConfigParser:
+#         -------------------------
+#         A convenience method which coerces the `option` in the specified
+#         `section` to a floating point number.
+#         
+#         """
+#         value = self.get(section, option)
+#         if isinstance(value, float):
+#             return value
+#         return ConfigParser.getfloat(self, section, option)
+# 
+#     def getboolean(self, section, option):
+#         """Overrides method `getboolean` from `RawConfigParser` to avoid
+#         problems with dynamically created configurations, i.e. which are not
+#         read from a config file.
+#         
+#         Doc from RawConfigParser:
+#         -------------------------
+#         A convenience method which coerces the `option` in the specified
+#         `section` to a Boolean value. Note that the accepted values for the
+#         option are "1", "yes", "true", and "on", which cause this method to
+#         return `True`, and "0", "no", "false", and "off", which cause it to
+#         return `False`. These string values are checked in a case-insensitive
+#         manner. Any other value will cause it to raise ValueError.
+#         
+#         """
+#         value = self.get(section, option)
+#         if isinstance(value, bool):
+#             return value
+#         return ConfigParser.getboolean(self, section, option)
     
     def remove_all_sections(self):
         """Removes all sections."""
@@ -145,13 +178,13 @@ class JCMPConfiguration(ConfigParser):
         self.set('Data', 'projects', '')
         self.set('Data', 'refractiveIndexDatabase', '')
         # JCMsuite
-        self.set('JCMsuite', 'kernel', 3)
+        self.set('JCMsuite', 'kernel', '3')
         # Logging
         self.set('Logging', 'level', 'INFO')
-        self.set('Logging', 'write_logfile', False)
+        self.set('Logging', 'write_logfile', 'False')
         self.set('Logging', 'log_directory', 'logs')
         self.set('Logging', 'log_filename', 'from_date')
-        self.set('Logging', 'send_mail', False)
+        self.set('Logging', 'send_mail', 'False')
         self.set('Logging', 'mail_server', '')
         # DEFAULTS
         self.set('DEFAULTS', 'database_name', 'result_database.h5')
@@ -163,8 +196,8 @@ class JCMPConfiguration(ConfigParser):
         self.set(section, 'hostname', 'localhost')
         self.set(section, 'JCM_root', 'AS_LOCAL')
         self.set(section, 'login', '')
-        self.set(section, 'multiplicity_default', 1)
-        self.set(section, 'n_threads_default', 1)
+        self.set(section, 'multiplicity_default', '1')
+        self.set(section, 'n_threads_default', '1')
         self.set(section, 'stype', 'Workstation')
         
     def init_config(self):
