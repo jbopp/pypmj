@@ -18,11 +18,12 @@ from glob import glob
 import inspect
 from itertools import product
 import numpy as np
-from shutil import copy, copytree, rmtree, move
+from shutil import copytree, rmtree, move
 import os
 import pandas as pd
 from six import string_types
 import sys
+import tempfile
 import time
 from . import utils
 
@@ -259,7 +260,6 @@ class JCMProject(object):
                                  ' does not exist.')
         
         # Backup the original project file
-        import tempfile
         pfiledir, pfilename = os.path.split(project_file)
         pre, suf = os.path.splitext(pfilename)
         bak_file = tempfile.NamedTemporaryFile(suffix=suf, prefix=pre, 
