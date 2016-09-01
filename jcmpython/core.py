@@ -231,6 +231,13 @@ class JCMProject(object):
         self.was_copied = False
     
     def merge_pp_files_to_project_file(self, pp_files):
+        """Creates a backup of the project file and appends the contents
+        of the `pp_files` (single file or list) to the project file. This is
+        useful if additional post processes should be executed without
+        modifying the original project file. The path to the backup file
+        is stored in the `project_file_backup_path` attribute.
+        
+        """
         if not self.was_copied:
             raise RuntimeError('Cannot merge project file as the project ' +
                                'was not copied yet. Call `copy_to` before.')
@@ -266,6 +273,8 @@ class JCMProject(object):
             f.write(new_content)
     
     def restore_original_project_file(self):
+        """Overwrites the original project file with the backup version if
+        it exists."""
         if not hasattr(self, 'project_file_backup_path'):
             self.logger.debug('No backup of the project file found.')
             return
