@@ -1551,6 +1551,8 @@ class SimulationSet(object):
         os.chdir(_thisdir)
 
     def solve_single_simulation(self, simulation, compute_geometry=True,
+                                run_post_process_files=None, 
+                                additional_keys_for_pps=None,
                                 jcm_geo_kwargs=None, jcm_solve_kwargs=None):
         """Solves a specific simulation and returns the results and logs
         without any further processing and without saving of data to the HDF5
@@ -1564,11 +1566,23 @@ class SimulationSet(object):
             simulation in the simulation list.
         compute_geometry : bool, default True
             Runs jcm.geo before the simulation if True.
-        jcm_geo_kwargs : dict or None, default None
+        run_post_process_files : str, list or NoneType, default None
+            File path or list of file paths to post processing files (extension
+            .jcmp(t)) which should be executed subsequent to the actual solve.
+            This calls jcmwave.solve with mode `post_process` internally. The
+            results are appended to the `jcm_results`-list of the `Simulation`
+            instance.
+        additional_keys_for_pps : dict or NoneType, default None
+            dict which will be merged to the `keys`-dict of the `Simulation`
+            instance before passing them to the jcmwave.solve-method in the
+            post process run. This has no effect if `run_post_process_files`
+            is None. Only new keys are added, duplicates are ignored and not
+            updated.
+        jcm_geo_kwargs : dict or NoneType, default None
             These keyword arguments are directly passed to jcm.geo, except for
             `project_dir`, `keys` and `working_dir`, which are set
             automatically (ignored if provided).
-        jcm_solve_kwargs : dict or None, default None
+        jcm_solve_kwargs : dict or NoneType, default None
             These keyword arguments are directly passed to jcm.solve, except
             for `project_dir`, `keys` and `working_dir`, which are set
             automatically (ignored if provided).
@@ -1604,18 +1618,58 @@ class SimulationSet(object):
             results = daemon.wait(return_style='new')
             result = results.values()[0]
             simulation._set_jcm_results_and_logs(result)
-            return result['results'], result['logs']
+            ret1, ret2 = (result['results'], result['logs'])
         
         # This is the old daemon style version
-        with utils.Capturing() as output:
-            simulation.solve(**jcm_solve_kwargs)
-            results, logs = daemon.wait()
-        for line in output:
-            logger_JCMsolve.debug(line)
-
-        # Set the results and logs in the Simulation-instance and return them
-        simulation._set_jcm_results_and_logs(results[0], logs[0])
-        return results[0], logs[0]
+        else:
+            with utils.Capturing() as output:
+                simulation.solve(**jcm_solve_kwargs)
+                results, logs = daemon.wait()
+            for line in output:
+                logger_JCMsolve.debug(line)
+    
+            # Set the results and logs in the Simulation-instance and return them
+            simulation._set_jcm_results_and_logs(results[0], logs[0])
+            ret1, ret2 = (results[0], logs[0])
+        
+        if run_post_process_files is None:
+            return ret1, ret2
+        
+        # If additional post process files are given, these are performed
+        # subsequently
+        if not isinstance(run_post_process_files, list):
+            # Convert to list
+            run_post_process_files = [run_post_process_files]
+        
+        # Iterate over all given post process files
+        for f in run_post_process_files:
+            if os.path.isfile(f):
+                # This is the new daemon style version
+                if NEW_DAEMON_DETECTED:
+                    simulation.solve(pp_file=f,
+                                     additional_keys=additional_keys_for_pps,
+                                     **jcm_solve_kwargs)
+                    pp_results = daemon.wait(return_style='new')
+                    pp_result = pp_results.values()[0]
+                    # Add the post process results to the simulation
+                    simulation._add_post_process_results(pp_result)
+                # This is the old daemon style version
+                else:
+                    with utils.Capturing() as output:
+                        simulation.solve(pp_file=f,
+                                    additional_keys=additional_keys_for_pps,
+                                    **jcm_solve_kwargs)
+                        pp_results, pp_logs = daemon.wait()
+                    for line in output:
+                        logger_JCMsolve.debug(line)
+                    # Add the post process results to the simulation
+                    simulation._add_post_process_results(pp_results[0],
+                                                         pp_logs[0])
+            else:
+                self.logger.warn('Given post process file "{}" '.format(f) +
+                                 'does not exist. Skipping.')
+            return ret1, ret2
+                
 
     def _start_simulations(self, N='all', processing_func=None, 
                            jcm_geo_kwargs=None, jcm_solve_kwargs=None):
