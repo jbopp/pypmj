@@ -103,6 +103,7 @@ class JCMPConfiguration(ConfigParser):
                               allow_no_value=allow_no_value)
         self.optionxform = str # this is needed for case sensitive options
         self.ready = False
+        self.config_file = None
         self.init_config()
     
     def remove_all_sections(self):
@@ -112,7 +113,7 @@ class JCMPConfiguration(ConfigParser):
     
     def search_config_file(self):
         """Looks for a configuration file in the environment variable
-        'JCMPYTHON_CONFIG_FILE' or otherwise in the current directory (must be
+                'JCMPYTHON_CONFIG_FILE' or otherwise in the current directory (must be
         named 'config.cfg'). Returns `None` if no config file is found.
         """
         if 'JCMPYTHON_CONFIG_FILE' in os.environ:
@@ -204,17 +205,17 @@ class JCMPConfiguration(ConfigParser):
         self.set_default_configuration()
         
         # Look for a config file
-        config_file = self.search_config_file()
+        self.config_file = self.search_config_file()
         
         # Read the configuration from the spotted config file, if any. This
         # overwrites any previously configured options values if present in the
         # config file.
-        if config_file is not None:
-            self.read(config_file)
+        if self.config_file is not None:
+            self.read(self.config_file)
             self.ready = self.check_configuration()
             if not self.ready:
                 raise ConfigurationError('The located config file {} does not'.
-                                         format(config_file) +
+                                         format(self.config_file) +
                                          ' represent a valid configuration,' +
                                          ' as the configured JCMsuite ' +
                                          'installation path could not be ' +
