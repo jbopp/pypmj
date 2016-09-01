@@ -1,0 +1,6 @@
+export PYTHONPATH=/local/bzfherrm/python_carlo
+
+export LD_LIBRARY_PATH=/local/bzfherrm/hdf5/lib
+
+ipython notebook --config=~/.jupyter/jupyter_notebook_config.py ./jcmpython/examples
+#ipython notebook --config=jupyter_notebook_config.py ./jcmpython/examples
