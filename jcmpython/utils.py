@@ -47,6 +47,11 @@ def is_callable(obj):
         return isinstance(obj, collections.Callable)
     return callable(obj)
 
+def file_content(file_path):
+    """Returns the content of an existing file."""
+    with open(file_path, 'r') as f:
+        content = f.read()
+    return content
 
 def tForm(t1):
     """Returns a well formated time string."""

@@ -229,6 +229,47 @@ class JCMProject(object):
         if os.path.exists(self.working_dir):
             rmtree(self.working_dir)
         self.was_copied = False
+    
+    def merge_pp_files_to_project_file(self, pp_files):
+        if not self.was_copied:
+            raise RuntimeError('Cannot merge project file as the project ' +
+                               'was not copied yet. Call `copy_to` before.')
+            return
+        if not isinstance(pp_files, list):
+            pp_files = [pp_files]
+        
+        # Read the project file contents
+        project_file = self.get_project_file_path()
+        project_content = utils.file_content(project_file)
+        new_content = project_content
+        
+        # Append the post processing file contents
+        for f in pp_files:
+            if os.path.isfile(f):
+                new_content += '\n'+utils.file_content(f)
+            else:
+                self.logger.warn('Given post processing file "{}"'.format(f) +
+                                 ' does not exist.')
+        
+        # Backup the original project file
+        import tempfile
+        pfiledir, pfilename = os.path.split(project_file)
+        pre, suf = os.path.splitext(pfilename)
+        bak_file = tempfile.NamedTemporaryFile(suffix=suf, prefix=pre, 
+                                               dir=pfiledir, delete=False)
+        bak_file.write(project_content)
+        bak_file.close()
+        self.project_file_backup_path = bak_file.name
+        
+        # Fill the new content into the original project file
+        with open(project_file, 'w') as f:
+            f.write(new_content)
+    
+    def restore_original_project_file(self):
+        if not hasattr(self, 'project_file_backup_path'):
+            self.logger.debug('No backup of the project file found.')
+            return
+        os.rename(self.project_file_backup_path, self.get_project_file_path())
 
 
 # =============================================================================
@@ -1672,6 +1713,8 @@ class SimulationSet(object):
                 
 
     def _start_simulations(self, N='all', processing_func=None, 
+                           run_post_process_files=None, 
+                           additional_keys=None,
                            jcm_geo_kwargs=None, jcm_solve_kwargs=None):
         """Starts all simulations, `N` at a time, waits for them to finish
         using `_wait_for_simulations` and processes the results using the
@@ -1691,6 +1734,17 @@ class SimulationSet(object):
             will be executed. See the docs of the
             Simulation.process_results-method for more info on how to use this
             parameter.
+        run_post_process_files : str, list or NoneType, default None
+            File path or list of file paths to post processing files (extension
+            .jcmp(t)) which should be executed subsequent to the actual solve.
+            This calls jcmwave.solve with mode `post_process` internally. The
+            results are appended to the `jcm_results`-list of the `Simulation`
+            instance.
+        additional_keys : dict or NoneType, default None
+            dict which will be merged to the `keys`-dict of the `Simulation`
+            instance before passing them to the jcmwave.solve-method.
+            Only new keys are added, duplicates are ignored and not
+            updated. These values are not stored in the HDF5 store!
         jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
             Keyword arguments which are directly passed to jcm.geo and
             jcm.solve, respectively.
@@ -1965,6 +2019,7 @@ class SimulationSet(object):
         return set(range(self.num_sims)) == set(self.finished_sim_numbers)
 
     def run(self, processing_func=None, N='all', auto_rerun_failed=1,
+            run_post_process_files=None, additional_keys=None,
             wdir_mode='keep', zip_file_path=None, jcm_geo_kwargs=None,
             jcm_solve_kwargs=None):
         """Convenient function to add the resources, run all necessary
@@ -1988,6 +2043,19 @@ class SimulationSet(object):
             Controls whether/how often a simulation which failed is
             automatically rerun. If False or 0, no automatic rerunning
             will be done.
+        run_post_process_files : str, list or NoneType, default None
+            File path or list of file paths to post processing files (extension
+            .jcmp(t)) which should be executed subsequent to the actual solve.
+            In contrast to the procedure in the `solve_single_simulation`
+            method, a merged project file is created in this case, i.e. the
+            content of the post processing files is appended to the actual
+            project file. The original project file is backed up and restored
+            after the run. 
+        additional_keys : dict or NoneType, default None
+            dict which will be merged to the `keys`-dict of the `Simulation`
+            instance before passing them to the jcmwave.solve-method.
+            Only new keys are added, duplicates are ignored and not
+            updated. These values are not stored in the HDF5 store!
         wdir_mode : {'keep', 'zip', 'delete'}, default 'keep'
             The way in which the working directories of the simulations are
             treated. If 'keep', they are left on disk. If 'zip', they are
@@ -2040,7 +2108,12 @@ class SimulationSet(object):
 
         # Store the metadata of this run
         self._store_metadata()
-
+        
+        # Create a merged version of the project file, with all post processes
+        # appended to the original project
+        if run_post_process_files is not None:
+            self.project.merge_pp_files_to_project_file(run_post_process_files)
+        
         # Try to add the resources
         if not self._resources_ready():
             self.add_resources()
@@ -2053,6 +2126,7 @@ class SimulationSet(object):
                 self.logger.info('Rerunning failed simulations: trial {}/{}'.
                                  format(n_trials+1,int(auto_rerun_failed)))
             self._start_simulations(N=N, processing_func=processing_func,
+                                    additional_keys=additional_keys,
                                     jcm_geo_kwargs=jcm_geo_kwargs,
                                     jcm_solve_kwargs=jcm_solve_kwargs)
             n_trials += 1
@@ -2074,7 +2148,11 @@ class SimulationSet(object):
 
         # Copy the data if a transitional storage base was set
         self._copy_from_transitional_dir()
-
+        
+        # Restore the original project file if necessary
+        if run_post_process_files is not None:
+            self.project.restore_original_project_file()
+        
         self.logger.info('Total time for all simulations: {}'.format(
             utils.tForm(time.time() - t0)))
 
