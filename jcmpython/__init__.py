@@ -47,6 +47,7 @@ for dependency in hard_dependencies:
 if missing_dependencies:
     raise ImportError('Missing required dependencies {0}'.
                       format(missing_dependencies))
+del dependency
 
 def __version_to_tuple(version):
     """Returns a tuple of integers, given a `version` string. The version is
@@ -54,10 +55,10 @@ def __version_to_tuple(version):
     return tuple([int(num_) for num_ in version.split('.') if num_.isdigit()])
 
 # Check if dependencies have a supported version
-import pandas as pd
-if not __version_to_tuple(pd.__version__) > (0,17,0):
+import pandas as _pd
+if not __version_to_tuple(_pd.__version__) > (0,17,0):
     raise ImportError('Your pandas version is {}, which is too old.'.
-                      format(pd.__version__) +
+                      format(_pd.__version__) +
                       'jcmpython needs version 0.17.0 or higher.')
 
 
@@ -65,7 +66,7 @@ if not __version_to_tuple(pd.__version__) > (0,17,0):
 # ==============================================================================
 
 # Start up by setting up the configuration
-from jcmpython.internals import (_config, ConfigurationError,
+from jcmpython.internals import (_config, ConfigurationError, NotSetUpError,
                                  _JCMPNotLoadedExceptionRaiser)
 __jcm_version__ = None
 jcm = None
@@ -98,7 +99,7 @@ def jcm_version_info(log=True, return_output=False):
     """Prints and/or returns the current JCMsuite version information. Returns
     None, if jcmwave is not yet imported."""
     if jcmwave_imported is False:
-        return
+        raise NotSetUpError('Please import jcmwave first.')
     out, _, _ = jcm.__private.call_tool(jcm.__private.JCMsolve, '--version')
     if log:
         for line in out.splitlines():
@@ -111,7 +112,7 @@ def jcm_license_info(log=True, return_output=False):
     """Prints and/or returns the current JCMsuite license information. Returns
     None, if jcmwave is not yet imported."""
     if jcmwave_imported is False:
-        return
+        raise NotSetUpError('Please import jcmwave first.')
     out, _, _ = jcm.__private.call_tool(jcm.__private.JCMsolve,
                                         '--license_info')
     if log:
