@@ -25,7 +25,7 @@ Copyright(C) 2016 Carlo Barth.
 __author__ = 'Carlo Barth'
 __copyright__ = 'Copyright 2016'
 __license__ = 'GPL'
-__version__ = '2.1.2'
+__version__ = '2.1.3'
 __maintainer__ = 'Carlo Barth'
 __status__ = 'Production'
 
