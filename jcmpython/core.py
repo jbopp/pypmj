@@ -18,7 +18,7 @@ from glob import glob
 import inspect
 from itertools import product
 import numpy as np
-from shutil import copytree, rmtree, move
+from shutil import copy, copytree, rmtree, move
 import os
 import pandas as pd
 from six import string_types
@@ -289,15 +289,26 @@ class Simulation(object):
         """
         return _default_sim_wdir(self.storage_dir, self.number)
 
-    def solve(self, **jcm_kwargs):
+    def solve(self, pp_file=None, additional_keys=None, **jcm_kwargs):
         """Starts the simulation (i.e. runs jcm.solve) and returns the job ID.
-
+        
+        Parameters
+        ----------
+        pp_file : str or NoneType, default None
+            File path to a JCM post processing file (extension .jcmp(t)). If
+            None, the `project_file_name` is used and the mode 'solve' is used
+            for jcmwave.solve. If not None, the mode 'post_process' is used.
+        additional_keys : dict or NoneType, default None
+            dict which will be merged to the `keys`-dict before passing them
+            to the jcmwave.solve-method. Only new keys are added, duplicates
+            are ignored and not updated.
+        
         The jcm_kwargs are directly passed to jcm.solve, except for
         `project_dir`, `keys` and `working_dir`, which are set
         automatically (ignored if provided).
 
         """
-        forbidden_keys = ['project_file', 'keys', 'working_dir']
+        forbidden_keys = ['project_file', 'keys', 'working_dir', 'mode']
         for key in jcm_kwargs:
             if key in forbidden_keys:
                 self.logger.warn('You cannot use {} as a keyword'.format(key) +
@@ -309,10 +320,25 @@ class Simulation(object):
         wdir = self.working_dir()
         if not os.path.exists(wdir):
             os.makedirs(wdir)
-
+        
+        if pp_file is None:
+            mode = 'solve'
+            project_file = self.project_file_name
+        else:
+            mode = 'post_process'
+            project_file = pp_file
+        
+        # Merge `self.keys` with the `additional_keys` if necessary
+        if additional_keys is None:
+            pass_keys = self.keys
+        else:
+            pass_keys = { k: self.keys.get(k, 0) if k in self.keys
+                             else additional_keys.get(k, 0)
+                             for k in set(self.keys) | set(additional_keys) }
+        
         # Start to solve
-        self.job_id = jcm.solve(self.project_file_name, keys=self.keys,
-                                working_dir=wdir, **jcm_kwargs)
+        self.job_id = jcm.solve(project_file, keys=pass_keys,
+                                working_dir=wdir, mode=mode, **jcm_kwargs)
         return self.job_id
 
     def _set_jcm_results_and_logs(self, results, logs=None):
@@ -372,6 +398,67 @@ class Simulation(object):
         # path from the results
         self.fieldbag_file = self.jcm_results[0]['file']
         self.status = 'Finished'
+    
+    def _add_post_process_results(self, results, logs=None):
+        """Adds results from post processes performed subsequently to the
+        actual solving run. The `results` (and `logs`) as returned by the
+        jcmwave.daemon are appended to the `jcm_results` attribute and are
+        then available for the `process_results`-method.
+        
+        This can only be done if the simulation status is 'Finished' (or
+        'Finished and processed') and the `_set_jcm_results_and_logs` method
+        was already executed.
+        
+        """
+        # Check if this can already be done
+        if 'Finished' not in self.status:
+            self.logger.warning('Cannot add post process result to a '+
+                                'simulation with status "{}"'.
+                                format(self.status))
+            return
+        if not hasattr(self, 'jcm_results'):
+            raise RuntimeError('Something weird happened. {} '.format(self) +
+                               'has no attribute `jcm_results` although '+
+                               'the status is "{}"'.format(self.status))
+            return
+        
+        # Load the relevant data from the passed results (and logs)
+        if NEW_DAEMON_DETECTED:
+            if logs is not None:
+                self.logger.warning('`logs` should be None if using the ' +
+                                    'new daemon, otherwise problems may ' +
+                                    'occur.')
+            exit_code = results['logs']['ExitCode']
+            pp_results = results['results']
+        else:
+            if logs is None:
+                raise ValueError('`logs` can only be None if the new daemon ' +
+                                 'implementation was detected. But this is ' +
+                                 'not true on your current '+
+                                 'system/configuration.')
+            exit_code = logs['ExitCode']
+            pp_results = results
+        
+        # Treat failed simulations
+        if exit_code != 0:
+            self.logger.warning('Cannot add post process results from solve' +
+                                ' with exit code: {}'.format(exit_code))
+            return
+        
+        # If the solve did not fail, the results dict must contain a dict.
+        if len(pp_results) < 1:
+            raise RuntimeError('Did not receive results from PostProcess ' +
+                               'although the exit status is 0.')
+            return
+        if not isinstance(pp_results[0], dict):
+            raise RuntimeError('Expecting a dict as the first element of the' +
+                               ' results list, but the type is {}'.format(
+                                   type(pp_results[0])))
+            return
+        
+        # If everything went okay, we add the post process results to the
+        # jcm_results list
+        self.jcm_results += pp_results
 
     def process_results(self, processing_func=None, overwrite=False):
         """Process the raw results from JCMsolve with a function
