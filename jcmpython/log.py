@@ -12,6 +12,7 @@ from jcmpython.internals import _config
 # At first the logging is configured, as considered as best practice in
 # http://victorlin.me/posts/2012/08/26/good-logging-practice-in-python
 import logging
+import logging.config
 logger = logging.getLogger('init')
 
 # Classes
