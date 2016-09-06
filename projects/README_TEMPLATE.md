@@ -1,7 +1,7 @@
 # Description
 
 
-## Simulation setup:
+## Simulation setup
 
 Fig. 1 shows ...
 
@@ -31,7 +31,10 @@ Fig. 2 shows ...
 
 ## Project specific
 
-*None*
+Key | Default | Description
+--- |:-------:| -----------
+`parameter_1` | `default` | Description ...
+... | ... | ...
 
 ## Geometry specific
 

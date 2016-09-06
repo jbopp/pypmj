@@ -11,7 +11,7 @@ more information*.
 
 [JCMtutorial]: http://www.jcmwave.com/JCMsuite/doc/html/PythonInterface/849f4e5b5a742e774b22bb4811574000.html
 
-## Simulation setup:
+## Simulation setup
 
 Fig. 1 shows a sketch of the simulation setup and defines the orientation axes
 and illumination conditions.
@@ -45,16 +45,19 @@ electric field strength.*
 
 ## Project specific
 
-- `fem_degree_max`: The maximum FEM degree used in the adaptive approach
-- `precision_field_energy`: `Precision` parameter in Scattering->Accuracy section,
-controlling the numerical accuracy of the near field.
+Key | Default | Description
+--- |:-------:| -----------
+`fem_degree_max` | | The maximum FEM degree used in the adaptive approach
+`precision_field_energy` | | `Precision` parameter in Scattering->Accuracy section, controlling the numerical accuracy of the near field.
 
 ## Geometry specific
 
-- `radius`: The radius of the glass sphere in µm.
-- `slc_domain`: Maximum side length of air surrounding the glass rod
-- `slc_circle`: Maximum side length of the glass rod
-- `refine_all_circle`: Number of subsequent segmentations of the glass rod
+Key | Default | Description
+--- |:-------:| -----------
+`radius` | | The radius of the glass sphere in µm
+`slc_domain` | | Maximum side length of air surrounding the glass rod
+`slc_circle` | | Maximum side length of the glass rod
+`refine_all_circle` | | Number of subsequent segmentations of the glass rod
 
 ## Material specific
 

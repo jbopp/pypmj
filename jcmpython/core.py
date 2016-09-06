@@ -222,7 +222,21 @@ class JCMProject(object):
     def get_project_file_path(self):
         """Returns the complete path to the project file."""
         return os.path.join(self.working_dir, self.project_file_name)
-
+    
+    def show_readme(self, try_use_markdown=True):
+        readme_file = os.path.join(self.source, 'README.md')
+        if not os.path.isfile(readme_file):
+            self.logger.warn('No README.md found in {}'.format(self.source))
+            return
+        readme = utils.file_content(readme_file)
+        if not try_use_markdown:
+            return readme
+        try:
+            from IPython.display import display, Markdown
+            display(Markdown(readme))
+        except:
+            return readme
+    
     def remove_working_dir(self):
         """Removes the working directory."""
         self.logger.debug('Removing working directory: {}'.format(

@@ -11,7 +11,7 @@ more information*.
 
 [JCMtutorial]: http://www.jcmwave.com/JCMsuite/doc/html/PythonInterface/849f4e5b5a742e774b22bb4811574000.html
 
-## Simulation setup:
+## Simulation setup
 
 Fig. 1 shows a sketch of the simulation setup and defines the orientation axes
 and illumination conditions.
@@ -49,7 +49,9 @@ electric field strength.*
 
 ## Geometry specific
 
-- `radius`: The radius of the glass sphere in µm.
+Key | Default | Description
+--- |:-------:| -----------
+`radius` | | The radius of the glass sphere in µm
 
 ## Material specific
 
