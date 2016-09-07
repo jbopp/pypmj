@@ -17,6 +17,7 @@ from datetime import date
 from glob import glob
 import inspect
 from itertools import product
+from numbers import Number
 import numpy as np
 from shutil import copytree, rmtree, move
 import os
@@ -42,6 +43,7 @@ DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
 # Global defaults
 SIM_DIR_FMT = 'simulation{0:06d}'
 STANDARD_DATE_FORMAT = '%y%m%d'
+_H5_STORABLE_TYPES = (string_types, Number)
 NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
 if not NEW_DAEMON_DETECTED:
     logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
@@ -321,24 +323,48 @@ class Simulation(object):
         Path to the directory were simulation working directories will be
         stored. The Simulation itself will be in a subfolder containing its
         number in the folder name.
-    project_file_name : str
-        Name of the JCM project file (a .jcmp(t)-file).
+    project : JCMProject, default None
+        The JCMProject instance related to this simulation.
     rerun_JCMgeo : bool
         Controls if JCMgeo needs to be called before execution in a series of
         simulations.
 
     """
 
-    def __init__(self, number, keys, stored_keys, storage_dir,
-                 project_file_name, rerun_JCMgeo=False):
+    def __init__(self, keys, project=None, number=0, stored_keys=None, 
+                 storage_dir=None, rerun_JCMgeo=False, **kwargs):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
-        self.number = number
         self.keys = keys
-        self.stored_keys = stored_keys
-        self.storage_dir = storage_dir
-        self.project_file_name = project_file_name
+        self.project = project
+        self.number = number
         self.rerun_JCMgeo = rerun_JCMgeo
         self.status = 'Pending'
+        
+        # If no list of stored_keys is provided, use all keys for which values
+        # are of types that could be stored to H5
+        if stored_keys is None:
+            stored_keys = []
+            for key, val in keys.iteritems():
+                if isinstance(val, _H5_STORABLE_TYPES):
+                    stored_keys.append(key)
+        self.stored_keys = stored_keys
+        
+        # If no storage_dir is given, use a subfolder of the current working
+        # directory
+        if storage_dir is None:
+            storage_dir = os.path.abspath('standalone_solves')
+        self.storage_dir = storage_dir
+        
+        # Deprecation handling
+        if 'project_file_name' in kwargs:
+            self._deprecated_pfilename = kwargs['project_file_name']
+            self.logger.warn('Passing only the project file name is ' +
+                             'deprecated. Please path the complete ' +
+                             'JCMProject-instance.')
+        else:
+            if self.project is None:
+                raise ValueError('Please pass the JCMProject-instance for ' +
+                                 'argument `project`.')
 
     def __repr__(self):
         return 'Simulation(number={}, status={})'.format(self.number,
@@ -360,8 +386,9 @@ class Simulation(object):
         ----------
         pp_file : str or NoneType, default None
             File path to a JCM post processing file (extension .jcmp(t)). If
-            None, the `project_file_name` is used and the mode 'solve' is used
-            for jcmwave.solve. If not None, the mode 'post_process' is used.
+            None, the `get_project_file_path` of the current project is used
+            and the mode 'solve' is used for jcmwave.solve. If not None, the
+            mode 'post_process' is used.
         additional_keys : dict or NoneType, default None
             dict which will be merged to the `keys`-dict before passing them
             to the jcmwave.solve-method. Only new keys are added, duplicates
@@ -387,7 +414,11 @@ class Simulation(object):
         
         if pp_file is None:
             mode = 'solve'
-            project_file = self.project_file_name
+            if self.project is None:
+                # Only for backwards compatibility
+                project_file = self._deprecated_pfilename
+            else:
+                project_file = self.project.get_project_file_path()
         else:
             mode = 'post_process'
             project_file = pp_file
@@ -668,6 +699,230 @@ class Simulation(object):
             self.logger.warn('Working directory {} does not exist'.format(
                 os.path.basename(wdir)) +
                 ' for simNumber {}'.format(self.number))
+    
+    def _prepare_project(self):
+        """Copies the project to its working directory if not already done."""
+        if not self.project.was_copied:
+            self.project.copy_to()
+    
+    def compute_geometry(self, **jcm_kwargs):
+        """Computes the geometry (i.e. runs jcm.geo) for this simulation.
+
+        Parameters
+        ----------
+        simulation : Simulation or int
+            The `Simulation`-instance for which the geometry should be
+            computed. If the type is `int`, it is treated as the index of the
+            simulation in the simulation list.
+
+        The jcm_kwargs are directly passed to jcm.geo, except for
+        `project_dir`, `keys` and `working_dir`, which are set automatically
+        (ignored if provided).
+
+        """
+        self.logger.debug('Computing geometry.')
+        # Copy project to its working directory
+        self._prepare_project()
+        
+        # Check the keyword arguments
+        forbidden_keys = ['project_file', 'keys', 'working_dir']
+        for key in jcm_kwargs:
+            if key in forbidden_keys:
+                self.logger.warn('You cannot use {} as a '.format(key) +
+                                 'keyword argument for jcm.geo. It is ' +
+                                 'already set by the SimulationSet instance.')
+                del jcm_kwargs[key]
+        
+        # If True is given for the jcm_kwargs `show`, set its value to
+        # float('inf'). This is done to achieve a more intuitive behavior, as
+        # `show` expects a time, so that True would be casted to 1 second,
+        # causing the window to pop up and disappear right away
+#         if 'show' in jcm_kwargs:
+#             if jcm_kwargs['show'] is True:
+#                 jcm_kwargs['show'] = float('inf')
+
+        # Run jcm.geo. The cd-fix is necessary because the
+        # project_dir/working_dir functionality seems to be broken in the
+        # current python interface!
+        _thisdir = os.getcwd()
+        os.chdir(self.project.working_dir)
+        with utils.Capturing() as output:
+            jcm.geo(project_dir=self.project.working_dir,
+                    keys=self.keys,
+                    working_dir=self.project.working_dir,
+                    **jcm_kwargs)
+        for line in output:
+            logger_JCMgeo.debug(line)
+        os.chdir(_thisdir)
+    
+    def solve_standalone(self, processing_func=None, wdir_mode='keep',
+                         run_post_process_files=None, resource_manager=None,
+                         additional_keys_for_pps=None, jcm_solve_kwargs=None):
+        """Solves this simulation and returns the results and logs.
+
+        Parameters
+        ----------
+        processing_func : callable or NoneType, default None
+            Function for result processing. If None, only a standard processing
+            will be executed. See the docs of the
+            Simulation.process_results-method for more info on how to use this
+            parameter.
+        wdir_mode : {'keep', 'delete'}, default 'keep'
+            The way in which the working directories of the simulations are
+            treated. If 'keep', they are left on disk. If 'delete', they are
+            deleted.
+        run_post_process_files : str, list or NoneType, default None
+            File path or list of file paths to post processing files (extension
+            .jcmp(t)) which should be executed subsequent to the actual solve.
+            This calls jcmwave.solve with mode `post_process` internally. The
+            results are appended to the `jcm_results`-list of the `Simulation`
+            instance.
+        additional_keys_for_pps : dict or NoneType, default None
+            dict which will be merged to the `keys`-dict of the `Simulation`
+            instance before passing them to the jcmwave.solve-method in the
+            post process run. This has no effect if `run_post_process_files`
+            is None. Only new keys are added, duplicates are ignored and not
+            updated.
+        jcm_solve_kwargs : dict or NoneType, default None
+            These keyword arguments are directly passed to jcm.solve, except
+            for `project_dir`, `keys` and `working_dir`, which are set
+            automatically (ignored if provided).
+
+        """
+        if jcm_solve_kwargs is None:
+            jcm_solve_kwargs = {}
+        
+        if wdir_mode not in ['keep', 'delete']:
+            raise ValueError('Unknown wdir_mode: {}'.format(wdir_mode))
+            return
+        
+        if resource_manager is None:
+            resource_manager = ResourceManager()
+
+        # Add the resources if they are not ready yet
+        if not resource_manager._resources_ready():
+            resource_manager.add_resources()
+        
+        # Copy project to its working directory
+        self._prepare_project()
+
+        # Solve the simulation and wait for it to finish. Output is captured
+        # and passed to the logger
+        # ---
+        # This is the new daemon style version
+        if NEW_DAEMON_DETECTED:
+            self.solve(**jcm_solve_kwargs)
+            results = daemon.wait(return_style='new')
+            result = results.values()[0]
+            self._set_jcm_results_and_logs(result)
+            ret1, ret2 = (result['results'], result['logs'])
+        
+        # This is the old daemon style version
+        else:
+            with utils.Capturing() as output:
+                self.solve(**jcm_solve_kwargs)
+                results, logs = daemon.wait()
+            for line in output:
+                logger_JCMsolve.debug(line)
+    
+            # Set the results and logs in the Simulation-instance
+            self._set_jcm_results_and_logs(results[0], logs[0])
+            ret1, ret2 = (results[0], logs[0])
+        
+        if run_post_process_files is None:
+            if wdir_mode == 'delete':
+                self.remove_working_directory()
+            return ret1, ret2
+        
+        # If additional post process files are given, these are performed
+        # subsequently
+        if not isinstance(run_post_process_files, list):
+            # Convert to list
+            run_post_process_files = [run_post_process_files]
+        
+        # Iterate over all given post process files
+        for f in run_post_process_files:
+            if os.path.isfile(f):
+                # This is the new daemon style version
+                if NEW_DAEMON_DETECTED:
+                    self.solve(pp_file=f,
+                               additional_keys=additional_keys_for_pps,
+                               **jcm_solve_kwargs)
+                    pp_results = daemon.wait(return_style='new')
+                    pp_result = pp_results.values()[0]
+                    # Add the post process results
+                    self._add_post_process_results(pp_result)
+                # This is the old daemon style version
+                else:
+                    with utils.Capturing() as output:
+                        self.solve(pp_file=f,
+                                   additional_keys=additional_keys_for_pps,
+                                   **jcm_solve_kwargs)
+                        pp_results, pp_logs = daemon.wait()
+                    for line in output:
+                        logger_JCMsolve.debug(line)
+                    # Add the post process results
+                    self._add_post_process_results(pp_results[0], pp_logs[0])
+            else:
+                self.logger.warn('Given post process file "{}" '.format(f) +
+                                 'does not exist. Skipping.')
+            
+            if wdir_mode == 'delete':
+                self.remove_working_directory()
+            return ret1, ret2
+
+
+# =============================================================================
+class ResourceManager(object):
+    """"""
+    
+    def __init__(self):
+        self.logger = logging.getLogger('core.' + self.__class__.__name__)
+        self.reset_resources()
+    
+    def reset_resources(self):
+        self.resources = ResourceDict()
+        for r in resources:
+            self.resources[r] = resources[r]
+
+    def get_current_resources(self):
+        """Returns a list of the currently configured resources, i.e. the ones
+        that will be added using `add_resources`."""
+        return self.resources
+
+    def use_only_resources(self, names):
+        """Restrict the daemon resources to `names`. Only makes sense if the
+        resources have not already been added.
+
+        Names that are unknown are ignored. If no valid name is present,
+        the default configuration will remain untouched.
+
+        """
+        if isinstance(names, string_types):
+            names = [names]
+        valid = []
+        for n in names:
+            if n not in resources:
+                self.logger.warn('{} is not in the configured resources'.
+                                 format(n))
+            else:
+                valid.append(n)
+        if len(valid) == 0:
+            self.logger.warn('No valid resources found, no change is made.')
+            return
+        self.logger.info('Restricting resources to: {}'.format(valid))
+        self.resources = ResourceDict()
+        for v in valid:
+            self.resources[v] = resources[v]
+
+    def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
+        """Tries to add all resources configured in the configuration using the
+        JCMdaemon."""
+        self.resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
+
+    def _resources_ready(self):
+        """Returns whether the resources are already added."""
+        return daemon.daemonCheck(warn=False)
 
 
 # =============================================================================
@@ -1165,7 +1420,6 @@ class SimulationSet(object):
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed
         self.logger.debug('Generating the simulation list.')
-        pfile_path = self.project.get_project_file_path()
         for i, keySet in enumerate(propertyCombinations):
             keys = {}
             for k in keySet:
@@ -1175,7 +1429,7 @@ class SimulationSet(object):
             self.simulations.append(Simulation(number=i, keys=keys,
                                                stored_keys=self.stored_keys,
                                                storage_dir=self.storage_dir,
-                                               project_file_name=pfile_path))
+                                               project=self.project))
 
         # We generate a pandas DataFrame that holds all the parameter and
         # geometry properties for each simulation, with the simulation number
