@@ -1732,7 +1732,7 @@ class SimulationSet(object):
             else:
                 self.logger.warn('Given post process file "{}" '.format(f) +
                                  'does not exist. Skipping.')
-            return ret1, ret2
+        return ret1, ret2
                 
 
     def _start_simulations(self, N='all', processing_func=None, 
