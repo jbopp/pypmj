@@ -220,15 +220,35 @@ class JCMProject(object):
         if sys_append:
             sys.path.append(path)
         self.was_copied = True
-
+    
+    def get_file_path(self, file_name):
+        """Returns the full path to the file with `file_name` if present in
+        the current project. If this project was already copied to a working
+        directory, the path to this directory is used. Otherwise, the source
+        directory is used.""" 
+        if self.was_copied:
+            dir_ = self.working_dir
+        else:
+            dir_ = self.source
+        if not file_name in os.listdir(dir_):
+            raise OSError('File "{}" is not present in the current project.'.
+                          format(file_name))
+            return
+        return os.path.join(dir_, file_name)
+    
     def get_project_file_path(self):
         """Returns the complete path to the project file."""
         return os.path.join(self.working_dir, self.project_file_name)
     
     def show_readme(self, try_use_markdown=True):
-        readme_file = os.path.join(self.source, 'README.md')
-        if not os.path.isfile(readme_file):
-            self.logger.warn('No README.md found in {}'.format(self.source))
+        """Returns the content of the README.md file, if present. If
+        `try_use_markdown` is True, it is tried to display the mark down file
+        in a parsed way, which might only work inside ipython/jupyter notebooks.
+        """
+        try:
+            readme_file = self.get_file_path('README.md')
+        except OSError:
+            self.logger.warn('No README.md found for this project.')
             return
         readme = utils.file_content(readme_file)
         if not try_use_markdown:
@@ -705,6 +725,16 @@ class Simulation(object):
         if not self.project.was_copied:
             self.project.copy_to()
     
+    def view_geometry(self):
+        """Opens the grid.jcm file using JCMview if it exists."""
+        try:
+            grid_file = self.project.get_file_path('grid.jcm')
+        except OSError:
+            self.logger.warn('No "grid.jcm" found in the current project. ' +
+                             'Please compute the geometry first.')
+            return
+        jcm.view(grid_file)
+    
     def compute_geometry(self, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for this simulation.
 
@@ -737,9 +767,9 @@ class Simulation(object):
         # float('inf'). This is done to achieve a more intuitive behavior, as
         # `show` expects a time, so that True would be casted to 1 second,
         # causing the window to pop up and disappear right away
-#         if 'show' in jcm_kwargs:
-#             if jcm_kwargs['show'] is True:
-#                 jcm_kwargs['show'] = float('inf')
+        if 'show' in jcm_kwargs:
+            if jcm_kwargs['show'] is True:
+                jcm_kwargs['show'] = float('inf')
 
         # Run jcm.geo. The cd-fix is necessary because the
         # project_dir/working_dir functionality seems to be broken in the
