@@ -1,0 +1,10 @@
+SourceBag {
+  Source {
+    ElectricFieldStrength {
+      PlaneWave {
+        K = [1.14239732857811e7 0.0 0.0]
+        Amplitude = [0 0 1]
+      }
+    }
+  }
+}

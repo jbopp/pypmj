@@ -1,0 +1,13 @@
+# Material properties for the surroundings (air)
+Material {
+  DomainId = 1
+  RelPermittivity = 1.0
+  RelPermeability = 1.0
+}
+
+# Material properties the glass rod
+Material {
+  DomainId = 2
+  RelPermittivity = 2.3104 # 1.52^2
+  RelPermeability = 1.0
+}

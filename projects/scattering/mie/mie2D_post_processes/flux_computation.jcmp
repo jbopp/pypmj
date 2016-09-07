@@ -1,0 +1,8 @@
+PostProcess {
+  FluxIntegration {
+    FieldBagPath = "./mie2D_results/fieldbag.jcm"
+    OutputFileName = "./mie2D_results/energyflux_scattered.jcm"  
+    OutputQuantity = ElectromagneticFieldEnergyFlux
+    InterfaceType = ExteriorDomain
+  }
+}

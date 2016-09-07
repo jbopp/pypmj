@@ -1,0 +1,21 @@
+Project = {
+  InfoLevel = 3
+  Electromagnetics {
+    TimeHarmonic {
+      Scattering {
+        FieldComponents = Electric
+        Accuracy {
+          FiniteElementDegree {
+            Adaptive{
+              MaximumDegree = 4
+            }
+          }
+          Precision = 2.e-2
+          Refinement {
+            Adaptivity = yes
+          }
+        }
+      }
+    }
+  }
+}
