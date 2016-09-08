@@ -272,6 +272,10 @@ class JCMPConfiguration(ConfigParser):
                                          'ThirdPartySupport', 
                                          'Python')
         sys.path.append(self.JCMWAVE_PATH)
+        
+        # Set the environment variable JCMKERNEL
+        jcm_kernel = self.getint('JCMsuite', 'kernel')
+        os.environ['JCMKERNEL'] = 'V{}'.format(jcm_kernel)
 
 
 # Module instances 
