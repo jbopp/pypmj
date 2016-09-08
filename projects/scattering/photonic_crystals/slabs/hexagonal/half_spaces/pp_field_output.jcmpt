@@ -1,0 +1,77 @@
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_x_electric.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsX = 0.
+            NGridPointsY = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_x_magnetic.jcm"
+        OutputQuantity = MagneticFieldStrength
+        Cartesian {
+            GridPointsX = 0.
+            NGridPointsY = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_y_electric.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsY = 0.
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_y_magnetic.jcm"
+        OutputQuantity = MagneticFieldStrength
+        Cartesian {
+            GridPointsY = 0.
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsZ = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_z_electric.jcm"
+        OutputQuantity = ElectricFieldStrength
+        Cartesian {
+            GridPointsZ = 4.05e-07
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsY = %(field_output_Npoints)i
+        }
+    }
+}
+
+PostProcess {
+    ExportFields {
+        FieldBagPath = "project_results/fieldbag.jcm"
+        OutputFileName = "project_results/fields_z_magnetic.jcm"
+        OutputQuantity = MagneticFieldStrength
+        Cartesian {
+            GridPointsZ = 4.05e-07
+            NGridPointsX = %(field_output_Npoints)i
+            NGridPointsY = %(field_output_Npoints)i
+        }
+    }
+}

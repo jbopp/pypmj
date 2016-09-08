@@ -54,10 +54,10 @@ Key | Default | Description
 `uol` | `1.e-9` | Scaling parameter for dimensions used in `layout.jcmt` (default: nm)
 `p` |  | Pitch, i.e. lattice constant of the hexagonal lattice
 `d` |  | Center diameter of the holes
-`h` |  | Height, i.e. extent in $z$-direction, of the slab
+`h` |  | Height, i.e. extent in *z*-direction, of the slab
 `pore_angle` | `0.` | Side-wall angle of the holes in degrees
-`h_sub` |  | Height, i.e. extent in $z$-direction of the substrate material
-`h_sup` |  | Height, i.e. extent in $z$-direction of the superstrate material
+`h_sub` |  | Height, i.e. extent in *z*-direction of the substrate material
+`h_sup` |  | Height, i.e. extent in *z*-direction of the superstrate material
 `refine_all_circle` | `2` | Number of subsequent segmentations of the circle
 `max_sl_polygon` | | Maximum side length of the polygon in the non-extruded (2D) layout
 `max_sl_circle` | | Maximum side length of the circle in the non-extruded (2D) layout

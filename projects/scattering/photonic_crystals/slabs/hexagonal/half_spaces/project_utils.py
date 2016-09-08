@@ -140,6 +140,20 @@ def processing_default(pps, keys):
                          ' post processes, but these are {}'.format(len(pps)))
         return
     
+    # Use key defaults for keys which are not provided
+    default_keys = {'min_mesh_angle' : 20.,
+                    'refine_all_circle' : 2,
+                    'uol' : 1.e-9,
+                    'pore_angle' : 0.,
+                    'info_level' : 10,
+                    'storage_format' : 'Binary',
+                    'fem_degree_min' : 1,
+                    'n_refinement_steps' : 0,
+                    'mat_hole' : keys['mat_superspace']}
+    for dkey in default_keys:
+        if not dkey in keys:
+            keys[dkey] = default_keys[dkey]
+    
     # Create the appropriate JCM_Post_Process subclass instances,
     # which will also check the results for validity.
     # These are the Fouriertransfrom results:

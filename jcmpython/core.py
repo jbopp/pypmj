@@ -327,25 +327,27 @@ class Simulation(object):
 
     Parameters
     ----------
+    keys : dict
+        The keys dict passed as the `keys` argument of jcmwave.solve. Used to
+        translate JCM template files (i.e. *.jcmt-files).
+    project : JCMProject, default None
+        The JCMProject instance related to this simulation.
     number : int
         A simulation number to identify/order simulations in a series of
         multiple simulations. It is used as the row index of the returned
         pandas DataFrame (e.g. by _get_DataFrame()).
-    keys : dict
-        The keys dict passed as the `keys` argument of jcmwave.solve. Used to
-        translate JCM template files (i.e. *.jcmt-files).
-    stored_keys : list
+    stored_keys : list or NoneType, default None
         A list of keys (must be a subset of `keys.keys()`) which will be part
         of the data in the pandas DataFrame, i.e. columns in the DataFrame
         returned by _get_DataFrame(). These keys will be stored in the HDF5
-        store by the SimulationSet-instance.
+        store by the SimulationSet-instance. If None, a it is tried to generate
+        an as complete list of storable keys as possible automatically.
     storage_dir : str (path)
         Path to the directory were simulation working directories will be
         stored. The Simulation itself will be in a subfolder containing its
-        number in the folder name.
-    project : JCMProject, default None
-        The JCMProject instance related to this simulation.
-    rerun_JCMgeo : bool
+        number in the folder name. If None, the subdirectory 'standalone_solves'
+        in the current working directory is used.
+    rerun_JCMgeo : bool, default False
         Controls if JCMgeo needs to be called before execution in a series of
         simulations.
 
@@ -738,13 +740,6 @@ class Simulation(object):
     def compute_geometry(self, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for this simulation.
 
-        Parameters
-        ----------
-        simulation : Simulation or int
-            The `Simulation`-instance for which the geometry should be
-            computed. If the type is `int`, it is treated as the index of the
-            simulation in the simulation list.
-
         The jcm_kwargs are directly passed to jcm.geo, except for
         `project_dir`, `keys` and `working_dir`, which are set automatically
         (ignored if provided).
@@ -860,6 +855,8 @@ class Simulation(object):
             ret1, ret2 = (results[0], logs[0])
         
         if run_post_process_files is None:
+            if not self.status == 'Failed':
+                self.process_results(processing_func, True)
             if wdir_mode == 'delete':
                 self.remove_working_directory()
             return ret1, ret2
@@ -897,6 +894,8 @@ class Simulation(object):
                 self.logger.warn('Given post process file "{}" '.format(f) +
                                  'does not exist. Skipping.')
             
+            if not self.status == 'Failed':
+                self.process_results(processing_func, True)
             if wdir_mode == 'delete':
                 self.remove_working_directory()
             return ret1, ret2
@@ -904,7 +903,8 @@ class Simulation(object):
 
 # =============================================================================
 class ResourceManager(object):
-    """"""
+    """Class for convenient management of resources in all objects that are
+    able to provoke simulations, i.e. call jcmwave.solve."""
     
     def __init__(self):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)

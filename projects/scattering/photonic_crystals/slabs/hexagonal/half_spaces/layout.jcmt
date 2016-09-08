@@ -9,7 +9,8 @@ import numpy as np
 # Set default keys
 default_keys = {'min_mesh_angle' : 20.,
 				'refine_all_circle' : 2,
-				'uol' : 1.e-9}
+				'uol' : 1.e-9,
+				'pore_angle' : 0.}
 
 for dkey, dval in default_keys.iteritems():
 	if not dkey in keys:
