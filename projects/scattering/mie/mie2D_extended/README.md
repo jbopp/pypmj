@@ -46,14 +46,14 @@ electric field strength.*
 ## Project specific
 
 Key | Default | Description
---- |:-------:| -----------
+:---|:-------:| -----------
 `fem_degree_max` | | The maximum FEM degree used in the adaptive approach
 `precision_field_energy` | | `Precision` parameter in Scattering->Accuracy section, controlling the numerical accuracy of the near field.
 
 ## Geometry specific
 
 Key | Default | Description
---- |:-------:| -----------
+:---|:-------:| -----------
 `radius` | | The radius of the glass sphere in µm
 `slc_domain` | | Maximum side length of air surrounding the glass rod
 `slc_circle` | | Maximum side length of the glass rod

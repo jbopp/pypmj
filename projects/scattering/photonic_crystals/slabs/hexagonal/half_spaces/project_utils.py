@@ -18,51 +18,6 @@ Z0 = np.sqrt( constants.mu_0 / constants.epsilon_0 )
 
 # =============================================================================
 
-def pointlist_im_to_re(plist, N=10):
-    """
-    Generates a real valued NumPy-array [x1, y1, x2, y2, ...] from a complex
-    NumPy-array [x1+y1j, x2+y2j, ...] defining a polygon. The output is rounded
-    to N digits.
-    """
-    # Check if input arguments are of correct type
-    errMsg = 'Error in function pointlist_im_to_re: expecting '
-    assert plist.dtype == np.complex, errMsg + 'a complex valued numpy array'
-    assert type(N) == int, errMsg + 'an integer value for N'
-    
-    # Convert the complex valued numpy array plist to real valued array
-    plistOut = np.zeros( 2 * plist.shape[0], dtype = np.float64 )
-    plistOut[0::2] = plist.real
-    plistOut[1::2] = plist.imag
-    
-    # return the rounded real-valued array
-    return np.round(plistOut, N)
-
-def polyarea(x,y):
-    """
-    Returns the area of a 2-D simple polygon (no matter concave or convex).
-    Must name the vertices in sequence (i.e., clockwise or counterclockwise).
-    Square root input arguments are not supported.
-    
-    Parameters
-    ----------
-    x : list or numpy.ndarray
-        x-axis coordinates of vertex array
-    y : list or numpy.ndarray
-        y-axis coordinates of vertex array
-    Output: polygon area
-    
-    Notes
-    -----
-    Formula used: http://en.wikipedia.org/wiki/Polygon#Area_and_centroid
-    Definition of "simple polygon": http://en.wikipedia.org/wiki/Simple_polygon
-    """
-    ind_arr = np.arange(len(x))-1  # for indexing convenience
-    s = 0
-    for ii in ind_arr:
-        s = s + (x[ii]*y[ii+1] - x[ii+1]*y[ii])
-
-    return abs(s)*0.5
-
 def cosd(angles):
     """Shorthand for numpy's `cos` function for `angles` in degrees."""
     return np.cos( np.deg2rad(angles) )
@@ -212,8 +167,10 @@ def processing_default(pps, keys):
     n_sup = keys['mat_superspace'].getNKdata(wvl)
     
     # Calculate simple derived quantities
-    # TODO: check if this is realy true if we use an hexagon here
-    area_cd = p**2 # area of the computational domain
+    # TODO: check if this is really true if we use a hexagon here
+#     area_cd = p**2 # area of the computational domain
+    # Fix for hexagon area (lengthy number = 3*sqrt(3)/8)
+    area_cd = p**2*0.64951905283832898507 # area of the computational domain
     p_in = cosd(theta_in)*(1./np.sqrt(2.))**2 *n_sup*area_cd / Z0
     
     # Save the refactive index data, real and imag parts marked
@@ -260,8 +217,9 @@ def processing_default(pps, keys):
 
         # Calculate the energy normalization factor
         e_norm = get_energy_normalization(p, d, h, h_sup, pore_angle, n_sup)
-        E_enhance = np.log10((results['e_13'] + results['e_{0}1'.format(i+1)]) / e_norm)
-        results['E_{0}'.format(i+1)] = E_enhance
+        E_total = results['e_{0}3'.format(i+1)] + results['e_{0}4'.format(i+1)]
+        results['E_{0}'.format(i+1)] = np.log10(E_total/e_norm)
+#         E_enhance = np.log10((results['e_13'] + results['e_{0}1'.format(i+1)]) / e_norm)
     return results
 
 
