@@ -911,6 +911,7 @@ class ResourceManager(object):
         self.reset_resources()
     
     def reset_resources(self):
+        """Resets the resources to the default configuration."""
         self.resources = ResourceDict()
         for r in resources:
             self.resources[r] = resources[r]
@@ -1027,7 +1028,8 @@ class SimulationSet(object):
     def __init__(self, project, keys, duplicate_path_levels=0,
                  storage_folder='from_date', storage_base='from_config',
                  transitional_storage_base=None,
-                 combination_mode='product', check_version_match=True):
+                 combination_mode='product', check_version_match=True,
+                 resource_manager=None):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Save initialization arguments into namespace
@@ -1053,7 +1055,15 @@ class SimulationSet(object):
         self._initialize_store(check_version_match)
 
         # Initialize the resources
-        self.reset_resources()
+        if resource_manager is None:
+            self._rm = ResourceManager()
+        else:
+            if not isinstance(resource_manager, ResourceManager):
+                raise TypeError('`resource_manager` must be of type '+
+                                '`ResourceManager`, not {}'.
+                                format(type(resource_manager)))
+                return
+            self._rm = resource_manager
 
     def __repr__(self):
         return 'SimulationSet(project={}, storage={})'.format(self.project,
@@ -1806,14 +1816,13 @@ class SimulationSet(object):
         return matches, unmatched
 
     def reset_resources(self):
-        self.resources = ResourceDict()
-        for r in resources:
-            self.resources[r] = resources[r]
+        """Resets the resources to the default configuration."""
+        self._rm.reset_resources()
 
     def get_current_resources(self):
         """Returns a list of the currently configured resources, i.e. the ones
         that will be added using `add_resources`."""
-        return self.resources
+        return self._rm.get_current_resources()
 
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
@@ -1823,31 +1832,16 @@ class SimulationSet(object):
         the default configuration will remain untouched.
 
         """
-        if isinstance(names, string_types):
-            names = [names]
-        valid = []
-        for n in names:
-            if n not in resources:
-                self.logger.warn('{} is not in the configured resources'.
-                                 format(n))
-            else:
-                valid.append(n)
-        if len(valid) == 0:
-            self.logger.warn('No valid resources found, no change is made.')
-            return
-        self.logger.info('Restricting resources to: {}'.format(valid))
-        self.resources = ResourceDict()
-        for v in valid:
-            self.resources[v] = resources[v]
+        self._rm.use_only_resources(names)
 
     def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Tries to add all resources configured in the configuration using the
         JCMdaemon."""
-        self.resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
+        self._rm.add_resources(n_shots, wait_seconds, ignore_fail)
 
     def _resources_ready(self):
         """Returns whether the resources are already added."""
-        return daemon.daemonCheck(warn=False)
+        return self._rm._resources_ready()
 
     def compute_geometry(self, simulation, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for a specific simulation
@@ -1874,29 +1868,32 @@ class SimulationSet(object):
                              'current SimulationSet or a simulation index' +
                              ' (int).')
             return
-
-        # Check the keyword arguments
-        forbidden_keys = ['project_file', 'keys', 'working_dir']
-        for key in jcm_kwargs:
-            if key in forbidden_keys:
-                self.logger.warn('You cannot use {} as a '.format(key) +
-                                 'keyword argument for jcm.geo. It is ' +
-                                 'already set by the SimulationSet instance.')
-                del jcm_kwargs[key]
-
-        # Run jcm.geo. The cd-fix is necessary because the
-        # project_dir/working_dir functionality seems to be broken in the
-        # current python interface!
-        _thisdir = os.getcwd()
-        os.chdir(self.get_project_wdir())
-        with utils.Capturing() as output:
-            jcm.geo(project_dir=self.project.working_dir,
-                    keys=simulation.keys,
-                    working_dir=self.project.working_dir,
-                    **jcm_kwargs)
-        for line in output:
-            logger_JCMgeo.debug(line)
-        os.chdir(_thisdir)
+        
+        # Call the compute_geometry-method of the simulation
+        simulation.compute_geometry(**jcm_kwargs)
+        
+#         # Check the keyword arguments
+#         forbidden_keys = ['project_file', 'keys', 'working_dir']
+#         for key in jcm_kwargs:
+#             if key in forbidden_keys:
+#                 self.logger.warn('You cannot use {} as a '.format(key) +
+#                                  'keyword argument for jcm.geo. It is ' +
+#                                  'already set by the SimulationSet instance.')
+#                 del jcm_kwargs[key]
+# 
+#         # Run jcm.geo. The cd-fix is necessary because the
+#         # project_dir/working_dir functionality seems to be broken in the
+#         # current python interface!
+#         _thisdir = os.getcwd()
+#         os.chdir(self.get_project_wdir())
+#         with utils.Capturing() as output:
+#             jcm.geo(project_dir=self.project.working_dir,
+#                     keys=simulation.keys,
+#                     working_dir=self.project.working_dir,
+#                     **jcm_kwargs)
+#         for line in output:
+#             logger_JCMgeo.debug(line)
+#         os.chdir(_thisdir)
 
     def solve_single_simulation(self, simulation, compute_geometry=True,
                                 run_post_process_files=None, 
@@ -1952,72 +1949,80 @@ class SimulationSet(object):
         # Geometry computation
         if compute_geometry:
             self.compute_geometry(simulation, **jcm_geo_kwargs)
-
-        # Add the resources if they are not ready yet
-        if not self._resources_ready():
-            self.add_resources()
-
-        # Solve the simulation and wait for it to finish. Output is captured
-        # and passed to the logger
-        # ---
-        # This is the new daemon style version
-        if NEW_DAEMON_DETECTED:
-            simulation.solve(**jcm_solve_kwargs)
-            results = daemon.wait(return_style='new')
-            result = results.values()[0]
-            simulation._set_jcm_results_and_logs(result)
-            ret1, ret2 = (result['results'], result['logs'])
         
-        # This is the old daemon style version
-        else:
-            with utils.Capturing() as output:
-                simulation.solve(**jcm_solve_kwargs)
-                results, logs = daemon.wait()
-            for line in output:
-                logger_JCMsolve.debug(line)
+        # TODO: make wdir_mode and processing_func also parameters of this
+        #       method
+        return simulation.solve_standalone(processing_func=None,
+                                run_post_process_files=run_post_process_files, 
+                                resource_manager=self._rm,
+                                additional_keys_for_pps=additional_keys_for_pps,
+                                jcm_solve_kwargs=jcm_solve_kwargs)
+        
+#         # Add the resources if they are not ready yet
+#         if not self._resources_ready():
+#             self.add_resources()
+# 
+#         # Solve the simulation and wait for it to finish. Output is captured
+#         # and passed to the logger
+#         # ---
+#         # This is the new daemon style version
+#         if NEW_DAEMON_DETECTED:
+#             simulation.solve(**jcm_solve_kwargs)
+#             results = daemon.wait(return_style='new')
+#             result = results.values()[0]
+#             simulation._set_jcm_results_and_logs(result)
+#             ret1, ret2 = (result['results'], result['logs'])
+#         
+#         # This is the old daemon style version
+#         else:
+#             with utils.Capturing() as output:
+#                 simulation.solve(**jcm_solve_kwargs)
+#                 results, logs = daemon.wait()
+#             for line in output:
+#                 logger_JCMsolve.debug(line)
+#     
+#             # Set the results and logs in the Simulation-instance and return them
+#             simulation._set_jcm_results_and_logs(results[0], logs[0])
+#             ret1, ret2 = (results[0], logs[0])
+#         
+#         if run_post_process_files is None:
+#             return ret1, ret2
+#         
+#         # If additional post process files are given, these are performed
+#         # subsequently
+#         if not isinstance(run_post_process_files, list):
+#             # Convert to list
+#             run_post_process_files = [run_post_process_files]
+#         
+#         # Iterate over all given post process files
+#         for f in run_post_process_files:
+#             if os.path.isfile(f):
+#                 # This is the new daemon style version
+#                 if NEW_DAEMON_DETECTED:
+#                     simulation.solve(pp_file=f,
+#                                      additional_keys=additional_keys_for_pps,
+#                                      **jcm_solve_kwargs)
+#                     pp_results = daemon.wait(return_style='new')
+#                     pp_result = pp_results.values()[0]
+#                     # Add the post process results to the simulation
+#                     simulation._add_post_process_results(pp_result)
+#                 # This is the old daemon style version
+#                 else:
+#                     with utils.Capturing() as output:
+#                         simulation.solve(pp_file=f,
+#                                     additional_keys=additional_keys_for_pps,
+#                                     **jcm_solve_kwargs)
+#                         pp_results, pp_logs = daemon.wait()
+#                     for line in output:
+#                         logger_JCMsolve.debug(line)
+#                     # Add the post process results to the simulation
+#                     simulation._add_post_process_results(pp_results[0],
+#                                                          pp_logs[0])
+#             else:
+#                 self.logger.warn('Given post process file "{}" '.format(f) +
+#                                  'does not exist. Skipping.')
+#         return ret1, ret2
     
-            # Set the results and logs in the Simulation-instance and return them
-            simulation._set_jcm_results_and_logs(results[0], logs[0])
-            ret1, ret2 = (results[0], logs[0])
-        
-        if run_post_process_files is None:
-            return ret1, ret2
-        
-        # If additional post process files are given, these are performed
-        # subsequently
-        if not isinstance(run_post_process_files, list):
-            # Convert to list
-            run_post_process_files = [run_post_process_files]
-        
-        # Iterate over all given post process files
-        for f in run_post_process_files:
-            if os.path.isfile(f):
-                # This is the new daemon style version
-                if NEW_DAEMON_DETECTED:
-                    simulation.solve(pp_file=f,
-                                     additional_keys=additional_keys_for_pps,
-                                     **jcm_solve_kwargs)
-                    pp_results = daemon.wait(return_style='new')
-                    pp_result = pp_results.values()[0]
-                    # Add the post process results to the simulation
-                    simulation._add_post_process_results(pp_result)
-                # This is the old daemon style version
-                else:
-                    with utils.Capturing() as output:
-                        simulation.solve(pp_file=f,
-                                    additional_keys=additional_keys_for_pps,
-                                    **jcm_solve_kwargs)
-                        pp_results, pp_logs = daemon.wait()
-                    for line in output:
-                        logger_JCMsolve.debug(line)
-                    # Add the post process results to the simulation
-                    simulation._add_post_process_results(pp_results[0],
-                                                         pp_logs[0])
-            else:
-                self.logger.warn('Given post process file "{}" '.format(f) +
-                                 'does not exist. Skipping.')
-        return ret1, ret2
-                
 
     def _start_simulations(self, N='all', processing_func=None, 
                            run_post_process_files=None, 
@@ -2488,6 +2493,10 @@ class SimulationSet(object):
         self._copying_needed = False
 
 # =============================================================================
+
+
+# TODO: Use a resource_manager for this class and make the handling in the
+# run-method part of the ResourceManager-class.
 
 
 class ConvergenceTest(object):
