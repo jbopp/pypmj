@@ -1,0 +1,33 @@
+<?
+if not 'farFieldRadius' in keys: keys['farFieldRadius'] = 1e6
+keys['outputName'] = "./"+keys['project_name']+"_results/farField"+str(keys['fName'])+".jcm"
+keys['inputName'] = "./"+keys['project_name']+"_results/fieldbag.jcm"
+?>
+
+PostProcess {
+  FarField {
+<?
+if keys['geometry'] == '2D':
+    ?>
+    Rotation = X:Z:-Y
+<?
+# ...
+?>
+
+    FieldBagFileName = "%(inputName)s"
+    OutputFileName = "%(outputName)s"
+    Polar {
+      Radius = %(farFieldRadius)e
+      Points = [
+<?
+for keys['theta'] in np.linspace(keys['startTheta'],keys['stopTheta'],keys['thetaSteps']):
+        for keys['phi'] in np.linspace(keys['startPhi'],keys['stopPhi'],keys['phiSteps']):
+            ?>
+            %(theta)e %(phi)e
+<?
+
+?>
+	]
+    }
+  }
+}

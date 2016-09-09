@@ -1,0 +1,22 @@
+Project = {
+  InfoLevel = 3
+  StorageFormat = Binary
+  Electromagnetics {
+    TimeHarmonic {
+      Scattering {
+        FieldComponents = Electric
+        Accuracy {
+          FiniteElementDegree = 4
+          Precision = 1e-2
+          Refinement {
+            NSegmentsPerWavelength = 20
+            MaxNumberSteps = 0
+          }
+	}
+      }
+    }
+  }
+}
+
+
+

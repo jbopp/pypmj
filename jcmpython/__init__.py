@@ -230,7 +230,7 @@ def _set_up_resources(daemon_):
 # Extension handling
 # ==============================================================================
 
-extensions = ['materials'] # Lists all known extensions
+extensions = ['materials', 'antenna'] # Lists all known extensions
 
 def load_extension(ext_name):
     """Loads the specified extension of jcmpython.
@@ -249,7 +249,14 @@ def load_extension(ext_name):
         except Exception as e:
             __logger.warn('Unable to load extension `{}`: {}'.format(ext_name,
                                                                      e))
-
+    elif ext_name == 'antenna':
+        try:
+            global antenna
+            from .extension_antenna import antenna
+            __logger.info('Loaded extension: {}'.format(ext_name))
+        except Exception as e:
+            __logger.warn('Unable to load extension `{}`: {}'.format(ext_name,
+                                                                     e))
 # =============================================================================
 
 # Import jcmwave here if the configuration is complete

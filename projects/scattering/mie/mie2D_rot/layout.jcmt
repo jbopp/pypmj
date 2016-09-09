@@ -1,0 +1,62 @@
+<?
+
+if not 'sphereRadius' in keys: keys['sphereRadius'] = 140
+
+if not 'substrateHeight' in keys: keys['substrateHeight'] = 100.0
+if not 'zSpace' in keys: keys['zSpace'] = 100
+if not 'rSpace' in keys: keys['rSpace'] = 100
+
+keys['domainRadius'] = keys['sphereRadius']+keys['rSpace']
+keys['domainHalfHeight'] = keys['sphereRadius']+keys['zSpace']
+
+?>
+
+Layout {
+  UnitOfLength = 1e-9
+  CoordinateSystem = Cylindrical
+  MeshOptions {
+    MaximumSidelength = 500
+  }
+  Polygon {
+    Name = "ComputationalDomain"
+    DomainId = 1
+    Priority = ComputationalDomain
+    SideLengthConstraint = 500
+    Points = [
+    0.0, -%(domainHalfHeight)e,
+    %(domainRadius)e, -%(domainHalfHeight)e,
+    %(domainRadius)e,  %(domainHalfHeight)e,
+    0.0, %(domainHalfHeight)e
+    ]
+    BoundarySegment {
+      Number = 1
+      ExteriorDomainId = 1
+      BoundaryClass = Transparent
+    }
+    BoundarySegment {
+      Number = 2
+      ExteriorDomainId = 1
+      BoundaryClass = Transparent
+    }
+    BoundarySegment {
+      Number = 3
+      ExteriorDomainId = 1
+      BoundaryClass = Transparent
+    }
+    BoundarySegment {
+      Number = 4
+      BoundaryId = 1
+    }
+  }
+
+
+  Circle {
+    Name = "Sphere"
+    DomainId = 2
+    Priority = 2
+    Radius = %(sphereRadius)e
+    RefineAll = 2
+  }
+}
+
+

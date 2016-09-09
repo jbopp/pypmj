@@ -213,7 +213,7 @@ class antenna(object):
     
     
     
-    def generatePostProcess(self,**kwargs):
+    def generatePostProcess(self,project_file,**kwargs):
         """
         Converts the farFieldPolarT.jcmpt file (deposited in the procject/file/path/postprocesses/)
         into .jcm files. The filepaths will be given back as the attribute .filePaths.
@@ -225,6 +225,8 @@ class antenna(object):
         """
         pp_keys = {}
         pp_keys['geometry'] = self._geometry
+        file_path, project_name = os.path.split(project_file)
+        pp_keys['project_name'], _ = os.path.splitext(project_name)
         
         if 'direction' in kwargs:
             pp_keys['startPhi'] = 0
@@ -255,9 +257,9 @@ class antenna(object):
                 pp_keys['thetaSteps'] =   1
             
             pp_keys['fName'] = ''
-            jpy.jcm.jcmt2jcm('postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
-                              outputfile='postprocesses/farFieldPolar.jcmp')
-            self.filePaths = 'postprocesses/farFieldPolar.jcmp'
+            jpy.jcm.jcmt2jcm(file_path+'/postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
+                              outputfile=file_path+'/postprocesses/farFieldPolar.jcmp')
+            self.filePaths = file_path+'/postprocesses/farFieldPolar.jcmp'
             
         else:
             pp_keys['phiSteps']   =  self.res
@@ -269,18 +271,18 @@ class antenna(object):
             pp_keys['stopTheta']  =  89.9
             
             pp_keys['fName'] = 'Up'
-            jpy.jcm.jcmt2jcm('postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
-                      outputfile='postprocesses/farFieldPolarUp.jcmp')
+            jpy.jcm.jcmt2jcm(file_path+'/postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
+                      outputfile=file_path+'/postprocesses/farFieldPolarUp.jcmp')
 
             pp_keys['startTheta'] =  90.1
             pp_keys['stopTheta']  = 180.0
             
             pp_keys['fName'] = 'Down'
-            jpy.jcm.jcmt2jcm('postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
-                      outputfile='postprocesses/farFieldPolarDown.jcmp')
+            jpy.jcm.jcmt2jcm(file_path+'/postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
+                      outputfile=file_path+'/postprocesses/farFieldPolarDown.jcmp')
 
-            self.filePaths = ['postprocesses/farFieldPolarUp.jcmp',
-                              'postprocesses/farFieldPolarDown.jcmp']
+            self.filePaths = [file_path+'/postprocesses/farFieldPolarUp.jcmp',
+                              file_path+'/postprocesses/farFieldPolarDown.jcmp']
         return
     
     
