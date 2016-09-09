@@ -48,17 +48,10 @@ class antenna(object):
         >> plt.ylabel('collection efficiency / %')
     """
     
-    def __init__(self,**kwargs):
+    def __init__(self,resolution=25,geometry='2D'):
         
-        if 'resolution' in kwargs:
-            self.res = kwargs['resolution']
-        else:
-            self.res = 25
-            
-        if 'geometry' in kwargs:
-            self._geometry = kwargs['geometry']
-        else:
-            self._geometry = '2D'
+        self.resolution = resolution
+        self.geometry = geometry
         
         return
     
@@ -76,16 +69,16 @@ class antenna(object):
         ------
         resolution  (=INT) specifies the number of sample points on a cartesian grid, standard = 25.
         """
-        theta0 = np.linspace(0, np.pi/2,self.res)
-        phi0   = np.linspace(0, 2*np.pi,self.res)
+        theta0 = np.linspace(0, np.pi/2,self.resolution)
+        phi0   = np.linspace(0, 2*np.pi,self.resolution)
         
         dtt_up_unn = self._calc_dtt(ff_dict['n_up'],
                                     ff_dict['FF_up'],
                                     ff_dict['points_up'],
                                     theta0, phi0)
         
-        theta1 = np.linspace(np.pi/2,np.pi,self.res)
-        phi1   = np.linspace(0, 2*np.pi,self.res)
+        theta1 = np.linspace(np.pi/2,np.pi,self.resolution)
+        phi1   = np.linspace(0, 2*np.pi,self.resolution)
         
         dtt_down_unn = self._calc_dtt(ff_dict['n_down'],
                                       ff_dict['FF_down'],
@@ -142,16 +135,16 @@ class antenna(object):
         """
         p_dict = self._calc_poynting(n,FF,points,**kwargs)
         
-        ffp = np.zeros(self.res)
-        NA  = np.zeros(self.res)
+        ffp = np.zeros(self.resolution)
+        NA  = np.zeros(self.resolution)
         
         
         if p_dict['theta'][0][0] > np.pi/2.0:
-            for i in range(self.res):
-                ffp[i] = np.trapz(np.trapz(p_dict['poynting_S'][i:self.res+1,:].real*np.sin(p_dict['theta'][i:self.res+1,:]),x=theta_i),x=phi_i[i:self.res+1])*p_dict['r'].real**2
+            for i in range(self.resolution):
+                ffp[i] = np.trapz(np.trapz(p_dict['poynting_S'][i:self.resolution+1,:].real*np.sin(p_dict['theta'][i:self.resolution+1,:]),x=theta_i),x=phi_i[i:self.resolution+1])*p_dict['r'].real**2
                 NA[i]  = n.real*np.sin(np.pi-p_dict['theta'][i][0])
         else:
-            for i in range(self.res):
+            for i in range(self.resolution):
                 ffp[i] = np.trapz(np.trapz(p_dict['poynting_S'][0:i+1,:].real*np.sin(p_dict['theta'][0:i+1,:]),x=theta_i),x=phi_i[0:i+1])*p_dict['r'].real**2
                 NA[i]  = n.real*np.sin(p_dict['theta'][i][0])
         
@@ -189,7 +182,7 @@ class antenna(object):
             # Readout each polarisation of the far field
             # computed by JCMwave + computation of the lengths
             # of complex poynting vector:
-            poynting_R.append(z0*abs(np.reshape(FF[:,i],(-1,self.res)))**2)
+            poynting_R.append(z0*abs(np.reshape(FF[:,i],(-1,self.resolution)))**2)
             # Determining direction (x,y,z components) of
             # poynting vectors on the sphere surface used
             # for computation, for each polarization:
@@ -224,7 +217,7 @@ class antenna(object):
                          justUp/justDown - single evaluation point in upward/downward direction
         """
         pp_keys = {}
-        pp_keys['geometry'] = self._geometry
+        pp_keys['geometry'] = self.geometry
         file_path, project_name = os.path.split(project_file)
         pp_keys['project_name'], _ = os.path.splitext(project_name)
         
@@ -262,8 +255,8 @@ class antenna(object):
             self.filePaths = file_path+'/postprocesses/farFieldPolar.jcmp'
             
         else:
-            pp_keys['phiSteps']   =  self.res
-            pp_keys['thetaSteps'] =  self.res
+            pp_keys['phiSteps']   =  self.resolution
+            pp_keys['thetaSteps'] =  self.resolution
             
             pp_keys['startPhi']   =   0.0
             pp_keys['stopPhi']    = 360.0
@@ -296,8 +289,8 @@ class antenna(object):
         /
         """
         r      = np.sqrt(np.sum(points**2,axis=1))
-        theta  = np.reshape(np.arccos(points[:,2]/r),(-1,self.res))
-        phi    = np.reshape(np.arctan2(points[:,1],points[:,0]),(-1,self.res))
+        theta  = np.reshape(np.arccos(points[:,2]/r),(-1,self.resolution))
+        phi    = np.reshape(np.arctan2(points[:,1],points[:,0]),(-1,self.resolution))
         
         return r,theta,phi
     
