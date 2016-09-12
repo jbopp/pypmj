@@ -1,153 +1,119 @@
 <?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
 # Imports
-import os
-from project_utils import pointlist_im_to_re, polyarea
 import numpy as np
-from math import pi
 
-# Calc d1, d2, d3 from d
-tanA = np.tan( np.deg2rad(keys['pore_angle']) )
-xHelp = keys['d']/2. - ( keys['h']/2. * tanA )
-keys['d1'] = 2 * xHelp # diameter pore at 0
-keys['d2'] = keys['d'] # diameter pore at hm
-keys['d3'] = 2 * ( keys['d'] - xHelp ) # diameter pore at h (top)
-keys['hm'] = keys['h'] / 2.
+# Set default keys
+default_keys = {'min_mesh_angle' : 20.,
+				'refine_all_circle' : 2,
+				'uol' : 1.e-9,
+				'pore_angle' : 0.}
 
-# Generate a point-list
-points_cd = ( keys['p'] / 2. / np.cos(np.deg2rad(30)) * 
-                np.exp( 2.j * pi / 6. * np.arange(1,7) ) )
-keys['pointlist_cd'] = pointlist_im_to_re(points_cd)
+for dkey, dval in default_keys.iteritems():
+	if not dkey in keys:
+		keys[dkey] = dval
 
-dz_des = keys['slc_1']
+# Set all missing values for the z-direction maximum meshing side lengths using
+# the minimum of the two horizontal side lengths
+sl_z_default = min([keys['max_sl_polygon'], keys['max_sl_circle']])
+sl_z_keys = ['max_sl_z_sub', 'max_sl_z_slab', 'max_sl_z_sup']
+for zkey in sl_z_keys:
+	if not zkey in keys:
+		keys[zkey] = sl_z_default
 
-h1 = keys['h'] - keys['hm']
-nSlices1 = np.ceil( h1 / dz_des )
-dz1 = h1 / nSlices1
+# Calculate the lower and upper radii of the cone from center diameter and
+# pore angle
+alpha = keys['pore_angle']
+d = keys['d']
+h = keys['h']
+keys['radius_i'] = d/2. - h*np.tan(np.deg2rad(alpha))/2.
+keys['radius_f'] = keys['d'] - keys['radius_i']
 
-h2 = keys['hm']
-nSlices2 = np.ceil( h2 / dz_des )
-dz2 = h2 / nSlices2
-
-z1 = np.arange(0, nSlices1+1) * dz1
-d1 = keys['d1'] + (keys['d2'] - keys['d1']) * z1/h1
-z2 = np.arange(1, nSlices2+1) * dz2
-d2 = keys['d2'] + (keys['d3'] - keys['d2']) * z2/h2
-
-diameters = np.append(np.array(d1), np.array(d2))
-thicknesses = np.hstack( (np.ones(nSlices1)*dz1, np.ones(nSlices2)*dz2) )
-
-horizontal_shape1 = np.zeros((len(diameters), keys['n_points_circle']), 
-                             dtype=np.complex128)
-derivatives =np.zeros_like(horizontal_shape1)
-angles = np.linspace(0., 2.*pi, keys['n_points_circle'] + 1)[:-1]
-points_circle_base = 1./2. * np.exp( 1j*angles )
-
-for i, d in enumerate(diameters):
-    # outer boundary of the frame
-    points_circle = d * points_circle_base
-    area = polyarea(points_circle.real, points_circle.imag)
-    area_circle = pi * (d/2.)**2
-    area_scaling = np.sqrt( area_circle/area )
-    horizontal_shape1[i,:] = area_scaling* points_circle
-    derivatives[i,:]  = area_scaling*points_circle_base
-
-# for all heights, all positions of the line shape polygons are written to 
-# strings gv
-gv_s = []
-for i, horizontal in enumerate(horizontal_shape1):
-    gv = ''
-    for count, h in enumerate(horizontal):
-        gv += ' X_o_{0}:{1}<{3}>, Y_o_{0}:{2}<{4}> ,'.format(count+1, h.real, h.imag, derivatives[i,count].real, derivatives[i,count].imag)
-    gv_s.append(gv)
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
 ?>
-DerivativeParameters = ["Radius"]
 Layout {
   UnitOfLength = %(uol)e
   MeshOptions {
-    MinimumMeshAngle = 20.0
+    MinimumMeshAngle = %(min_mesh_angle)4f
   }
-  Polygon {
-    Name = "ComputationalDomain"
-    Points = %(pointlist_cd)10e
-    DomainId = 101
-    Priority = -1
-    MeshOptions {
-      MaximumSidelength = %(slc_1)4f
-    }
-<?
-for i in range(1,len(points_cd)+1):
-    keys['index_'] = i
-    ?>
-    BoundarySegment {
-      Number = %(index_)i
-      BoundaryClass = Periodic
-    }
-<?
-?>
 
+  Polygon { 
+    Name = "ComputationalDomain" 
+    DomainId = 1
+    Priority = -1 
+    PeriodicUnitCell {
+      LatticeVectorLengths = [%(p)4f %(p)4f]
+      LatticeAngle = 60
+      Shape = Hexagonal
+    }
+    MeshOptions {
+      MaximumSidelength = %(max_sl_polygon)4f
+    }
   }
-  Polygon {
-    Name = "Hole"
-    DomainId = 102
+  
+  Circle {
+    Name = "Cone"
+    DomainId = 2
     Priority = 1
-    Points = [
-<?
-for count in range(keys['n_points_circle']):
-    keys['str1'] = 'LayerInterface:X_o_{0}'.format(count+1)
-    keys['str2'] = 'LayerInterface:Y_o_{0}'.format(count+1)
-    ?>
-               %(str1)s
-               %(str2)s
-<?
-?>
-              ]
+    Radius = %(radius_i)4f
+    RefineAll = %(refine_all_circle)i
     MeshOptions {
-      MaximumSidelength = %(slc_2)4f
+      MaximumSidelength = %(max_sl_circle)4f
     }
   }
-   HeightProfile {
-     OffsetZ = 0
-     InfiniteLayer { # subspace
-    DomainIdMapping = [101 1 102 1]
-     }
-<?
-keys['gv'] = gv_s[0]
-?>
-     LayerInterface {    
-        GeometryValues = [%(gv)s]
-     }     
-
-     Layer { # substrate
-     Thickness = %(h_sup)e
-    DomainIdMapping = [101 1 102 1]
-     }    
-<?
-for i, thickness in enumerate(thicknesses):
-    keys['gv'] = gv_s[i]
-    keys['thickness'] = thickness
-    ?>
-   LayerInterface {    
-        GeometryValues = [%(gv)s]
-     }  
-    Layer {
-     Thickness = %(thickness)e
-     DomainIdMapping = [101 2 102 3]
+  
+  Extrusion {
+  
+    LayerInterface {
+	  Name = "BoundaryInterfaceBottom"
+      BoundaryClass = Transparent
     }
-<?
-keys['gv'] = gv_s[-1]
-?>
-     LayerInterface {    
-        GeometryValues = [%(gv)s]
-     }     
-     Layer { # superspace
-     Thickness = %(h_sub)e
-    DomainIdMapping = [101 4 102 4]
-     }
-     LayerInterface {    
-        GeometryValues = [%(gv)s]
-     }     
-     InfiniteLayer {
-    DomainIdMapping = [101 4 102 4]
-     }
-   }
+    
+    Layer {
+      Name = "Subspace"
+      Thickness = %(h_sub)4f
+      DomainId = 1
+      MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_sub)4f
+        MaximumSidelengthZLower = %(max_sl_z_sub)4f
+        MaximumSidelengthZUpper = %(max_sl_z_slab)4f
+      }
+    }
+
+    Layer {
+      Name = "Slab"
+      Thickness = %(h)4f
+      DomainIdMapping = [1 2, 2 3]
+      MeshOptions {
+        MaximumSidelengthZ = %(max_sl_z_slab)4f
+      }
+    }
+    
+    LayerInterface {
+	  Name = "InterfaceTop"
+      GeometryValues = [Cone/Radius = %(radius_f)4f]
+    }
+    
+    Layer {
+      Name = "Superspace"
+      Thickness = %(h_sup)4f
+      DomainIdMapping = [1 4]
+      MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_sup)4f
+        MaximumSidelengthZLower = %(max_sl_z_slab)4f
+        MaximumSidelengthZUpper = %(max_sl_z_sup)4f
+      }
+    }
+    
+    LayerInterface {
+	  Name = "BoundaryInterfaceTop"
+	  GeometryValues = [Cone/Radius = %(radius_f)4f]
+      BoundaryClass = Transparent
+    }
+  }
 }

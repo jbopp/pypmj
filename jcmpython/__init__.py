@@ -88,6 +88,7 @@ from . import utils
 resources = _JCMPNotLoadedExceptionRaiser('resources')
 JCMProject = _JCMPNotLoadedExceptionRaiser('JCMProject')
 Simulation = _JCMPNotLoadedExceptionRaiser('Simulation')
+ResourceManager = _JCMPNotLoadedExceptionRaiser('ResourceManager')
 SimulationSet = _JCMPNotLoadedExceptionRaiser('SimulationSet')
 ConvergenceTest = _JCMPNotLoadedExceptionRaiser('ConvergenceTest')
 
@@ -180,9 +181,11 @@ def import_jcmwave(jcm_install_path=None):
     # Import the core classes
     global JCMProject
     global Simulation
+    global ResourceManager
     global SimulationSet
     global ConvergenceTest
-    from .core import JCMProject, Simulation, SimulationSet, ConvergenceTest
+    from .core import (JCMProject, Simulation, ResourceManager, SimulationSet,
+                       ConvergenceTest)
 
 def set_log_file(directory='logs', filename='from_date'):
     """Sets up the logging to a log-file if this is not already configured.
