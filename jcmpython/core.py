@@ -1234,8 +1234,10 @@ class SimulationSet(object):
         self._final_storage_dir = fsd
         self.storage_dir = tsd
 
-    def _initialize_store(self, check_version_match):
-        """Initializes the HDF5 store and sets the `store` attribute.
+    def _initialize_store(self, check_version_match=False):
+        """Initializes the HDF5 store and sets the `store` attribute. If
+        `check_version_match` is True, the current versions of JCMsuite and
+        jcmpython are compared to the stored versions.
 
         The file name and the name of the data section inside the file
         are configured in the DEFAULTS section of the configuration
@@ -1871,29 +1873,6 @@ class SimulationSet(object):
         
         # Call the compute_geometry-method of the simulation
         simulation.compute_geometry(**jcm_kwargs)
-        
-#         # Check the keyword arguments
-#         forbidden_keys = ['project_file', 'keys', 'working_dir']
-#         for key in jcm_kwargs:
-#             if key in forbidden_keys:
-#                 self.logger.warn('You cannot use {} as a '.format(key) +
-#                                  'keyword argument for jcm.geo. It is ' +
-#                                  'already set by the SimulationSet instance.')
-#                 del jcm_kwargs[key]
-# 
-#         # Run jcm.geo. The cd-fix is necessary because the
-#         # project_dir/working_dir functionality seems to be broken in the
-#         # current python interface!
-#         _thisdir = os.getcwd()
-#         os.chdir(self.get_project_wdir())
-#         with utils.Capturing() as output:
-#             jcm.geo(project_dir=self.project.working_dir,
-#                     keys=simulation.keys,
-#                     working_dir=self.project.working_dir,
-#                     **jcm_kwargs)
-#         for line in output:
-#             logger_JCMgeo.debug(line)
-#         os.chdir(_thisdir)
 
     def solve_single_simulation(self, simulation, compute_geometry=True,
                                 run_post_process_files=None, 
@@ -1957,72 +1936,6 @@ class SimulationSet(object):
                                 resource_manager=self._rm,
                                 additional_keys_for_pps=additional_keys_for_pps,
                                 jcm_solve_kwargs=jcm_solve_kwargs)
-        
-#         # Add the resources if they are not ready yet
-#         if not self._resources_ready():
-#             self.add_resources()
-# 
-#         # Solve the simulation and wait for it to finish. Output is captured
-#         # and passed to the logger
-#         # ---
-#         # This is the new daemon style version
-#         if NEW_DAEMON_DETECTED:
-#             simulation.solve(**jcm_solve_kwargs)
-#             results = daemon.wait(return_style='new')
-#             result = results.values()[0]
-#             simulation._set_jcm_results_and_logs(result)
-#             ret1, ret2 = (result['results'], result['logs'])
-#         
-#         # This is the old daemon style version
-#         else:
-#             with utils.Capturing() as output:
-#                 simulation.solve(**jcm_solve_kwargs)
-#                 results, logs = daemon.wait()
-#             for line in output:
-#                 logger_JCMsolve.debug(line)
-#     
-#             # Set the results and logs in the Simulation-instance and return them
-#             simulation._set_jcm_results_and_logs(results[0], logs[0])
-#             ret1, ret2 = (results[0], logs[0])
-#         
-#         if run_post_process_files is None:
-#             return ret1, ret2
-#         
-#         # If additional post process files are given, these are performed
-#         # subsequently
-#         if not isinstance(run_post_process_files, list):
-#             # Convert to list
-#             run_post_process_files = [run_post_process_files]
-#         
-#         # Iterate over all given post process files
-#         for f in run_post_process_files:
-#             if os.path.isfile(f):
-#                 # This is the new daemon style version
-#                 if NEW_DAEMON_DETECTED:
-#                     simulation.solve(pp_file=f,
-#                                      additional_keys=additional_keys_for_pps,
-#                                      **jcm_solve_kwargs)
-#                     pp_results = daemon.wait(return_style='new')
-#                     pp_result = pp_results.values()[0]
-#                     # Add the post process results to the simulation
-#                     simulation._add_post_process_results(pp_result)
-#                 # This is the old daemon style version
-#                 else:
-#                     with utils.Capturing() as output:
-#                         simulation.solve(pp_file=f,
-#                                     additional_keys=additional_keys_for_pps,
-#                                     **jcm_solve_kwargs)
-#                         pp_results, pp_logs = daemon.wait()
-#                     for line in output:
-#                         logger_JCMsolve.debug(line)
-#                     # Add the post process results to the simulation
-#                     simulation._add_post_process_results(pp_results[0],
-#                                                          pp_logs[0])
-#             else:
-#                 self.logger.warn('Given post process file "{}" '.format(f) +
-#                                  'does not exist. Skipping.')
-#         return ret1, ret2
-    
 
     def _start_simulations(self, N='all', processing_func=None, 
                            run_post_process_files=None, 
@@ -2469,8 +2382,15 @@ class SimulationSet(object):
             utils.tForm(time.time() - t0)))
 
     def _copy_from_transitional_dir(self):
+        """Moves the transitional storage directory to the taget storage
+        directory and cleans up any empty residual directories in the
+        transitional path."""
         if not self._copying_needed:
             return
+        
+        # Close the HDF5 store, as it will be moved
+        self.close_store()
+        
         try:
             if os.path.isdir(self._final_storage_dir):
                 rmtree(self._final_storage_dir)
@@ -2491,6 +2411,9 @@ class SimulationSet(object):
         self.storage_dir = self._final_storage_dir
         del self._final_storage_dir
         self._copying_needed = False
+        
+        # Reconnect to the moved HDF5 store
+        self._initialize_store()
 
 # =============================================================================
 
@@ -2779,8 +2702,8 @@ class ConvergenceTest(object):
         attribute.
 
         If more than 1 `dev_columns` is given, the mean deviation is
-        also calculated and in DataFrame column 'deviation_mean'. It is
-        used to sort the data if `sort_by` is None.
+        also calculated and stored in the DataFrame column 'deviation_mean'. It
+        is used to sort the data if `sort_by` is None.
 
         """
         self.__log_paragraph('Analyzing...')
