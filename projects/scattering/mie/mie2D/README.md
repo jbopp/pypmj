@@ -50,7 +50,7 @@ electric field strength.*
 ## Geometry specific
 
 Key | Default | Description
---- |:-------:| -----------
+:---|:-------:| -----------
 `radius` | | The radius of the glass sphere in µm
 
 ## Material specific

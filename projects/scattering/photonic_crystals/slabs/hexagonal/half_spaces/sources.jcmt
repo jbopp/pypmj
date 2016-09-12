@@ -1,36 +1,61 @@
 <?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+# Imports
 import numpy as np
-amplitude_1 = np.array([0, 1, 0])
-amplitude_2 = np.array([1, 0, 0])
-nSuperspace = np.real(keys['mat_superspace'].getNKdata(
-                                                    keys['vacuum_wavelength']))
-k_vector = np.array([0, 0, -2*np.pi/keys['vacuum_wavelength'] * nSuperspace])
+
+# Load values from keys
+mat_super = keys['mat_superspace'] # <- MaterialData-instance
+wvl = keys['vacuum_wavelength']
 theta = np.deg2rad(keys['theta'])
 phi = np.deg2rad(keys['phi'])
-A = np.array([ [np.cos(theta), 0, np.sin(theta)], [0, 1, 0], [-np.sin(theta), 0, np.cos(theta)] ])
-B = np.array([ [np.cos(phi), np.sin(phi), 0], [-np.sin(phi), np.cos(phi), 0], [0, 0, 1] ])
 
-keys['strength_1'] = np.dot(np.dot(B,A),amplitude_1).T
-keys['strength_2'] = np.dot(np.dot(B,A),amplitude_2).T
-keys['k_vec'] = np.dot(np.dot(B,A),k_vector).T
+# Amplitudes of the two sources
+amplitude_1 = np.array([0., 1., 0.])
+amplitude_2 = np.array([1., 0., 0.])
 
+# Refractive index of the superspace material
+n_super = np.real(mat_super.getNKdata(wvl))
+
+# k-vector
+k_vector = np.array([0., 0., -2.*np.pi*n_super/wvl])
+
+# Rotation matrices to calculate the projected amplitudes
+rot_y = np.array([[np.cos(theta), 0., np.sin(theta)], 
+                  [0., 1., 0.], 
+                  [-np.sin(theta), 0., np.cos(theta)]])
+rot_z = np.array([[np.cos(phi), np.sin(phi), 0.],
+                  [-np.sin(phi), np.cos(phi), 0.],
+                  [0., 0., 1.] ])
+rot_both = np.dot(rot_z,rot_y)
+
+# Update the keys dict with the necessary values
+keys['amplitude_1'] = np.dot(rot_both, amplitude_1).T
+keys['amplitude_2'] = np.dot(rot_both, amplitude_2).T
+keys['k_vector'] = np.dot(rot_both, k_vector).T
+
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
 ?>
-SourceBag { # S
+SourceBag { # S/TE
   Source {
     ElectricFieldStrength {
       PlaneWave {
-        K = %(k_vec)e
-        Amplitude = %(strength_1)e
+        K = %(k_vector)e
+        Amplitude = %(amplitude_1)e
       }
     }
   }
 }
-SourceBag { # P
+SourceBag { # P/TM
   Source {
     ElectricFieldStrength {
       PlaneWave {
-        K = %(k_vec)e
-        Amplitude = %(strength_2)e
+        K = %(k_vector)e
+        Amplitude = %(amplitude_2)e
       }
     }
   }

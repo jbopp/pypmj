@@ -29,7 +29,7 @@ CWD = os.getcwd()
 DEFAULT_PROJECT = 'scattering/mie/mie2D_extended'
 MIE_KEYS_REF = {'constants': {},
                 'parameters': {'fem_degree_max': 6,
-                               'precision_field_energy': 1.e-9},
+                               'precision_field_energy': 1.e-8},
                 'geometry': {'radius': 0.3,
                              'slc_domain': 0.1,
                              'slc_circle': 0.05,

@@ -211,7 +211,25 @@ class DaemonResource(object):
     def restore_default_m_n(self):
         """Restores the default values for multiplicity and n_threads."""
         self.set_m_n(self.multiplicity_default, self.n_threads_default)
-
+    
+    def maximize_n_threads(self, n_threads=None):
+        """Changes the multiplicity to 1 and the number of threads to the
+        product of the currently configured `multiplicity` and `n_threads` or
+        to the given number `n_threads`.
+        """
+        if n_threads is None:
+            n_threads = self.get_available_cores()
+        self.set_m_n(1, n_threads)
+    
+    def maximize_multiplicity(self, multiplicity=None):
+        """Changes n_threads to 1 and the multiplicity to the product of the
+        currently configured `multiplicity` and `n_threads` or to the given
+        number `multiplicity`.
+        """
+        if multiplicity is None:
+            multiplicity = self.get_available_cores()
+        self.set_m_n(multiplicity, 1)
+    
     def _add_type_dependent(self):
         """Adds the current ressource depending on the stype."""
         if self.stype == 'Workstation':
@@ -271,9 +289,7 @@ class DaemonResource(object):
 # =============================================================================
 class ResourceDict(dict):
     """Subclass of dict for extended handling of DaemonResource instances.
-
-    If a key value pair is added
-
+    
     """
 
     def __init__(self, *args, **kwargs):

@@ -17,6 +17,7 @@ from datetime import date
 from glob import glob
 import inspect
 from itertools import product
+from numbers import Number
 import numpy as np
 from shutil import copytree, rmtree, move
 import os
@@ -42,6 +43,7 @@ DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
 # Global defaults
 SIM_DIR_FMT = 'simulation{0:06d}'
 STANDARD_DATE_FORMAT = '%y%m%d'
+_H5_STORABLE_TYPES = (string_types, Number)
 NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
 if not NEW_DAEMON_DETECTED:
     logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
@@ -218,15 +220,35 @@ class JCMProject(object):
         if sys_append:
             sys.path.append(path)
         self.was_copied = True
-
+    
+    def get_file_path(self, file_name):
+        """Returns the full path to the file with `file_name` if present in
+        the current project. If this project was already copied to a working
+        directory, the path to this directory is used. Otherwise, the source
+        directory is used.""" 
+        if self.was_copied:
+            dir_ = self.working_dir
+        else:
+            dir_ = self.source
+        if not file_name in os.listdir(dir_):
+            raise OSError('File "{}" is not present in the current project.'.
+                          format(file_name))
+            return
+        return os.path.join(dir_, file_name)
+    
     def get_project_file_path(self):
         """Returns the complete path to the project file."""
         return os.path.join(self.working_dir, self.project_file_name)
     
     def show_readme(self, try_use_markdown=True):
-        readme_file = os.path.join(self.source, 'README.md')
-        if not os.path.isfile(readme_file):
-            self.logger.warn('No README.md found in {}'.format(self.source))
+        """Returns the content of the README.md file, if present. If
+        `try_use_markdown` is True, it is tried to display the mark down file
+        in a parsed way, which might only work inside ipython/jupyter notebooks.
+        """
+        try:
+            readme_file = self.get_file_path('README.md')
+        except OSError:
+            self.logger.warn('No README.md found for this project.')
             return
         readme = utils.file_content(readme_file)
         if not try_use_markdown:
@@ -305,40 +327,66 @@ class Simulation(object):
 
     Parameters
     ----------
+    keys : dict
+        The keys dict passed as the `keys` argument of jcmwave.solve. Used to
+        translate JCM template files (i.e. *.jcmt-files).
+    project : JCMProject, default None
+        The JCMProject instance related to this simulation.
     number : int
         A simulation number to identify/order simulations in a series of
         multiple simulations. It is used as the row index of the returned
         pandas DataFrame (e.g. by _get_DataFrame()).
-    keys : dict
-        The keys dict passed as the `keys` argument of jcmwave.solve. Used to
-        translate JCM template files (i.e. *.jcmt-files).
-    stored_keys : list
+    stored_keys : list or NoneType, default None
         A list of keys (must be a subset of `keys.keys()`) which will be part
         of the data in the pandas DataFrame, i.e. columns in the DataFrame
         returned by _get_DataFrame(). These keys will be stored in the HDF5
-        store by the SimulationSet-instance.
+        store by the SimulationSet-instance. If None, a it is tried to generate
+        an as complete list of storable keys as possible automatically.
     storage_dir : str (path)
         Path to the directory were simulation working directories will be
         stored. The Simulation itself will be in a subfolder containing its
-        number in the folder name.
-    project_file_name : str
-        Name of the JCM project file (a .jcmp(t)-file).
-    rerun_JCMgeo : bool
+        number in the folder name. If None, the subdirectory 'standalone_solves'
+        in the current working directory is used.
+    rerun_JCMgeo : bool, default False
         Controls if JCMgeo needs to be called before execution in a series of
         simulations.
 
     """
 
-    def __init__(self, number, keys, stored_keys, storage_dir,
-                 project_file_name, rerun_JCMgeo=False):
+    def __init__(self, keys, project=None, number=0, stored_keys=None, 
+                 storage_dir=None, rerun_JCMgeo=False, **kwargs):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
-        self.number = number
         self.keys = keys
-        self.stored_keys = stored_keys
-        self.storage_dir = storage_dir
-        self.project_file_name = project_file_name
+        self.project = project
+        self.number = number
         self.rerun_JCMgeo = rerun_JCMgeo
         self.status = 'Pending'
+        
+        # If no list of stored_keys is provided, use all keys for which values
+        # are of types that could be stored to H5
+        if stored_keys is None:
+            stored_keys = []
+            for key, val in keys.iteritems():
+                if isinstance(val, _H5_STORABLE_TYPES):
+                    stored_keys.append(key)
+        self.stored_keys = stored_keys
+        
+        # If no storage_dir is given, use a subfolder of the current working
+        # directory
+        if storage_dir is None:
+            storage_dir = os.path.abspath('standalone_solves')
+        self.storage_dir = storage_dir
+        
+        # Deprecation handling
+        if 'project_file_name' in kwargs:
+            self._deprecated_pfilename = kwargs['project_file_name']
+            self.logger.warn('Passing only the project file name is ' +
+                             'deprecated. Please path the complete ' +
+                             'JCMProject-instance.')
+        else:
+            if self.project is None:
+                raise ValueError('Please pass the JCMProject-instance for ' +
+                                 'argument `project`.')
 
     def __repr__(self):
         return 'Simulation(number={}, status={})'.format(self.number,
@@ -360,8 +408,9 @@ class Simulation(object):
         ----------
         pp_file : str or NoneType, default None
             File path to a JCM post processing file (extension .jcmp(t)). If
-            None, the `project_file_name` is used and the mode 'solve' is used
-            for jcmwave.solve. If not None, the mode 'post_process' is used.
+            None, the `get_project_file_path` of the current project is used
+            and the mode 'solve' is used for jcmwave.solve. If not None, the
+            mode 'post_process' is used.
         additional_keys : dict or NoneType, default None
             dict which will be merged to the `keys`-dict before passing them
             to the jcmwave.solve-method. Only new keys are added, duplicates
@@ -387,7 +436,11 @@ class Simulation(object):
         
         if pp_file is None:
             mode = 'solve'
-            project_file = self.project_file_name
+            if self.project is None:
+                # Only for backwards compatibility
+                project_file = self._deprecated_pfilename
+            else:
+                project_file = self.project.get_project_file_path()
         else:
             mode = 'post_process'
             project_file = pp_file
@@ -668,6 +721,312 @@ class Simulation(object):
             self.logger.warn('Working directory {} does not exist'.format(
                 os.path.basename(wdir)) +
                 ' for simNumber {}'.format(self.number))
+    
+    def _prepare_project(self):
+        """Copies the project to its working directory if not already done."""
+        if not self.project.was_copied:
+            self.project.copy_to()
+    
+    def view_geometry(self):
+        """Opens the grid.jcm file using JCMview if it exists."""
+        try:
+            grid_file = self.project.get_file_path('grid.jcm')
+        except OSError:
+            self.logger.warn('No "grid.jcm" found in the current project. ' +
+                             'Please compute the geometry first.')
+            return
+        jcm.view(grid_file)
+    
+    def compute_geometry(self, **jcm_kwargs):
+        """Computes the geometry (i.e. runs jcm.geo) for this simulation.
+
+        The jcm_kwargs are directly passed to jcm.geo, except for
+        `project_dir`, `keys` and `working_dir`, which are set automatically
+        (ignored if provided).
+
+        """
+        self.logger.debug('Computing geometry.')
+        # Copy project to its working directory
+        self._prepare_project()
+        
+        # Check the keyword arguments
+        forbidden_keys = ['project_file', 'keys', 'working_dir']
+        for key in jcm_kwargs:
+            if key in forbidden_keys:
+                self.logger.warn('You cannot use {} as a '.format(key) +
+                                 'keyword argument for jcm.geo. It is ' +
+                                 'already set by the SimulationSet instance.')
+                del jcm_kwargs[key]
+        
+        # If True is given for the jcm_kwargs `show`, set its value to
+        # float('inf'). This is done to achieve a more intuitive behavior, as
+        # `show` expects a time, so that True would be casted to 1 second,
+        # causing the window to pop up and disappear right away
+        if 'show' in jcm_kwargs:
+            if jcm_kwargs['show'] is True:
+                jcm_kwargs['show'] = float('inf')
+
+        # Run jcm.geo. The cd-fix is necessary because the
+        # project_dir/working_dir functionality seems to be broken in the
+        # current python interface!
+        _thisdir = os.getcwd()
+        os.chdir(self.project.working_dir)
+        with utils.Capturing() as output:
+            jcm.geo(project_dir=self.project.working_dir,
+                    keys=self.keys,
+                    working_dir=self.project.working_dir,
+                    **jcm_kwargs)
+        for line in output:
+            logger_JCMgeo.debug(line)
+        os.chdir(_thisdir)
+    
+    def solve_standalone(self, processing_func=None, wdir_mode='keep',
+                         run_post_process_files=None, resource_manager=None,
+                         additional_keys_for_pps=None, jcm_solve_kwargs=None):
+        """Solves this simulation and returns the results and logs.
+
+        Parameters
+        ----------
+        processing_func : callable or NoneType, default None
+            Function for result processing. If None, only a standard processing
+            will be executed. See the docs of the
+            Simulation.process_results-method for more info on how to use this
+            parameter.
+        wdir_mode : {'keep', 'delete'}, default 'keep'
+            The way in which the working directories of the simulations are
+            treated. If 'keep', they are left on disk. If 'delete', they are
+            deleted.
+        run_post_process_files : str, list or NoneType, default None
+            File path or list of file paths to post processing files (extension
+            .jcmp(t)) which should be executed subsequent to the actual solve.
+            This calls jcmwave.solve with mode `post_process` internally. The
+            results are appended to the `jcm_results`-list of the `Simulation`
+            instance.
+        additional_keys_for_pps : dict or NoneType, default None
+            dict which will be merged to the `keys`-dict of the `Simulation`
+            instance before passing them to the jcmwave.solve-method in the
+            post process run. This has no effect if `run_post_process_files`
+            is None. Only new keys are added, duplicates are ignored and not
+            updated.
+        jcm_solve_kwargs : dict or NoneType, default None
+            These keyword arguments are directly passed to jcm.solve, except
+            for `project_dir`, `keys` and `working_dir`, which are set
+            automatically (ignored if provided).
+
+        """
+        if jcm_solve_kwargs is None:
+            jcm_solve_kwargs = {}
+        
+        if wdir_mode not in ['keep', 'delete']:
+            raise ValueError('Unknown wdir_mode: {}'.format(wdir_mode))
+            return
+        
+        if resource_manager is None:
+            resource_manager = ResourceManager()
+
+        # Add the resources if they are not ready yet
+        if not resource_manager._resources_ready():
+            resource_manager.add_resources()
+        
+        # Copy project to its working directory
+        self._prepare_project()
+
+        # Solve the simulation and wait for it to finish. Output is captured
+        # and passed to the logger
+        # ---
+        # This is the new daemon style version
+        if NEW_DAEMON_DETECTED:
+            self.solve(**jcm_solve_kwargs)
+            results = daemon.wait(return_style='new')
+            result = results.values()[0]
+            self._set_jcm_results_and_logs(result)
+            ret1, ret2 = (result['results'], result['logs'])
+        
+        # This is the old daemon style version
+        else:
+            with utils.Capturing() as output:
+                self.solve(**jcm_solve_kwargs)
+                results, logs = daemon.wait()
+            for line in output:
+                logger_JCMsolve.debug(line)
+    
+            # Set the results and logs in the Simulation-instance
+            self._set_jcm_results_and_logs(results[0], logs[0])
+            ret1, ret2 = (results[0], logs[0])
+        
+        if run_post_process_files is None:
+            if not self.status == 'Failed':
+                self.process_results(processing_func, True)
+            if wdir_mode == 'delete':
+                self.remove_working_directory()
+            return ret1, ret2
+        
+        # If additional post process files are given, these are performed
+        # subsequently
+        if not isinstance(run_post_process_files, list):
+            # Convert to list
+            run_post_process_files = [run_post_process_files]
+        
+        # Iterate over all given post process files
+        for f in run_post_process_files:
+            if os.path.isfile(f):
+                # This is the new daemon style version
+                if NEW_DAEMON_DETECTED:
+                    self.solve(pp_file=f,
+                               additional_keys=additional_keys_for_pps,
+                               **jcm_solve_kwargs)
+                    pp_results = daemon.wait(return_style='new')
+                    pp_result = pp_results.values()[0]
+                    # Add the post process results
+                    self._add_post_process_results(pp_result)
+                # This is the old daemon style version
+                else:
+                    with utils.Capturing() as output:
+                        self.solve(pp_file=f,
+                                   additional_keys=additional_keys_for_pps,
+                                   **jcm_solve_kwargs)
+                        pp_results, pp_logs = daemon.wait()
+                    for line in output:
+                        logger_JCMsolve.debug(line)
+                    # Add the post process results
+                    self._add_post_process_results(pp_results[0], pp_logs[0])
+            else:
+                self.logger.warn('Given post process file "{}" '.format(f) +
+                                 'does not exist. Skipping.')
+            
+            if not self.status == 'Failed':
+                self.process_results(processing_func, True)
+            if wdir_mode == 'delete':
+                self.remove_working_directory()
+            return ret1, ret2
+
+
+# =============================================================================
+class ResourceManager(object):
+    """Class for convenient management of resources in all objects that are
+    able to provoke simulations, i.e. call jcmwave.solve."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger('core.' + self.__class__.__name__)
+        self.reset_resources()
+    
+    def __repr__(self):
+        return 'ResourceManager(resources={})'.format(self.resources)
+    
+    def reset_resources(self):
+        """Resets the resources to the default configuration."""
+        self.resources = ResourceDict()
+        for r in resources:
+            self.resources[r] = resources[r]
+    
+    def save_state(self):
+        """Saves the current resource configuration internally, allowing to
+        reset it to this state later."""
+        self._saved_nicks = []
+        for nick, resource in self.resources.iteritems():
+            resource.save_m_n()
+            self._saved_nicks.append(nick)
+    
+    def load_state(self):
+        """Loads a previously saved state."""
+        if not hasattr(self, '_saved_nicks'):
+            self.logger.warn('Did not find a saved state for loading.')
+            return
+        self.use_only_resources(self._saved_nicks)
+        for r in self.resources.itervalues():
+            r.restore_previous_m_n()
+
+    def get_current_resources(self):
+        """Returns a list of the currently configured resources, i.e. the ones
+        that will be added using `add_resources`."""
+        return self.resources
+
+    def use_only_resources(self, names):
+        """Restrict the daemon resources to `names`. Only makes sense if the
+        resources have not already been added.
+
+        Names that are unknown are ignored. If no valid name is present,
+        the default configuration will remain untouched.
+
+        """
+        if isinstance(names, string_types):
+            names = [names]
+        valid = []
+        for n in names:
+            if n not in resources:
+                self.logger.warn('{} is not in the configured resources'.
+                                 format(n))
+            else:
+                valid.append(n)
+        if len(valid) == 0:
+            self.logger.warn('No valid resources found, no change is made.')
+            return
+        self.logger.info('Restricting resources to: {}'.format(valid))
+        self.resources = ResourceDict()
+        for v in valid:
+            self.resources[v] = resources[v]
+    
+    def use_single_resource_with_max_threads(self, resource_nick=None,
+                                             n_threads=None):
+        """Changes the current resource configuration to only a single resource.
+        This resource can be specified by its `nickname`. If `resource_nick`
+        is None, the resource with the maximum available cores will be detected
+        automatically from the current configuration. The multiplicity of this
+        resource will be set to 1, and the number of threads to the maximum or
+        the given number `n_threads`.
+        
+        """
+        # Find out which resource has the most available cores automatically
+        if resource_nick is None:
+            resource_nick, _ = self.resources.get_resource_with_most_cores()
+        # Or use the given resource
+        else:
+            if not resource_nick in self.resources:
+                self.logger.warn('You specified a resource name for ' +
+                                 '`resource_nick` which is ' +
+                                 'unknown. Leaving the configuration ' +
+                                 'untouched.')
+            return
+        
+        resource = self.resources[resource_nick]
+        
+        # Find out how many cores to use
+        n_available = resource.get_available_cores()
+        if n_threads is None:
+            n_threads = n_available
+        elif n_threads > n_available:
+            self.logger.warn('The specified `n_threads` exceeds the maximum' +
+                             ' available number of cores which is currently ' +
+                             'configured for {}, which is {}. Falling '.
+                             format(resource_nick, n_available) +
+                             'back to this maximum value. To use this many ' +
+                             'cores anyway, please reconfigure the resource ' +
+                             'before.')
+            n_threads = n_available
+        
+        # Set the number of threads
+        resource.maximize_n_threads(n_threads=n_threads)
+        
+        # Restrict the current resources to this resource
+        self.use_only_resources(resource_nick)
+    
+    def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
+        """Tries to add all resources configured in the configuration using the
+        JCMdaemon."""
+        self.resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
+
+    def _resources_ready(self):
+        """Returns whether the resources are already added."""
+        return daemon.daemonCheck(warn=False)
+    
+    def reset_daemon(self):
+        """Resets the JCMdaemon, i.e. disconnects it and resets the queue."""
+        if NEW_DAEMON_DETECTED:
+            daemon.active_daemon.shutdown()
+            if not daemon.queue.is_empty():
+                daemon.queue.reset()
+        else:
+            daemon.shutdown()
 
 
 # =============================================================================
@@ -732,6 +1091,11 @@ class SimulationSet(object):
         to the versions that were used when the HDF5 store was created. This
         has no effect if no HDF5 store is present, i.e. if you are starting
         with an empty working directory.
+    resource_manager: ResourceManager or NoneType, default None
+        You can pass your own `ResourceManager`-instance here, e.g. to
+        configure the resources to use before the `SimulationSet` is
+        initialized. If `None`, a `ResourceManager`-instance will be created
+        automatically.
 
     """
 
@@ -742,7 +1106,8 @@ class SimulationSet(object):
     def __init__(self, project, keys, duplicate_path_levels=0,
                  storage_folder='from_date', storage_base='from_config',
                  transitional_storage_base=None,
-                 combination_mode='product', check_version_match=True):
+                 combination_mode='product', check_version_match=True,
+                 resource_manager=None):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Save initialization arguments into namespace
@@ -768,7 +1133,15 @@ class SimulationSet(object):
         self._initialize_store(check_version_match)
 
         # Initialize the resources
-        self.reset_resources()
+        if resource_manager is None:
+            self.resource_manager = ResourceManager()
+        else:
+            if not isinstance(resource_manager, ResourceManager):
+                raise TypeError('`resource_manager` must be of type '+
+                                '`ResourceManager`, not {}'.
+                                format(type(resource_manager)))
+                return
+            self.resource_manager = resource_manager
 
     def __repr__(self):
         return 'SimulationSet(project={}, storage={})'.format(self.project,
@@ -939,8 +1312,10 @@ class SimulationSet(object):
         self._final_storage_dir = fsd
         self.storage_dir = tsd
 
-    def _initialize_store(self, check_version_match):
-        """Initializes the HDF5 store and sets the `store` attribute.
+    def _initialize_store(self, check_version_match=False):
+        """Initializes the HDF5 store and sets the `store` attribute. If
+        `check_version_match` is True, the current versions of JCMsuite and
+        jcmpython are compared to the stored versions.
 
         The file name and the name of the data section inside the file
         are configured in the DEFAULTS section of the configuration
@@ -1165,7 +1540,6 @@ class SimulationSet(object):
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed
         self.logger.debug('Generating the simulation list.')
-        pfile_path = self.project.get_project_file_path()
         for i, keySet in enumerate(propertyCombinations):
             keys = {}
             for k in keySet:
@@ -1175,7 +1549,7 @@ class SimulationSet(object):
             self.simulations.append(Simulation(number=i, keys=keys,
                                                stored_keys=self.stored_keys,
                                                storage_dir=self.storage_dir,
-                                               project_file_name=pfile_path))
+                                               project=self.project))
 
         # We generate a pandas DataFrame that holds all the parameter and
         # geometry properties for each simulation, with the simulation number
@@ -1522,14 +1896,13 @@ class SimulationSet(object):
         return matches, unmatched
 
     def reset_resources(self):
-        self.resources = ResourceDict()
-        for r in resources:
-            self.resources[r] = resources[r]
+        """Resets the resources to the default configuration."""
+        self.resource_manager.reset_resources()
 
     def get_current_resources(self):
         """Returns a list of the currently configured resources, i.e. the ones
         that will be added using `add_resources`."""
-        return self.resources
+        return self.resource_manager.get_current_resources()
 
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
@@ -1539,31 +1912,16 @@ class SimulationSet(object):
         the default configuration will remain untouched.
 
         """
-        if isinstance(names, string_types):
-            names = [names]
-        valid = []
-        for n in names:
-            if n not in resources:
-                self.logger.warn('{} is not in the configured resources'.
-                                 format(n))
-            else:
-                valid.append(n)
-        if len(valid) == 0:
-            self.logger.warn('No valid resources found, no change is made.')
-            return
-        self.logger.info('Restricting resources to: {}'.format(valid))
-        self.resources = ResourceDict()
-        for v in valid:
-            self.resources[v] = resources[v]
+        self.resource_manager.use_only_resources(names)
 
     def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Tries to add all resources configured in the configuration using the
         JCMdaemon."""
-        self.resources.add_all_repeatedly(n_shots, wait_seconds, ignore_fail)
+        self.resource_manager.add_resources(n_shots, wait_seconds, ignore_fail)
 
     def _resources_ready(self):
         """Returns whether the resources are already added."""
-        return daemon.daemonCheck(warn=False)
+        return self.resource_manager._resources_ready()
 
     def compute_geometry(self, simulation, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for a specific simulation
@@ -1590,29 +1948,9 @@ class SimulationSet(object):
                              'current SimulationSet or a simulation index' +
                              ' (int).')
             return
-
-        # Check the keyword arguments
-        forbidden_keys = ['project_file', 'keys', 'working_dir']
-        for key in jcm_kwargs:
-            if key in forbidden_keys:
-                self.logger.warn('You cannot use {} as a '.format(key) +
-                                 'keyword argument for jcm.geo. It is ' +
-                                 'already set by the SimulationSet instance.')
-                del jcm_kwargs[key]
-
-        # Run jcm.geo. The cd-fix is necessary because the
-        # project_dir/working_dir functionality seems to be broken in the
-        # current python interface!
-        _thisdir = os.getcwd()
-        os.chdir(self.get_project_wdir())
-        with utils.Capturing() as output:
-            jcm.geo(project_dir=self.project.working_dir,
-                    keys=simulation.keys,
-                    working_dir=self.project.working_dir,
-                    **jcm_kwargs)
-        for line in output:
-            logger_JCMgeo.debug(line)
-        os.chdir(_thisdir)
+        
+        # Call the compute_geometry-method of the simulation
+        simulation.compute_geometry(**jcm_kwargs)
 
     def solve_single_simulation(self, simulation, compute_geometry=True,
                                 run_post_process_files=None, 
@@ -1668,72 +2006,14 @@ class SimulationSet(object):
         # Geometry computation
         if compute_geometry:
             self.compute_geometry(simulation, **jcm_geo_kwargs)
-
-        # Add the resources if they are not ready yet
-        if not self._resources_ready():
-            self.add_resources()
-
-        # Solve the simulation and wait for it to finish. Output is captured
-        # and passed to the logger
-        # ---
-        # This is the new daemon style version
-        if NEW_DAEMON_DETECTED:
-            simulation.solve(**jcm_solve_kwargs)
-            results = daemon.wait(return_style='new')
-            result = results.values()[0]
-            simulation._set_jcm_results_and_logs(result)
-            ret1, ret2 = (result['results'], result['logs'])
-        
-        # This is the old daemon style version
-        else:
-            with utils.Capturing() as output:
-                simulation.solve(**jcm_solve_kwargs)
-                results, logs = daemon.wait()
-            for line in output:
-                logger_JCMsolve.debug(line)
-    
-            # Set the results and logs in the Simulation-instance and return them
-            simulation._set_jcm_results_and_logs(results[0], logs[0])
-            ret1, ret2 = (results[0], logs[0])
-        
-        if run_post_process_files is None:
-            return ret1, ret2
-        
-        # If additional post process files are given, these are performed
-        # subsequently
-        if not isinstance(run_post_process_files, list):
-            # Convert to list
-            run_post_process_files = [run_post_process_files]
-        
-        # Iterate over all given post process files
-        for f in run_post_process_files:
-            if os.path.isfile(f):
-                # This is the new daemon style version
-                if NEW_DAEMON_DETECTED:
-                    simulation.solve(pp_file=f,
-                                     additional_keys=additional_keys_for_pps,
-                                     **jcm_solve_kwargs)
-                    pp_results = daemon.wait(return_style='new')
-                    pp_result = pp_results.values()[0]
-                    # Add the post process results to the simulation
-                    simulation._add_post_process_results(pp_result)
-                # This is the old daemon style version
-                else:
-                    with utils.Capturing() as output:
-                        simulation.solve(pp_file=f,
-                                    additional_keys=additional_keys_for_pps,
-                                    **jcm_solve_kwargs)
-                        pp_results, pp_logs = daemon.wait()
-                    for line in output:
-                        logger_JCMsolve.debug(line)
-                    # Add the post process results to the simulation
-                    simulation._add_post_process_results(pp_results[0],
-                                                         pp_logs[0])
-            else:
-                self.logger.warn('Given post process file "{}" '.format(f) +
-                                 'does not exist. Skipping.')
-        return ret1, ret2
                 
+        # TODO: make wdir_mode and processing_func also parameters of this
+        #       method
+        return simulation.solve_standalone(processing_func=None,
+                                run_post_process_files=run_post_process_files, 
+                                resource_manager=self.resource_manager,
+                                additional_keys_for_pps=additional_keys_for_pps,
+                                jcm_solve_kwargs=jcm_solve_kwargs)
 
     def _start_simulations(self, N='all', processing_func=None, 
                            run_post_process_files=None, 
@@ -2180,8 +2460,15 @@ class SimulationSet(object):
             utils.tForm(time.time() - t0)))
 
     def _copy_from_transitional_dir(self):
+        """Moves the transitional storage directory to the taget storage
+        directory and cleans up any empty residual directories in the
+        transitional path."""
         if not self._copying_needed:
             return
+        
+        # Close the HDF5 store, as it will be moved
+        self.close_store()
+        
         try:
             if os.path.isdir(self._final_storage_dir):
                 rmtree(self._final_storage_dir)
@@ -2202,6 +2489,9 @@ class SimulationSet(object):
         self.storage_dir = self._final_storage_dir
         del self._final_storage_dir
         self._copying_needed = False
+        
+        # Reconnect to the moved HDF5 store
+        self._initialize_store()
 
 # =============================================================================
 
@@ -2277,13 +2567,19 @@ class ConvergenceTest(object):
         versions that were used when the HDF5 store was used. This has no
         effect if no HDF5 is present, i.e. if you are starting with an empty
         working directory.
+    resource_manager: ResourceManager or NoneType, default None
+        You can pass your own `ResourceManager`-instance here, e.g. to
+        configure the resources to use before the `ConvergenceTest` is
+        initialized. The `resource_manager` will be used for both of the
+        simulation sets. If `None`, a `ResourceManager`-instance will be
+        created automatically.
 
     """
 
     def __init__(self, project, keys_test, keys_ref, duplicate_path_levels=0,
                  storage_folder='from_date', storage_base='from_config',
                  transitional_storage_base=None, combination_mode='product',
-                 check_version_match=True):
+                 check_version_match=True, resource_manager=None):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Get appropriate storage folders for the two simulation sets
@@ -2291,20 +2587,39 @@ class ConvergenceTest(object):
         storage_folder_ref = self.__get_storage_folder(storage_folder,
                                                        'Reference')
 
+        # Initialize the resources
+        if resource_manager is None:
+            self.resource_manager = ResourceManager()
+        else:
+            if not isinstance(resource_manager, ResourceManager):
+                raise TypeError('`resource_manager` must be of type '+
+                                '`ResourceManager`, not {}'.
+                                format(type(resource_manager)))
+                return
+            self.resource_manager = resource_manager
+
         # Initialize the SimualtionSet-instances
         self.logger.info('Initializing the reference simulation set.')
-        self.sset_ref = SimulationSet(project, keys_ref, duplicate_path_levels,
-                                      storage_folder_ref, storage_base,
-                                      transitional_storage_base,
-                                      combination_mode, check_version_match)
+        self.sset_ref = SimulationSet(project=project, keys=keys_ref, 
+                            duplicate_path_levels=duplicate_path_levels,
+                            storage_folder=storage_folder_ref, 
+                            storage_base=storage_base,
+                            transitional_storage_base=transitional_storage_base,
+                            combination_mode=combination_mode,
+                            check_version_match=check_version_match,
+                            resource_manager=self.resource_manager)
         self.logger.info('Initializing the test simulation set.')
-        self.sset_test = SimulationSet(project, keys_test,
-                                       duplicate_path_levels,
-                                       storage_folder_test, storage_base,
-                                       transitional_storage_base,
-                                       combination_mode, check_version_match)
+        self.sset_test = SimulationSet(project=project, keys=keys_test, 
+                            duplicate_path_levels=duplicate_path_levels,
+                            storage_folder=storage_folder_test, 
+                            storage_base=storage_base,
+                            transitional_storage_base=transitional_storage_base,
+                            combination_mode=combination_mode,
+                            check_version_match=check_version_match,
+                            resource_manager=self.resource_manager)
         self.simulation_sets = [self.sset_ref, self.sset_test]
         self.storage_dir = os.path.dirname(self.sset_ref.storage_dir)
+
 
     def __get_storage_folder(self, storage_folder, sub_folder):
         """Returns the standard storage folder name, depending on the input
@@ -2343,6 +2658,15 @@ class ConvergenceTest(object):
         self.__log_paragraph('Scheduling simulation for the test set.')
         self.sset_test.make_simulation_schedule()
 
+    def reset_resources(self):
+        """Resets the resources to the default configuration."""
+        self.resource_manager.reset_resources()
+
+    def get_current_resources(self):
+        """Returns a list of the currently configured resources, i.e. the ones
+        that will be added using `add_resources`."""
+        return self.resource_manager.get_current_resources()
+
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
         resources have not already been added.
@@ -2351,11 +2675,16 @@ class ConvergenceTest(object):
         the default configuration will remain untouched.
 
         """
-        self.logger.info('Restricting resources to: {}'.format(names))
-        with utils.DisableLogger():
-            self.logger.info('Test info')
-            for sset in self.simulation_sets:
-                sset.use_only_resources(names)
+        self.resource_manager.use_only_resources(names)
+
+    def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
+        """Tries to add all resources configured in the configuration using the
+        JCMdaemon."""
+        self.resource_manager.add_resources(n_shots, wait_seconds, ignore_fail)
+
+    def _resources_ready(self):
+        """Returns whether the resources are already added."""
+        return self.resource_manager._resources_ready()
 
     def open_stores(self):
         """Opens all HDF5 stores."""
@@ -2370,7 +2699,64 @@ class ConvergenceTest(object):
         with utils.DisableLogger():
             for sset in self.simulation_sets:
                 sset.close_store()
-
+    
+    def run_reference_simulation(self, run_on_resource='AUTO',
+                                 save_run=False, **simuset_kwargs):
+        """Runs the reference simulation set using the `simuset_kwargs`, which
+        are passed to the `run`-method.
+        
+        Parameters
+        ----------
+        run_on_resource : str (DaemonResource.nickname) or False, default 'AUTO'
+            If 'AUTO', the DaemonResource with the most cores is automatically
+            determined and used for the reference simulation with a
+            `multiplicity` of 1 and all configured cores as `n_threads`. If
+            a nickname is given, all configured cores of this resource are used
+            in the same way. If False, the currently active resource
+            configuration is used.
+        save_run : bool, default False
+            If True, the utility function `run_simusets_in_save_mode` is used
+            for the run.
+        
+        """
+        # Save the resource manager state and change the resource configuration
+        # if necessary
+        self.resource_manager.save_state()
+        if run_on_resource is not False:
+            if run_on_resource == 'AUTO':
+                run_on_resource = None
+            self.resource_manager.use_single_resource_with_max_threads(
+                                                  resource_nick=run_on_resource)
+        
+        # Run the simulation set
+        self.__log_paragraph('Running the reference simulation set.')
+        if save_run:
+            utils.run_simusets_in_save_mode(self.sset_ref, **simuset_kwargs)
+        else:
+            self.sset_ref.run(**simuset_kwargs)
+        
+        # Reset the resource manager and the daemon
+        self.resource_manager.load_state()
+        self.resource_manager.reset_daemon()
+    
+    def run_test_simulations(self, save_run=False, **simuset_kwargs):
+        """Runs the test simulation set using the `simuset_kwargs`, which
+        are passed to the `run`-method.
+        
+        Parameters
+        ----------
+        save_run : bool, default False
+            If True, the utility function `run_simusets_in_save_mode` is used
+            for the run.
+        
+        """
+        # Run the test simulation set
+        self.__log_paragraph('Running the test simulation set.')
+        if save_run:
+            utils.run_simusets_in_save_mode(self.sset_test, **simuset_kwargs)
+        else:
+            self.sset_test.run(**simuset_kwargs)
+    
     def run(self, run_ref_with_max_cores='AUTO', save_run=False,
             **simuset_kwargs):
         """Runs the reference and the test simulation sets using the
@@ -2383,7 +2769,7 @@ class ConvergenceTest(object):
                                  default 'AUTO'
             If 'AUTO', the DaemonResource with the most cores is automatically
             determined and used for the reference simulation with a
-            `multiplicity` of one and all configured cores as `n_threads`. If
+            `multiplicity` of 1 and all configured cores as `n_threads`. If
             a nickname is given, all configured cores of this resource are used
             in the same way. If False, the currently active resource
             configuration is used. The configuration for the test simulation
@@ -2393,55 +2779,9 @@ class ConvergenceTest(object):
             for the run.
 
         """
-        # Reference simulation
-        change_resource_configuration = False
-        if run_ref_with_max_cores == 'AUTO':
-            nick, N = self.sset_ref.resources.get_resource_with_most_cores()
-            change_resource_configuration = True
-        elif isinstance(run_ref_with_max_cores, string_types):
-            if nick in self.sset_ref.resources:
-                nick = run_ref_with_max_cores
-                N = self.sset_ref.resources[nick].get_available_cores()
-                change_resource_configuration = True
-            else:
-                self.logger.warn('You specified a resource name for ' +
-                                 '`run_ref_with_max_cores` which is ' +
-                                 'unknown. Leaving the configuration ' +
-                                 'untouched.')
-
-        self.__log_paragraph('Running the reference simulation set.')
-        # If necessary we change the resource configuration for the reference
-        # simulation here
-        if change_resource_configuration:
-            # Restrict resources
-            self.sset_ref.use_only_resources(nick)
-            # Save the configuration for this resource for restoring it later
-            ref_resource = self.sset_ref.resources[nick]
-            ref_resource.save_m_n()
-            # Set multiplicity and n_threads
-            ref_resource.set_m_n(1, N)
-            self.logger.info('Changed resource configuration to: {}'.format(
-                ref_resource))
-
-        # Run the reference simulation set
-        if save_run:
-            utils.run_simusets_in_save_mode(self.sset_ref, **simuset_kwargs)
-        else:
-            self.sset_ref.run(**simuset_kwargs)
-
-        # Restore the previous configuration for the resource
-        ref_resource.restore_previous_m_n()
-
-        # Shut down the daemon to cause the test set to add its resources
-        # again.
-        daemon.shutdown()
-
-        # Run the test simulation set
-        self.__log_paragraph('Running the test simulation set.')
-        if save_run:
-            utils.run_simusets_in_save_mode(self.sset_test, **simuset_kwargs)
-        else:
-            self.sset_test.run(**simuset_kwargs)
+        self.run_reference_simulation(run_on_resource=run_ref_with_max_cores,
+                                      save_run=save_run, **simuset_kwargs)
+        self.run_test_simulations(save_run=save_run, **simuset_kwargs)
 
     def _get_deviation_data(self, data, ref, dev_columns):
         """Returns a new pandas DataFrame that holds the relative deviation
@@ -2486,8 +2826,8 @@ class ConvergenceTest(object):
         attribute.
 
         If more than 1 `dev_columns` is given, the mean deviation is
-        also calculated and in DataFrame column 'deviation_mean'. It is
-        used to sort the data if `sort_by` is None.
+        also calculated and stored in the DataFrame column 'deviation_mean'. It
+        is used to sort the data if `sort_by` is None.
 
         """
         self.__log_paragraph('Analyzing...')
