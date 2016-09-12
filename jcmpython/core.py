@@ -910,11 +910,31 @@ class ResourceManager(object):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
         self.reset_resources()
     
+    def __repr__(self):
+        return 'ResourceManager(resources={})'.format(self.resources)
+    
     def reset_resources(self):
         """Resets the resources to the default configuration."""
         self.resources = ResourceDict()
         for r in resources:
             self.resources[r] = resources[r]
+    
+    def save_state(self):
+        """Saves the current resource configuration internally, allowing to
+        reset it to this state later."""
+        self._saved_nicks = []
+        for nick, resource in self.resources.iteritems():
+            resource.save_m_n()
+            self._saved_nicks.append(nick)
+    
+    def load_state(self):
+        """Loads a previously saved state."""
+        if not hasattr(self, '_saved_nicks'):
+            self.logger.warn('Did not find a saved state for loading.')
+            return
+        self.use_only_resources(self._saved_nicks)
+        for r in self.resources.itervalues():
+            r.restore_previous_m_n()
 
     def get_current_resources(self):
         """Returns a list of the currently configured resources, i.e. the ones
@@ -945,7 +965,51 @@ class ResourceManager(object):
         self.resources = ResourceDict()
         for v in valid:
             self.resources[v] = resources[v]
-
+    
+    def use_single_resource_with_max_threads(self, resource_nick=None,
+                                             n_threads=None):
+        """Changes the current resource configuration to only a single resource.
+        This resource can be specified by its `nickname`. If `resource_nick`
+        is None, the resource with the maximum available cores will be detected
+        automatically from the current configuration. The multiplicity of this
+        resource will be set to 1, and the number of threads to the maximum or
+        the given number `n_threads`.
+        
+        """
+        # Find out which resource has the most available cores automatically
+        if resource_nick is None:
+            resource_nick, _ = self.resources.get_resource_with_most_cores()
+        # Or use the given resource
+        else:
+            if not resource_nick in self.resources:
+                self.logger.warn('You specified a resource name for ' +
+                                 '`resource_nick` which is ' +
+                                 'unknown. Leaving the configuration ' +
+                                 'untouched.')
+            return
+        
+        resource = self.resources[resource_nick]
+        
+        # Find out how many cores to use
+        n_available = resource.get_available_cores()
+        if n_threads is None:
+            n_threads = n_available
+        elif n_threads > n_available:
+            self.logger.warn('The specified `n_threads` exceeds the maximum' +
+                             ' available number of cores which is currently ' +
+                             'configured for {}, which is {}. Falling '.
+                             format(resource_nick, n_available) +
+                             'back to this maximum value. To use this many ' +
+                             'cores anyway, please reconfigure the resource ' +
+                             'before.')
+            n_threads = n_available
+        
+        # Set the number of threads
+        resource.maximize_n_threads(n_threads=n_threads)
+        
+        # Restrict the current resources to this resource
+        self.use_only_resources(resource_nick)
+    
     def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Tries to add all resources configured in the configuration using the
         JCMdaemon."""
@@ -954,6 +1018,15 @@ class ResourceManager(object):
     def _resources_ready(self):
         """Returns whether the resources are already added."""
         return daemon.daemonCheck(warn=False)
+    
+    def reset_daemon(self):
+        """Resets the JCMdaemon, i.e. disconnects it and resets the queue."""
+        if NEW_DAEMON_DETECTED:
+            daemon.active_daemon.shutdown()
+            if not daemon.queue.is_empty():
+                daemon.queue.reset()
+        else:
+            daemon.shutdown()
 
 
 # =============================================================================
@@ -1018,6 +1091,11 @@ class SimulationSet(object):
         to the versions that were used when the HDF5 store was created. This
         has no effect if no HDF5 store is present, i.e. if you are starting
         with an empty working directory.
+    resource_manager: ResourceManager or NoneType, default None
+        You can pass your own `ResourceManager`-instance here, e.g. to
+        configure the resources to use before the `SimulationSet` is
+        initialized. If `None`, a `ResourceManager`-instance will be created
+        automatically.
 
     """
 
@@ -1056,14 +1134,14 @@ class SimulationSet(object):
 
         # Initialize the resources
         if resource_manager is None:
-            self._rm = ResourceManager()
+            self.resource_manager = ResourceManager()
         else:
             if not isinstance(resource_manager, ResourceManager):
                 raise TypeError('`resource_manager` must be of type '+
                                 '`ResourceManager`, not {}'.
                                 format(type(resource_manager)))
                 return
-            self._rm = resource_manager
+            self.resource_manager = resource_manager
 
     def __repr__(self):
         return 'SimulationSet(project={}, storage={})'.format(self.project,
@@ -1819,12 +1897,12 @@ class SimulationSet(object):
 
     def reset_resources(self):
         """Resets the resources to the default configuration."""
-        self._rm.reset_resources()
+        self.resource_manager.reset_resources()
 
     def get_current_resources(self):
         """Returns a list of the currently configured resources, i.e. the ones
         that will be added using `add_resources`."""
-        return self._rm.get_current_resources()
+        return self.resource_manager.get_current_resources()
 
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
@@ -1834,16 +1912,16 @@ class SimulationSet(object):
         the default configuration will remain untouched.
 
         """
-        self._rm.use_only_resources(names)
+        self.resource_manager.use_only_resources(names)
 
     def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
         """Tries to add all resources configured in the configuration using the
         JCMdaemon."""
-        self._rm.add_resources(n_shots, wait_seconds, ignore_fail)
+        self.resource_manager.add_resources(n_shots, wait_seconds, ignore_fail)
 
     def _resources_ready(self):
         """Returns whether the resources are already added."""
-        return self._rm._resources_ready()
+        return self.resource_manager._resources_ready()
 
     def compute_geometry(self, simulation, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for a specific simulation
@@ -1933,7 +2011,7 @@ class SimulationSet(object):
         #       method
         return simulation.solve_standalone(processing_func=None,
                                 run_post_process_files=run_post_process_files, 
-                                resource_manager=self._rm,
+                                resource_manager=self.resource_manager,
                                 additional_keys_for_pps=additional_keys_for_pps,
                                 jcm_solve_kwargs=jcm_solve_kwargs)
 
@@ -2418,10 +2496,6 @@ class SimulationSet(object):
 # =============================================================================
 
 
-# TODO: Use a resource_manager for this class and make the handling in the
-# run-method part of the ResourceManager-class.
-
-
 class ConvergenceTest(object):
     """Class to set up, run and analyze convergence tests for JCMsuite
     projects. A convergence test consists of a reference simulation and (a)
@@ -2493,13 +2567,19 @@ class ConvergenceTest(object):
         versions that were used when the HDF5 store was used. This has no
         effect if no HDF5 is present, i.e. if you are starting with an empty
         working directory.
+    resource_manager: ResourceManager or NoneType, default None
+        You can pass your own `ResourceManager`-instance here, e.g. to
+        configure the resources to use before the `ConvergenceTest` is
+        initialized. The `resource_manager` will be used for both of the
+        simulation sets. If `None`, a `ResourceManager`-instance will be
+        created automatically.
 
     """
 
     def __init__(self, project, keys_test, keys_ref, duplicate_path_levels=0,
                  storage_folder='from_date', storage_base='from_config',
                  transitional_storage_base=None, combination_mode='product',
-                 check_version_match=True):
+                 check_version_match=True, resource_manager=None):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Get appropriate storage folders for the two simulation sets
@@ -2507,20 +2587,39 @@ class ConvergenceTest(object):
         storage_folder_ref = self.__get_storage_folder(storage_folder,
                                                        'Reference')
 
+        # Initialize the resources
+        if resource_manager is None:
+            self.resource_manager = ResourceManager()
+        else:
+            if not isinstance(resource_manager, ResourceManager):
+                raise TypeError('`resource_manager` must be of type '+
+                                '`ResourceManager`, not {}'.
+                                format(type(resource_manager)))
+                return
+            self.resource_manager = resource_manager
+
         # Initialize the SimualtionSet-instances
         self.logger.info('Initializing the reference simulation set.')
-        self.sset_ref = SimulationSet(project, keys_ref, duplicate_path_levels,
-                                      storage_folder_ref, storage_base,
-                                      transitional_storage_base,
-                                      combination_mode, check_version_match)
+        self.sset_ref = SimulationSet(project=project, keys=keys_ref, 
+                            duplicate_path_levels=duplicate_path_levels,
+                            storage_folder=storage_folder_ref, 
+                            storage_base=storage_base,
+                            transitional_storage_base=transitional_storage_base,
+                            combination_mode=combination_mode,
+                            check_version_match=check_version_match,
+                            resource_manager=self.resource_manager)
         self.logger.info('Initializing the test simulation set.')
-        self.sset_test = SimulationSet(project, keys_test,
-                                       duplicate_path_levels,
-                                       storage_folder_test, storage_base,
-                                       transitional_storage_base,
-                                       combination_mode, check_version_match)
+        self.sset_test = SimulationSet(project=project, keys=keys_test, 
+                            duplicate_path_levels=duplicate_path_levels,
+                            storage_folder=storage_folder_test, 
+                            storage_base=storage_base,
+                            transitional_storage_base=transitional_storage_base,
+                            combination_mode=combination_mode,
+                            check_version_match=check_version_match,
+                            resource_manager=self.resource_manager)
         self.simulation_sets = [self.sset_ref, self.sset_test]
         self.storage_dir = os.path.dirname(self.sset_ref.storage_dir)
+
 
     def __get_storage_folder(self, storage_folder, sub_folder):
         """Returns the standard storage folder name, depending on the input
@@ -2559,6 +2658,15 @@ class ConvergenceTest(object):
         self.__log_paragraph('Scheduling simulation for the test set.')
         self.sset_test.make_simulation_schedule()
 
+    def reset_resources(self):
+        """Resets the resources to the default configuration."""
+        self.resource_manager.reset_resources()
+
+    def get_current_resources(self):
+        """Returns a list of the currently configured resources, i.e. the ones
+        that will be added using `add_resources`."""
+        return self.resource_manager.get_current_resources()
+
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
         resources have not already been added.
@@ -2567,11 +2675,16 @@ class ConvergenceTest(object):
         the default configuration will remain untouched.
 
         """
-        self.logger.info('Restricting resources to: {}'.format(names))
-        with utils.DisableLogger():
-            self.logger.info('Test info')
-            for sset in self.simulation_sets:
-                sset.use_only_resources(names)
+        self.resource_manager.use_only_resources(names)
+
+    def add_resources(self, n_shots=10, wait_seconds=5, ignore_fail=False):
+        """Tries to add all resources configured in the configuration using the
+        JCMdaemon."""
+        self.resource_manager.add_resources(n_shots, wait_seconds, ignore_fail)
+
+    def _resources_ready(self):
+        """Returns whether the resources are already added."""
+        return self.resource_manager._resources_ready()
 
     def open_stores(self):
         """Opens all HDF5 stores."""
@@ -2586,7 +2699,64 @@ class ConvergenceTest(object):
         with utils.DisableLogger():
             for sset in self.simulation_sets:
                 sset.close_store()
-
+    
+    def run_reference_simulation(self, run_on_resource='AUTO',
+                                 save_run=False, **simuset_kwargs):
+        """Runs the reference simulation set using the `simuset_kwargs`, which
+        are passed to the `run`-method.
+        
+        Parameters
+        ----------
+        run_on_resource : str (DaemonResource.nickname) or False, default 'AUTO'
+            If 'AUTO', the DaemonResource with the most cores is automatically
+            determined and used for the reference simulation with a
+            `multiplicity` of 1 and all configured cores as `n_threads`. If
+            a nickname is given, all configured cores of this resource are used
+            in the same way. If False, the currently active resource
+            configuration is used.
+        save_run : bool, default False
+            If True, the utility function `run_simusets_in_save_mode` is used
+            for the run.
+        
+        """
+        # Save the resource manager state and change the resource configuration
+        # if necessary
+        self.resource_manager.save_state()
+        if run_on_resource is not False:
+            if run_on_resource == 'AUTO':
+                run_on_resource = None
+            self.resource_manager.use_single_resource_with_max_threads(
+                                                  resource_nick=run_on_resource)
+        
+        # Run the simulation set
+        self.__log_paragraph('Running the reference simulation set.')
+        if save_run:
+            utils.run_simusets_in_save_mode(self.sset_ref, **simuset_kwargs)
+        else:
+            self.sset_ref.run(**simuset_kwargs)
+        
+        # Reset the resource manager and the daemon
+        self.resource_manager.load_state()
+        self.resource_manager.reset_daemon()
+    
+    def run_test_simulations(self, save_run=False, **simuset_kwargs):
+        """Runs the test simulation set using the `simuset_kwargs`, which
+        are passed to the `run`-method.
+        
+        Parameters
+        ----------
+        save_run : bool, default False
+            If True, the utility function `run_simusets_in_save_mode` is used
+            for the run.
+        
+        """
+        # Run the test simulation set
+        self.__log_paragraph('Running the test simulation set.')
+        if save_run:
+            utils.run_simusets_in_save_mode(self.sset_test, **simuset_kwargs)
+        else:
+            self.sset_test.run(**simuset_kwargs)
+    
     def run(self, run_ref_with_max_cores='AUTO', save_run=False,
             **simuset_kwargs):
         """Runs the reference and the test simulation sets using the
@@ -2599,7 +2769,7 @@ class ConvergenceTest(object):
                                  default 'AUTO'
             If 'AUTO', the DaemonResource with the most cores is automatically
             determined and used for the reference simulation with a
-            `multiplicity` of one and all configured cores as `n_threads`. If
+            `multiplicity` of 1 and all configured cores as `n_threads`. If
             a nickname is given, all configured cores of this resource are used
             in the same way. If False, the currently active resource
             configuration is used. The configuration for the test simulation
@@ -2609,55 +2779,9 @@ class ConvergenceTest(object):
             for the run.
 
         """
-        # Reference simulation
-        change_resource_configuration = False
-        if run_ref_with_max_cores == 'AUTO':
-            nick, N = self.sset_ref.resources.get_resource_with_most_cores()
-            change_resource_configuration = True
-        elif isinstance(run_ref_with_max_cores, string_types):
-            if nick in self.sset_ref.resources:
-                nick = run_ref_with_max_cores
-                N = self.sset_ref.resources[nick].get_available_cores()
-                change_resource_configuration = True
-            else:
-                self.logger.warn('You specified a resource name for ' +
-                                 '`run_ref_with_max_cores` which is ' +
-                                 'unknown. Leaving the configuration ' +
-                                 'untouched.')
-
-        self.__log_paragraph('Running the reference simulation set.')
-        # If necessary we change the resource configuration for the reference
-        # simulation here
-        if change_resource_configuration:
-            # Restrict resources
-            self.sset_ref.use_only_resources(nick)
-            # Save the configuration for this resource for restoring it later
-            ref_resource = self.sset_ref.resources[nick]
-            ref_resource.save_m_n()
-            # Set multiplicity and n_threads
-            ref_resource.set_m_n(1, N)
-            self.logger.info('Changed resource configuration to: {}'.format(
-                ref_resource))
-
-        # Run the reference simulation set
-        if save_run:
-            utils.run_simusets_in_save_mode(self.sset_ref, **simuset_kwargs)
-        else:
-            self.sset_ref.run(**simuset_kwargs)
-
-        # Restore the previous configuration for the resource
-        ref_resource.restore_previous_m_n()
-
-        # Shut down the daemon to cause the test set to add its resources
-        # again.
-        daemon.shutdown()
-
-        # Run the test simulation set
-        self.__log_paragraph('Running the test simulation set.')
-        if save_run:
-            utils.run_simusets_in_save_mode(self.sset_test, **simuset_kwargs)
-        else:
-            self.sset_test.run(**simuset_kwargs)
+        self.run_reference_simulation(run_on_resource=run_ref_with_max_cores,
+                                      save_run=save_run, **simuset_kwargs)
+        self.run_test_simulations(save_run=save_run, **simuset_kwargs)
 
     def _get_deviation_data(self, data, ref, dev_columns):
         """Returns a new pandas DataFrame that holds the relative deviation
