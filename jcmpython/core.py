@@ -898,7 +898,7 @@ class Simulation(object):
                 self.process_results(processing_func, True)
             if wdir_mode == 'delete':
                 self.remove_working_directory()
-            return ret1, ret2
+        return ret1, ret2
 
 
 # =============================================================================

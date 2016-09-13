@@ -2,6 +2,194 @@ import os
 import numpy as np
 import jcmpython as jpy
 
+FAR_FIELD_JCMPT_CONTENT='''
+<?
+import os
+if not 'farFieldRadius' in keys:
+    keys['farFieldRadius'] = 1.e6
+keys['outputName'] = os.path.join(keys['project_name']+"_results",
+                                  "far_field"+str(keys['fName'])+".jcm")
+keys['inputName'] = os.path.join(keys['project_name']+"_results",
+                                 "fieldbag.jcm")
+?>
+
+PostProcess {
+  FarField {
+<?
+if keys['geometry'] == '2D':
+    ?>
+    Rotation = X:Z:-Y
+<?
+# ...
+?>
+
+    FieldBagFileName = "%(inputName)s"
+    OutputFileName = "%(outputName)s"
+    Polar {
+      Radius = %(farFieldRadius)e
+      Points = [
+<?
+theta_vals = np.linspace(keys['startTheta'], keys['stopTheta'], 
+                         keys['thetaSteps'])
+phi_vals = np.linspace(keys['startPhi'], keys['stopPhi'], keys['phiSteps'])
+for keys['theta'] in theta_vals:
+        for keys['phi'] in phi_vals:
+            ?>
+            %(theta)e %(phi)e
+<?
+
+?>
+    ]
+    }
+  }
+}
+'''
+
+def write_far_field_jcmpt_to_file(filepath):
+    """Writes the standard far field jcmpt file content to the file given by
+    `filepath`."""
+    with open(filepath, 'w') as f:
+        f.write(FAR_FIELD_JCMPT_CONTENT)
+
+
+class FarFieldEvaluation(object):
+    """
+    
+    Parameters
+    ----------
+    simulation : jcmpython.core.Simulation
+        The simulation instance for which the far field evaluation should be
+        performed.
+    resolution : int, default 25
+        ...
+    geometry : {'2D', '3D'}, default '2D'
+        ...
+    subfolder : str, default 'post_processes'
+        Folder name of the subfolder in the project working directory into
+        which the post processing jcmp(t)-files should be written.
+    
+    """
+    
+    _JCMPT_FNAME = 'far_field_polar.jcmpt'
+    _JCMP_FMT = 'far_field_polar{}.jcmp' # formatter for jcmp files
+    
+    def __init__(self, simulation, resolution=25, geometry='2D', 
+                 subfolder='post_processes'):
+        self.simulation = simulation
+        self.resolution = resolution
+        self.geometry = geometry
+        self.subfolder = subfolder
+        self._jcmpt_path = None
+        self._read_data_from_simulation()
+    
+    def _read_data_from_simulation(self):
+        """Reads path and project information from the simulation instance."""
+        self.project = self.simulation.project
+        self.working_dir = os.path.join(self.project.working_dir,
+                                        self.subfolder)
+        self._project_name = os.path.splitext(self.project.project_file_name)[0]
+    
+    def __wdir_fpath(self, filename):
+        """Returns a file path using the `working_dir` as directory plus the
+        given filename."""
+        return os.path.join(self.working_dir, filename)
+    
+    def __jcmp_path(self, suffix=''):
+        """Returns a file path to a jcmp file in the working directory using
+        the standard file name for jcmp files and the given suffix."""
+        return self.__wdir_fpath(self._JCMP_FMT.format(suffix))
+    
+    def _write_jcmpt_file(self):
+        """Generates the standard jcmpt-template file."""
+        # Create the working directory if it does not exist
+        if not os.path.isdir(self.working_dir):
+            os.makedirs(self.working_dir)
+        # Get the file path and write the content
+        self._jcmpt_path = self.__wdir_fpath(self._JCMPT_FNAME)
+        write_far_field_jcmpt_to_file(self._jcmpt_path)
+    
+    def _generate_jcmp_files(self, direction=None):
+        """Generates .jcmp post processing files necessary to execute the
+        far field relevant post processes using JCMsolve.
+
+        Parameters:
+        -----------
+        direction : {'half_space_up', 'half_space_down', 
+                     'point_up', 'point_down', None}
+            Direction specification for the far field evaluation. If None, the
+            complete space will be considered. If 'half_space_up'/
+            'half_space_down', only the upper/lower half space will be
+            considered. If  'point_up'/'point_down', a single evaluation point
+            in upward/downward direction will be used.
+        
+        """
+        # Generate the far field jcmpt-file
+        self._write_jcmpt_file()
+        
+        # Fill a keys dict with values for jcmpt-template file conversion
+        pp_keys = {}
+        pp_keys['geometry'] = self.geometry
+        pp_keys['project_name'] = self._project_name
+        
+        # Initialize list of jcmp file paths
+        self._jcmp_files = []
+        
+        if direction is not None:
+            # Single direction or single half-space case
+            pp_keys['startPhi'] = 0
+            pp_keys['stopPhi']  = 0
+            # Generate direction dependent keys
+            if direction == 'half_space_up':
+                pp_keys['startTheta'] = -89
+                pp_keys['stopTheta'] = 89
+                pp_keys['phiSteps'] = 1
+                pp_keys['thetaSteps'] = 179
+            elif direction == 'half_space_down':
+                pp_keys['startTheta'] =  91
+                pp_keys['stopTheta'] = 269
+                pp_keys['phiSteps'] = 1
+                pp_keys['thetaSteps'] = 179
+            elif direction == 'point_up':
+                pp_keys['startTheta'] = 0
+                pp_keys['stopTheta'] = 0
+                pp_keys['phiSteps'] = 1
+                pp_keys['thetaSteps'] = 1
+            elif direction == 'point_down':
+                pp_keys['startTheta'] = 180
+                pp_keys['stopTheta'] = 180
+                pp_keys['phiSteps'] = 1
+                pp_keys['thetaSteps'] = 1
+            else:
+                raise ValueError('Unknown value for direction: {}'.
+                                 format(direction))
+            
+            # Generate the jcmp file
+            pp_keys['fName'] = ''
+            self._jcmp_files.append(self.__jcmp_path())
+            jpy.jcm.jcmt2jcm(self._jcmpt_path, keys=pp_keys,
+                             outputfile=self._jcmp_files[-1])
+            return
+            
+        # Complete space case
+        pp_keys['phiSteps'] = self.resolution
+        pp_keys['thetaSteps'] = self.resolution
+        pp_keys['startPhi'] =   0.0
+        pp_keys['stopPhi'] = 360.0
+        
+        # Generate jcmp files for the upper and lower half space
+        for direc in ['_up', '_down']:
+            if direc == '_up':
+                pp_keys['startTheta'] = 0.0
+                pp_keys['stopTheta'] = 89.9
+            elif direc == '_down':
+                pp_keys['startTheta'] = 90.1
+                pp_keys['stopTheta'] = 180.0
+            self._jcmp_files.append(self.__jcmp_path(suffix=direc))
+            pp_keys['fName'] = direc
+            jpy.jcm.jcmt2jcm(self._jcmpt_path, keys=pp_keys,
+                             outputfile=self._jcmp_files[-1])
+
+
 class antenna(object):
     """
     Class antenna
@@ -278,61 +466,39 @@ class antenna(object):
                               file_path+'/postprocesses/farFieldPolarDown.jcmp']
         return
     
-    
-    
-    def _convert_points(self,points,**kwargs):
-        """
-        Converts xyz points given by jcmwave into theta, phi, r.
-
-        kwargs:
-        ------
-        /
-        """
-        r      = np.sqrt(np.sum(points**2,axis=1))
-        theta  = np.reshape(np.arccos(points[:,2]/r),(-1,self.resolution))
-        phi    = np.reshape(np.arctan2(points[:,1],points[:,0]),(-1,self.resolution))
-        
+    def _convert_points(self,points):
+        """Converts xyz points given by jcmwave into theta, phi, r."""
+        r = np.sqrt(np.sum(points**2,axis=1))
+        theta = np.reshape(np.arccos(points[:,2]/r),
+                           (-1,self.resolution))
+        phi = np.reshape(np.arctan2(points[:,1], points[:,0]),
+                         (-1,self.resolution))
         return r,theta,phi
-    
-    
     
     @staticmethod
     def read_fullFarField(pp):
-        """
-        Function to read out the far field, refractive index and the evaluation
-        points from the far field postprocess.
-
-        kwargs:
-        ------
-        /
-        """
+        """Reads the far field, refractive index and the evaluation points from
+        the far field postprocess."""
         results = {}
-        results['FF_up']     = pp[0]['ElectricFieldStrength'][0]
-        results['n_up']      = np.sqrt(pp[0]['header']['RelPermittivity'])
+        results['FF_up'] = pp[0]['ElectricFieldStrength'][0]
+        results['n_up'] = np.sqrt(pp[0]['header']['RelPermittivity'])
         results['points_up'] = pp[0]['EvaluationPoint']
         
         if len(pp)>1:
-            results['FF_down']     = pp[1]['ElectricFieldStrength'][0]
-            results['n_down']      = np.sqrt(pp[1]['header']['RelPermittivity'])
+            results['FF_down'] = pp[1]['ElectricFieldStrength'][0]
+            results['n_down'] = np.sqrt(pp[1]['header']['RelPermittivity'])
             results['points_down'] = pp[1]['EvaluationPoint']
         return results
     
-    
-    
     @staticmethod
     def read_customFarField(pp):
-        """
-        Not yet working..
-
-        kwargs:
-        ------
-        /
-        """
-        results = {}
-        results['FF_custom']     = pp[0]['ElectricFieldStrength'][0]
-        results['n_custom']      = np.sqrt(pp[0]['header']['RelPermittivity'])
-        results['points_custom'] = pp[0]['EvaluationPoint']
-        return results
+        """TODO"""
+        raise NotImplementedError()
+#         results = {}
+#         results['FF_custom']     = pp[0]['ElectricFieldStrength'][0]
+#         results['n_custom']      = np.sqrt(pp[0]['header']['RelPermittivity'])
+#         results['points_custom'] = pp[0]['EvaluationPoint']
+#         return results
     
     
     
