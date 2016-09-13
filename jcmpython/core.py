@@ -802,6 +802,11 @@ class Simulation(object):
             This calls jcmwave.solve with mode `post_process` internally. The
             results are appended to the `jcm_results`-list of the `Simulation`
             instance.
+        resource_manager : ResourceManager or NoneType, default None
+            You can pass your own `ResourceManager`-instance here, e.g. to
+            configure the resources to use before the `SimulationSet` is
+            initialized. If `None`, a `ResourceManager`-instance will be
+            created automatically.
         additional_keys_for_pps : dict or NoneType, default None
             dict which will be merged to the `keys`-dict of the `Simulation`
             instance before passing them to the jcmwave.solve-method in the
@@ -2895,6 +2900,5 @@ class ConvergenceTest(object):
             writer.save()
 
 
-# Call of the main function
 if __name__ == "__main__":
     pass

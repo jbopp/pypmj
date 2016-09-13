@@ -254,9 +254,10 @@ def load_extension(ext_name):
                                                                      e))
     elif ext_name == 'antenna':
         try:
-            global antenna
             global FarFieldEvaluation
-            from .extension_antenna import antenna, FarFieldEvaluation
+            global far_field_processing_func
+            from .extension_antenna import (FarFieldEvaluation,
+                                            far_field_processing_func)
             __logger.info('Loaded extension: {}'.format(ext_name))
         except Exception as e:
             __logger.warn('Unable to load extension `{}`: {}'.format(ext_name,

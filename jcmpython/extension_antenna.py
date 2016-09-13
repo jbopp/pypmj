@@ -1,7 +1,19 @@
+"""TODO: Explanation
+
+Authors: Niko Nikolay, Carlo Barth
+
+"""
+
+import logging
 import os
 import numpy as np
+from scipy import constants
 import jcmpython as jpy
 
+# Constants
+Z0 = constants.c*constants.epsilon_0/2.
+
+# The .jcmpt far field post processing default file
 FAR_FIELD_JCMPT_CONTENT='''
 <?
 import os
@@ -45,21 +57,71 @@ for keys['theta'] in theta_vals:
 }
 '''
 
-def write_far_field_jcmpt_to_file(filepath):
+
+# =============================================================================
+
+
+def far_field_processing_func(pps):
+    """This is the processing function for the far field evaluation as needed
+    for the `core.Simulation.process_results`-method (which is also used be
+    the `run`-methods). It reads the far field, refractive index and the
+    evaluation points from the far field post-processes.
+    """
+    results = {}
+    for i, pp in enumerate(pps):
+        suffix = '_{}'.format(i)
+        results['E_field_strength'+suffix] = pp['ElectricFieldStrength'][0]
+        results['n'+suffix] = np.sqrt(pp['header']['RelPermittivity'])
+        results['points'+suffix] = pp['EvaluationPoint']
+    return results
+
+def read_jcm_far_field_tables(jcm_files):
+    """This is the processing function for the far field evaluation as needed
+    for the `core.Simulation.process_results`-method (which is also used be
+    the `run`-methods). It reads the far field, refractive index and the
+    evaluation points from the far field post-processes.
+    """
+    results = {}
+    # Convert single file names to list
+    if not isinstance(jcm_files, (list,tuple)):
+        jcm_files = [jcm_files]
+    
+    for i, f in enumerate(jcm_files):
+        if not os.path.isfile(f):
+            raise RuntimeError('jcm file "{}" does not exist.'.format(f))
+        pp = jpy.jcm.loadtable(file_name=f)
+        suffix = '_{}'.format(i)
+        results['E_field_strength'+suffix] = pp['ElectricFieldStrength'][0]
+        results['n'+suffix] = np.sqrt(pp['header']['RelPermittivity'])
+        results['points'+suffix] = pp['EvaluationPoint']
+    return results
+
+def _write_far_field_jcmpt_to_file(filepath):
     """Writes the standard far field jcmpt file content to the file given by
     `filepath`."""
     with open(filepath, 'w') as f:
         f.write(FAR_FIELD_JCMPT_CONTENT)
 
 
+# =============================================================================
+
+
 class FarFieldEvaluation(object):
-    """
+    """TODO: Explanation
     
     Parameters
     ----------
     simulation : jcmpython.core.Simulation
         The simulation instance for which the far field evaluation should be
         performed.
+    direction : {'half_space_up', 'half_space_down', 'point_up',
+                 'point_down', None}
+            Direction specification for the far field evaluation. If None, the
+            complete space will be considered. If 'half_space_up'/
+            'half_space_down', only the upper/lower half space will be
+            considered. If  'point_up'/'point_down', a single evaluation point
+            in upward/downward direction will be used. Note: If a point
+            direction is used, the resolution parameter will be ignored.
     resolution : int, default 25
         ...
     geometry : {'2D', '3D'}, default '2D'
@@ -73,14 +135,23 @@ class FarFieldEvaluation(object):
     _JCMPT_FNAME = 'far_field_polar.jcmpt'
     _JCMP_FMT = 'far_field_polar{}.jcmp' # formatter for jcmp files
     
-    def __init__(self, simulation, resolution=25, geometry='2D', 
-                 subfolder='post_processes'):
+    def __init__(self, simulation=None, direction=None, resolution=25,
+                 geometry='2D', subfolder='post_processes'):
+        self.logger = logging.getLogger('antenna.' + self.__class__.__name__)
         self.simulation = simulation
+        self.direction = direction
         self.resolution = resolution
         self.geometry = geometry
         self.subfolder = subfolder
         self._jcmpt_path = None
-        self._read_data_from_simulation()
+        if simulation is not None:
+            self._read_data_from_simulation()
+    
+    def __repr__(self):
+        fmt = 'FarFieldEvaluation(simulation={}, direction={}, ' + \
+              'resolution={}, geometry={})'
+        return fmt.format(self.simulation, self.direction, self.resolution,
+                          self.geometry)
     
     def _read_data_from_simulation(self):
         """Reads path and project information from the simulation instance."""
@@ -88,6 +159,16 @@ class FarFieldEvaluation(object):
         self.working_dir = os.path.join(self.project.working_dir,
                                         self.subfolder)
         self._project_name = os.path.splitext(self.project.project_file_name)[0]
+        self._sim_results_dir = os.path.join(self.simulation.working_dir(),
+                                             self._project_name+'_results')
+        if self.direction is None:
+            self.far_field_result_files = [os.path.join(self._sim_results_dir, 
+                                                        'far_field_up.jcm'),
+                                           os.path.join(self._sim_results_dir, 
+                                                        'far_field_down.jcm')]
+        else:
+            self.far_field_result_files = [os.path.join(self._sim_results_dir, 
+                                                        'far_field.jcm')]
     
     def __wdir_fpath(self, filename):
         """Returns a file path using the `working_dir` as directory plus the
@@ -101,28 +182,27 @@ class FarFieldEvaluation(object):
     
     def _write_jcmpt_file(self):
         """Generates the standard jcmpt-template file."""
+        # Check if the project was already copied
+        if not self.project.was_copied:
+            self.project.copy_to()
         # Create the working directory if it does not exist
         if not os.path.isdir(self.working_dir):
             os.makedirs(self.working_dir)
         # Get the file path and write the content
         self._jcmpt_path = self.__wdir_fpath(self._JCMPT_FNAME)
-        write_far_field_jcmpt_to_file(self._jcmpt_path)
+        _write_far_field_jcmpt_to_file(self._jcmpt_path)
     
-    def _generate_jcmp_files(self, direction=None):
+    def _remove_jcmpt_file(self):
+        """Removes the jcmpt-file from the file system."""
+        if os.path.isfile(self._jcmpt_path):
+            os.remove(self._jcmpt_path)
+        else:
+            self.logger.warn('The file "{}" does not exist.'.
+                             format(self._jcmpt_path))
+    
+    def _generate_jcmp_files(self):
         """Generates .jcmp post processing files necessary to execute the
-        far field relevant post processes using JCMsolve.
-
-        Parameters:
-        -----------
-        direction : {'half_space_up', 'half_space_down', 
-                     'point_up', 'point_down', None}
-            Direction specification for the far field evaluation. If None, the
-            complete space will be considered. If 'half_space_up'/
-            'half_space_down', only the upper/lower half space will be
-            considered. If  'point_up'/'point_down', a single evaluation point
-            in upward/downward direction will be used.
-        
-        """
+        far field relevant post processes using JCMsolve."""
         # Generate the far field jcmpt-file
         self._write_jcmpt_file()
         
@@ -134,40 +214,41 @@ class FarFieldEvaluation(object):
         # Initialize list of jcmp file paths
         self._jcmp_files = []
         
-        if direction is not None:
+        if self.direction is not None:
             # Single direction or single half-space case
             pp_keys['startPhi'] = 0
             pp_keys['stopPhi']  = 0
             # Generate direction dependent keys
-            if direction == 'half_space_up':
+            if self.direction == 'half_space_up':
                 pp_keys['startTheta'] = -89
                 pp_keys['stopTheta'] = 89
                 pp_keys['phiSteps'] = 1
                 pp_keys['thetaSteps'] = 179
-            elif direction == 'half_space_down':
+            elif self.direction == 'half_space_down':
                 pp_keys['startTheta'] =  91
                 pp_keys['stopTheta'] = 269
                 pp_keys['phiSteps'] = 1
                 pp_keys['thetaSteps'] = 179
-            elif direction == 'point_up':
+            elif self.direction == 'point_up':
                 pp_keys['startTheta'] = 0
                 pp_keys['stopTheta'] = 0
                 pp_keys['phiSteps'] = 1
                 pp_keys['thetaSteps'] = 1
-            elif direction == 'point_down':
+            elif self.direction == 'point_down':
                 pp_keys['startTheta'] = 180
                 pp_keys['stopTheta'] = 180
                 pp_keys['phiSteps'] = 1
                 pp_keys['thetaSteps'] = 1
             else:
                 raise ValueError('Unknown value for direction: {}'.
-                                 format(direction))
+                                 format(self.direction))
             
             # Generate the jcmp file
             pp_keys['fName'] = ''
             self._jcmp_files.append(self.__jcmp_path())
             jpy.jcm.jcmt2jcm(self._jcmpt_path, keys=pp_keys,
                              outputfile=self._jcmp_files[-1])
+            self._remove_jcmpt_file()
             return
             
         # Complete space case
@@ -188,317 +269,309 @@ class FarFieldEvaluation(object):
             pp_keys['fName'] = direc
             jpy.jcm.jcmt2jcm(self._jcmpt_path, keys=pp_keys,
                              outputfile=self._jcmp_files[-1])
-
-
-class antenna(object):
-    """
-    Class antenna
-    --------------------------
+        self._remove_jcmpt_file()
     
-    Computes the directivity into any angle with a given resolution.
-    Also far field power with respect to a collection numerical aperture can be calculated.
-    You can specify a resolution, which is the number of steps on a cartesian grid where everything
-    will be calculated. You cal also specify the geometry type, eigther ='2D' or ='3D', standard is 2D.
+    def _check_result_file_existence(self):
+        """Checks if the necessary far field jcm-files already exist."""
+        return all([os.path.isfile(f) for f in self.far_field_result_files])
     
-    Usage:
-    ------
-    Starting with a defined simulationset called simuset.
-    
-    Create an antenna instance:
-        >> own_antenna = antenna()
-    Generate the post processes for far field evaulation:
-        >> own_antenna.generatePostProcess()
-    Use the given file paths to apply the post processes:
-        >> simuset.solve_single_simulation(0,run_post_process_files=own_antenna.filePaths)
-    Take out results with the help of the generated processing functions:
-        >> simuset.simulations[0].process_results(processing_func=own_antenna.antenna.read_fullFarField, overwrite=True)
-    Calculate the directivities by passing the post process results:
-        >> own_antenna.full_directivity(simuset.simulations[0]._results_dict)
-    And finally plot the results:
-        >> fig = plt.figure()
-        >> ax = fig.add_subplot(111, projection='3d')
-        >> 
-        >> ax.plot_surface(own_antenna.directivity_down[0].real,
-        >>                 own_antenna.directivity_down[1].real,
-        >>                 own_antenna.directivity_down[2].real,
-        >>                 rstride=1, cstride=1, cmap=cm.YlGnBu_r)
-        >>
-        >> ax.plot_surface(own_antenna.directivity_up[0].real,
-        >>                 own_antenna.directivity_up[1].real,
-        >>                 own_antenna.directivity_up[2].real,
-        >>                 rstride=1, cstride=1, cmap=cm.YlGnBu_r)
-    
-    Or monitor the collection efficiencies depending on the numerical aperture:
-        >> figure()
-        >> plt.plot(own_antenna.NA_down,own_antenna.ffp_down/own_antenna.ffp*100)
-        >> plt.plot(own_antenna.NA_up,own_antenna.ffp_up/own_antenna.ffp*100)
-        >> plt.xlabel('NA')
-        >> plt.ylabel('collection efficiency / %')
-    """
-    
-    def __init__(self,resolution=25,geometry='2D'):
-        
-        self.resolution = resolution
-        self.geometry = geometry
-        
-        return
-    
-    
-    def full_directivity(self,ff_dict,**kwargs):
+    def analyze_far_field(self, **simulation_solve_kwargs):
+        """Analyzes the far field of the current simulation. Checks if the
+        expected .jcm-result files already exist and runs the simulation plus
+        necessary post-processes if not. Afterwards, it executes the standard
+        far field processing (using the `_process_far_field_data`-method).
         """
-        Computes the directivity into any angle with a given resolution.
+        self.logger.debug('Analyzing far field...')
+        if 'run_post_process_files' in simulation_solve_kwargs:
+            self.logger.debug('Deleting forbidden keywordarg ' +
+                              '"run_post_process_files" from ' +
+                              '`simulation_solve_kwargs`')
+            del simulation_solve_kwargs['run_post_process_files']
+        if not self._check_result_file_existence():
+            self.logger.debug('Solving unfinished simulation {}'.
+                              format(self.simulation))
+            self._generate_jcmp_files()
+            self.simulation.solve_standalone(
+                                    run_post_process_files=self._jcmp_files,
+                                    **simulation_solve_kwargs)
+        self._process_far_field_data()
+    
+    def _process_far_field_data(self):
+        """Computes the directivity into any angle with the current resolution.
         Since most problems have different exterior domains above and below
-        the computational domain, the directivity will be devided into
-        a upwards and a downwards oriented half sphere.
-        Correspondingly, the far field power (up / down) is given with
-        respect to a collection numerical aperture (up / down).
-
-        kwargs:
-        ------
-        resolution  (=INT) specifies the number of sample points on a cartesian grid, standard = 25.
+        the computational domain, the directivity will be divided into
+        an upwards and a downwards oriented half sphere. Correspondingly, the
+        far field power (up / down) is given with respect to a collection
+        numerical aperture (up / down). All results are stored as attributes:
+        `power`, `NA` (, `total_power`, `directivity`)
         """
-        theta0 = np.linspace(0, np.pi/2,self.resolution)
-        phi0   = np.linspace(0, 2*np.pi,self.resolution)
+        self.logger.debug('Processing far field data from result files: {}'.
+                          format(self.far_field_result_files))
         
-        dtt_up_unn = self._calc_dtt(ff_dict['n_up'],
-                                    ff_dict['FF_up'],
-                                    ff_dict['points_up'],
-                                    theta0, phi0)
+        # Read the results from the .jcm-results files
+        results = read_jcm_far_field_tables(self.far_field_result_files)
         
-        theta1 = np.linspace(np.pi/2,np.pi,self.resolution)
-        phi1   = np.linspace(0, 2*np.pi,self.resolution)
+        # Check if it contains the proper keys depending on the direction
+        keys_0 = ['n_0', 'E_field_strength_0', 'points_0']
+        keys_1 = ['n_1', 'E_field_strength_1', 'points_1']
+        proper_keys = {None : keys_0+keys_1,
+                       'half_space_up' : keys_0,
+                       'point_up' : keys_0,
+                       'half_space_down' : keys_0,
+                       'point_down' : keys_0}
+        for key_ in proper_keys[self.direction]:
+            if not key_ in results:
+                raise RuntimeError('Key "{}" is missing in the simulation '.
+                                   format(key_) +
+                                   'results. Please check your processing ' +
+                                   'function.')
+                return
         
-        dtt_down_unn = self._calc_dtt(ff_dict['n_down'],
-                                      ff_dict['FF_down'],
-                                      ff_dict['points_down'],
-                                      theta1, phi1)
-
-        self.ffp_up = dtt_up_unn['ffp']
-        self.ffp_down = dtt_down_unn['ffp']
-        self.ffp = self.ffp_up[-1]+self.ffp_down[0]
-        self.NA_up = dtt_up_unn['NA']
-        self.NA_down = dtt_down_unn['NA']
+        # Calculate the power, numerical aperture and unnormalized directivity
+        self.power = {}
+        self.NA = {}
+        directivity_unn = {}
         
-        self.directivity_up = dtt_up_unn['directivity_unn']/self.ffp
-        self.directivity_down = dtt_down_unn['directivity_unn']/self.ffp
+        phi = np.linspace(0., 2.*np.pi, self.resolution)
         
-        return
-    
-    
-    def __custom_directivity(self,ff_dict,theta_i,phi_i,**kwargs):
-        """
-        Not yet working...
-
-        kwargs:
-        ------
-        /
-        """
-        dtt_custom = self._calc_dtt(ff_dict['n_custom'],
-                                    ff_dict['FF_custom'],
-                                    ff_dict['points_custom'],
-                                    theta_i, phi_i)
-        
-        if 'internal_use' in kwargs:
-            self._directivity_custom = dtt_custom['directivity']
-            self._ffp_custom = dtt_custom['ffp']
+        # Complete case
+        if self.direction is None:
+            # Up
+            theta = np.linspace(0, np.pi/2., self.resolution)
+            power, NA, d_val_unn = self._calc_dtt(
+                                              results['n_0'],
+                                              results['E_field_strength_0'],
+                                              results['points_0'],
+                                              theta, phi)
+            self.power['up'] = power
+            self.NA['up'] = NA
+            directivity_unn['up'] = d_val_unn
+            
+            # Down
+            theta = np.linspace(np.pi/2., np.pi, self.resolution)
+            power, NA, d_val_unn = self._calc_dtt(
+                                              results['n_1'],
+                                              results['E_field_strength_1'],
+                                              results['points_1'],
+                                              theta, phi)
+            self.power['down'] = power
+            self.NA['down'] = NA
+            directivity_unn['down'] = d_val_unn
         else:
-            self.directivity_custom = dtt_custom['directivity']
-            self.ffp_custom = dtt_custom['ffp']
-                
-        return
+            # Up-case
+            if 'up' in self.direction:
+                theta = np.linspace(0, np.pi/2., self.resolution)
+                power, NA, d_val_unn = self._calc_dtt(
+                                              results['n_0'],
+                                              results['E_field_strength_u0'],
+                                              results['points_0'],
+                                              theta, phi)
+                self.power['up'] = power
+                self.NA['up'] = NA
+                directivity_unn['up'] = d_val_unn
+            
+            # Down-case
+            if 'down' in self.direction:
+                theta = np.linspace(np.pi/2., np.pi, self.resolution)
+                power, NA, d_val_unn = self._calc_dtt(
+                                              results['n_0'],
+                                              results['E_field_strength_0'],
+                                              results['points_0'],
+                                              theta, phi)
+                self.power['down'] = power
+                self.NA['down'] = NA
+                directivity_unn['down'] = d_val_unn
+        
+        # Only if both half-spaces are calculated, i.e. if direction is None,
+        # the directivity is defined
+        if self.direction is None:
+            # Initialize the dict for the directivity results
+            self.directivity = {}
+            self.total_power = self.power['up'][-1] + self.power['down'][0]
+            for direc, dval in directivity_unn.iteritems():
+                self.directivity[direc] = dval/self.total_power
     
-    
-    
-    def _calc_dtt(self,n,FF,points,theta_i,phi_i,**kwargs):
+    def _calc_dtt(self,refractive_index, E_field_strength, 
+                  cartesian_points, theta_i, phi_i):
         """
         Computes the directivity into any angle with a given resolution.
-        Furthermore, the far field power (up / down) is given with
-        respect to a collection numerical aperture (up / down).
-        Refractive index, far field, evaluation points and
-        integration angles theta and phi must be given.
+        Furthermore, the far field power (up / down) is returned with
+        respect to a collection numerical aperture (up / down). Refractive
+        index, far field, evaluation points and integration angles theta and
+        phi must be given.
+        
+        Parameters
+        ----------
+        refractive_index : float
+            Refractive index of the material for which the data is provided.
+        E_field_strength : numpy.ndarray
+            Electric field strength as returned by the `FarField`-post-process
+            of JCMsuite
+        cartesian_points : numpy.ndarray
+            Cartesian points as returned in `EvaluationPoint` by the
+            `FarField`-post-process of JCMsuite
+        theta_i / phi_i : numpy.ndarray
+            Angles for which the integration is carried out
+        
+        Returns
+        -------
+        tuple
+            power : far field power
+            NA : numerical aperture
+            d_val_unn : unnormalized directivity
 
-        kwargs:
-        ------
-        resolution  (=INT) specifies the number of sample points on a cartesian grid, standard = 25.
         """
-        p_dict = self._calc_poynting(n,FF,points,**kwargs)
+        # Calculate the Poynting vectors
+        (r, theta, _, poynting_S, poynting_Abs_xpol, poynting_Abs_ypol, 
+         poynting_Abs_zpol) = self._calc_poynting(refractive_index, 
+                                                  E_field_strength, 
+                                                  cartesian_points)
         
-        ffp = np.zeros(self.resolution)
-        NA  = np.zeros(self.resolution)
+        # Initialize numpy arrays for the far field power and numerical
+        # aperture (NA)
+        N = self.resolution # short hand
+        power = np.zeros(N)
+        NA  = np.zeros(N)
         
-        
-        if p_dict['theta'][0][0] > np.pi/2.0:
-            for i in range(self.resolution):
-                ffp[i] = np.trapz(np.trapz(p_dict['poynting_S'][i:self.resolution+1,:].real*np.sin(p_dict['theta'][i:self.resolution+1,:]),x=theta_i),x=phi_i[i:self.resolution+1])*p_dict['r'].real**2
-                NA[i]  = n.real*np.sin(np.pi-p_dict['theta'][i][0])
+        # We integrate the Poynting vectors over theta_i and phi_i and calculate
+        # the far field power and the NA
+        if theta[0,0] > np.pi/2.0:
+            for i in range(N):
+                integrand = poynting_S[i:N+1,:].real * np.sin(theta[i:N+1,:])
+                integral = np.trapz(np.trapz(integrand, x=theta_i), 
+                                    x=phi_i[i:N+1])
+                power[i] = integral * r.real**2
+                NA[i]  = refractive_index.real * np.sin(np.pi-theta[i][0])
         else:
-            for i in range(self.resolution):
-                ffp[i] = np.trapz(np.trapz(p_dict['poynting_S'][0:i+1,:].real*np.sin(p_dict['theta'][0:i+1,:]),x=theta_i),x=phi_i[0:i+1])*p_dict['r'].real**2
-                NA[i]  = n.real*np.sin(p_dict['theta'][i][0])
+            for i in range(N):
+                integrand = poynting_S[0:i+1,:].real * np.sin(theta[0:i+1,:])
+                integral = np.trapz(np.trapz(integrand, x=theta_i), 
+                                    x=phi_i[0:i+1])
+                power[i] = integral * r.real**2
+                NA[i]  = refractive_index.real * np.sin(theta[i][0])
         
+        # We calculate the unnormalized directivity
+        scale = 4. * np.pi * r**2
+        d_val_unn = np.array([scale*poynting_Abs_xpol,
+                              scale*poynting_Abs_ypol,
+                              scale*poynting_Abs_zpol])
+        return power, NA, d_val_unn
+    
+    def _calc_poynting(self, refractive_index, E_field_strength, 
+                       cartesian_points):
+        """Computes the Poynting vectors in spherical coordinates.
         
-        directivityVal_unn = [4*np.pi*p_dict['poynting_Abs_xpol']*p_dict['r']**2,
-                              4*np.pi*p_dict['poynting_Abs_ypol']*p_dict['r']**2,
-                              4*np.pi*p_dict['poynting_Abs_zpol']*p_dict['r']**2]
+        Parameters
+        ----------
+        refractive_index : float
+            Refractive index of the material for which the data is provided.
+        E_field_strength : numpy.ndarray
+            Electric field strength as returned by the `FarField`-post-process
+            of JCMsuite
+        cartesian_points : numpy.ndarray
+            Cartesian points as returned in `EvaluationPoint` by the
+            `FarField`-post-process of JCMsuite
         
-        return {'ffp':ffp,'NA':NA,'directivity_unn':directivityVal_unn}
-    
-    
-    
-    def _calc_poynting(self,n,FF,points,**kwargs):
-        """
-        Computes the poynting vectors in spherical coordinates (poynting_S)
-        and in cartesian coordinates (poynting_Abs_xpol / ypol / zpol)
-        for any angle with a given resolution.
-        Angles theta and phi, and the radius of the evaluation points are given back.
+        Returns
+        -------
+        tuple
+            r, theta, phi : spherical coordinates 
+            poynting_S : Poynting vectors in spherical coordinates
+            poynting_Abs_xpol, poynting_Abs_ypol, poynting_Abs_zpol : Poynting
+                vectors in cartesian coordinates
 
-        kwargs:
-        ------
-        resolution  (=INT) specifies the number of sample points on a cartesian grid, standard = 25.
         """
-        c = 299792458
-        eps0 = 8.854187817e-12
-        z0 = c*n*eps0/2.0
-        r, theta, phi = self._convert_points(points)
         
-        poynting_R = []
-        poynting_xdir = []
-        poynting_ydir = []
-        poynting_zdir = []
-        # For each polarization..
-        for i in range(3):
-            # Readout each polarisation of the far field
-            # computed by JCMwave + computation of the lengths
-            # of complex poynting vector:
-            poynting_R.append(z0*abs(np.reshape(FF[:,i],(-1,self.resolution)))**2)
-            # Determining direction (x,y,z components) of
-            # poynting vectors on the sphere surface used
-            # for computation, for each polarization:
-            poynting_xdir.append(poynting_R[i]*np.sin(theta)*np.cos(phi))
-            poynting_ydir.append(poynting_R[i]*np.sin(theta)*np.sin(phi))
-            poynting_zdir.append(poynting_R[i]*np.cos(theta))
-        # Summing over all poynting vector polarisations
-        # gives the absolute poynting vector for each polarization:
-        poynting_Abs_xpol = np.sum(poynting_xdir,axis=0)
-        poynting_Abs_ypol = np.sum(poynting_ydir,axis=0)
-        poynting_Abs_zpol = np.sum(poynting_zdir,axis=0)
-        # Computation of the poynting vector lengths
-        # in spherical coordinates:
-        poynting_S = np.sum(poynting_R,axis=0)
+        # Basis transformation to spherical coordinates
+        r, theta, phi = self._convert_points(cartesian_points)
         
-        return {'poynting_S':poynting_S,
-                'poynting_Abs_xpol':poynting_Abs_xpol,
-                'poynting_Abs_ypol':poynting_Abs_ypol,
-                'poynting_Abs_zpol':poynting_Abs_zpol,
-                'theta':theta,'phi':phi,'r':r[0]}
+        shape = (3, -1, self.resolution) # the resolution dependent shape
+        poynting_spherical = refractive_index * Z0 * \
+                             np.square(np.abs(np.reshape(E_field_strength.T, 
+                                                         shape)))
+        poynting_xdir = poynting_spherical * np.sin(theta) * np.cos(phi)
+        poynting_ydir = poynting_spherical * np.sin(theta) * np.sin(phi)
+        poynting_zdir = poynting_spherical * np.cos(theta)
+        
+        # Summing over all Poynting vector polarizations gives the absolute
+        # Poynting vector for each polarization
+        poynting_Abs_xpol = np.sum(poynting_xdir, axis=0)
+        poynting_Abs_ypol = np.sum(poynting_ydir, axis=0)
+        poynting_Abs_zpol = np.sum(poynting_zdir, axis=0)
+        
+        # Poynting vector lengths in spherical coordinates
+        poynting_S = np.sum(poynting_spherical, axis=0)
+        
+        return (r[0], theta, phi, 
+                poynting_S, 
+                poynting_Abs_xpol, poynting_Abs_ypol, poynting_Abs_zpol)
     
-    
-    
-    def generatePostProcess(self,project_file,**kwargs):
+    def _convert_points(self, points):
+        """Converts (x, y, z) points, as returned by JCMsuite, into 
+        (theta, phi, r).
         """
-        Converts the farFieldPolarT.jcmpt file (deposited in the procject/file/path/postprocesses/)
-        into .jcm files. The filepaths will be given back as the attribute .filePaths.
-
-        kwargs:
-        ------
-        direction (=STR) upCut/downCut - cut through the upper/lower half sphere
-                         justUp/justDown - single evaluation point in upward/downward direction
-        """
-        pp_keys = {}
-        pp_keys['geometry'] = self.geometry
-        file_path, project_name = os.path.split(project_file)
-        pp_keys['project_name'], _ = os.path.splitext(project_name)
-        
-        if 'direction' in kwargs:
-            pp_keys['startPhi'] = 0
-            pp_keys['stopPhi']  = 0
-            
-            if kwargs.get('direction') == 'upCut':
-                pp_keys['startTheta'] = -89
-                pp_keys['stopTheta']  =  89
-                pp_keys['phiSteps']   =   1
-                pp_keys['thetaSteps'] = 179
-            
-            if kwargs.get('direction') == 'downCut':
-                pp_keys['startTheta'] =  91
-                pp_keys['stopTheta']  = 269
-                pp_keys['phiSteps']   =   1
-                pp_keys['thetaSteps'] = 179
-            
-            if kwargs.get('direction') == 'justUp':
-                pp_keys['startTheta'] = 0
-                pp_keys['stopTheta']  = 0
-                pp_keys['phiSteps']   = 1
-                pp_keys['thetaSteps'] = 1
-            
-            if kwargs.get('direction') == 'justDown':
-                pp_keys['startTheta'] = 180
-                pp_keys['stopTheta']  = 180
-                pp_keys['phiSteps']   =   1
-                pp_keys['thetaSteps'] =   1
-            
-            pp_keys['fName'] = ''
-            jpy.jcm.jcmt2jcm(file_path+'/postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
-                              outputfile=file_path+'/postprocesses/farFieldPolar.jcmp')
-            self.filePaths = file_path+'/postprocesses/farFieldPolar.jcmp'
-            
-        else:
-            pp_keys['phiSteps']   =  self.resolution
-            pp_keys['thetaSteps'] =  self.resolution
-            
-            pp_keys['startPhi']   =   0.0
-            pp_keys['stopPhi']    = 360.0
-            pp_keys['startTheta'] =   0.0
-            pp_keys['stopTheta']  =  89.9
-            
-            pp_keys['fName'] = 'Up'
-            jpy.jcm.jcmt2jcm(file_path+'/postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
-                      outputfile=file_path+'/postprocesses/farFieldPolarUp.jcmp')
-
-            pp_keys['startTheta'] =  90.1
-            pp_keys['stopTheta']  = 180.0
-            
-            pp_keys['fName'] = 'Down'
-            jpy.jcm.jcmt2jcm(file_path+'/postprocesses/farFieldPolarT.jcmpt', keys=pp_keys,
-                      outputfile=file_path+'/postprocesses/farFieldPolarDown.jcmp')
-
-            self.filePaths = [file_path+'/postprocesses/farFieldPolarUp.jcmp',
-                              file_path+'/postprocesses/farFieldPolarDown.jcmp']
-        return
-    
-    def _convert_points(self,points):
-        """Converts xyz points given by jcmwave into theta, phi, r."""
-        r = np.sqrt(np.sum(points**2,axis=1))
+        r = np.linalg.norm(points, axis=1)
         theta = np.reshape(np.arccos(points[:,2]/r),
-                           (-1,self.resolution))
+                           (-1, self.resolution))
         phi = np.reshape(np.arctan2(points[:,1], points[:,0]),
-                         (-1,self.resolution))
-        return r,theta,phi
+                         (-1, self.resolution))
+        return r, theta, phi
     
-    @staticmethod
-    def read_fullFarField(pp):
-        """Reads the far field, refractive index and the evaluation points from
-        the far field postprocess."""
-        results = {}
-        results['FF_up'] = pp[0]['ElectricFieldStrength'][0]
-        results['n_up'] = np.sqrt(pp[0]['header']['RelPermittivity'])
-        results['points_up'] = pp[0]['EvaluationPoint']
+    def save_far_field_data(self, file_path, compressed=True):
+        """Saves the far field data to the file at `file_path` using the
+        numpy.savez (or numpy.savez_compressed method if `compressed` is True).
+        """
+        direc_dependent = ['directivity', 'power', 'NA']
+        direc_independent = ['total_power']
+        directions = ['up', 'down']
         
-        if len(pp)>1:
-            results['FF_down'] = pp[1]['ElectricFieldStrength'][0]
-            results['n_down'] = np.sqrt(pp[1]['header']['RelPermittivity'])
-            results['points_down'] = pp[1]['EvaluationPoint']
-        return results
+        save_dict = {}
+        
+        # Direction dependent attributes
+        for dd in direc_dependent:
+            if hasattr(self, dd):
+                dict_ = getattr(self, dd)
+                for direc in directions:
+                    if direc in dict_:
+                        save_dict['{}_{}'.format(dd, direc)] = dict_[direc]
+        
+        # Direction independent attributes
+        for dd in direc_independent:
+            if hasattr(self, dd):
+                save_dict[dd] = getattr(self, dd)
+        
+        # Save with desired method
+        if compressed:
+            np.savez_compressed(file_path, **save_dict)
+        else:
+            np.savez(file_path, **save_dict)
     
-    @staticmethod
-    def read_customFarField(pp):
-        """TODO"""
-        raise NotImplementedError()
-#         results = {}
-#         results['FF_custom']     = pp[0]['ElectricFieldStrength'][0]
-#         results['n_custom']      = np.sqrt(pp[0]['header']['RelPermittivity'])
-#         results['points_custom'] = pp[0]['EvaluationPoint']
-#         return results
-    
-    
-    
+    def load_far_field_data(self, file_path):
+        """Loads far field data from the .npz-file located at `file_path`. 
+        """
+        if not os.path.isfile(file_path):
+            file_path = file_path+'.npz'
+        if not os.path.isfile(file_path):
+            raise OSError('Unable to find file {}'.format(file_path))
+        
+        # Load
+        arr = np.load(file_path)
+        
+        # Set values
+        for k in arr.keys():
+            if 'up' in k:
+                k_ = k.replace('_up','')
+                if not hasattr(self, k_):
+                    setattr(self, k_, {})
+                getattr(self, k_)['up'] = arr[k]
+            elif 'down' in k:
+                k_ = k.replace('_down','')
+                if not hasattr(self, k_):
+                    setattr(self, k_, {})
+                getattr(self, k_)['down'] = arr[k]
+            else:
+                setattr(self, k, arr[k])
+
+
+if __name__ == "__main__":
+    pass
