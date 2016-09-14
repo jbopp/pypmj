@@ -1,0 +1,45 @@
+<?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+# Set default keys
+if not 'mat_hole' in keys:
+    keys['mat_hole'] = keys['mat_coating']
+
+wvl = keys['vacuum_wavelength']
+keys['permittivity_subspace'] = keys['mat_subspace'].getPermittivity(wvl)
+keys['permittivity_phc'] = keys['mat_phc'].getPermittivity(wvl)
+keys['permittivity_hole'] = keys['mat_hole'].getPermittivity(wvl)
+keys['permittivity_superspace'] = keys['mat_superspace'].getPermittivity(wvl)
+keys['permittivity_coating'] = keys['mat_coating'].getPermittivity(wvl)
+
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+?>
+Material { 
+  DomainId = 1
+  RelPermittivity = %(permittivity_subspace)e
+  RelPermeability = 1.0
+}
+Material { 
+  DomainId = 2
+  RelPermittivity = %(permittivity_phc)e
+  RelPermeability = 1.0
+}
+Material { 
+  DomainId = 3
+  RelPermittivity = %(permittivity_hole)e
+  RelPermeability = 1.0
+}
+Material { 
+  DomainId = 4
+  RelPermittivity = %(permittivity_superspace)e
+  RelPermeability = 1.0
+}
+Material { 
+  DomainId = 5
+  RelPermittivity = %(permittivity_coating)e
+  RelPermeability = 1.0
+}

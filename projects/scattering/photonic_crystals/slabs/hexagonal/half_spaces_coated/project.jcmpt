@@ -1,0 +1,86 @@
+<?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+# Set default keys
+default_keys = {'info_level' : 10,
+				'storage_format' : 'Binary',
+				'fem_degree_min' : 1,
+				'n_refinement_steps' : 0}
+for dkey in default_keys:
+	if not dkey in keys:
+		keys[dkey] = default_keys[dkey]
+		
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+?>
+Project {
+  InfoLevel = %(info_level)i
+  StorageFormat = %(storage_format)s
+  Electromagnetics {
+    TimeHarmonic {
+      Scattering {
+        FieldComponents = Electric 
+        Accuracy{
+          Precision = %(precision_field_energy)e
+    	  FiniteElementDegree{
+    	    Adaptive{
+              MinimumDegree= %(fem_degree_min)i
+    	      MaximumDegree= %(fem_degree_max)i
+    	    }
+    	  }
+          Refinement {
+            Adaptivity = yes
+            MaxNumberSteps = %(n_refinement_steps)i
+          }
+        }
+        PML {
+          AnglePreRefinements = 0
+        }
+      }
+    }
+  }
+}
+<?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+wvl = keys['vacuum_wavelength']
+keys['na_sub'] = keys['mat_subspace'].getNKdata(wvl)
+keys['na_super'] = keys['mat_superspace'].getNKdata(wvl)
+
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+?>
+PostProcess {
+  FourierTransform {
+    FieldBagPath = "./project_results/fieldbag.jcm"
+    OutputFileName = "./project_results/reflected_diffraction_orders.jcm"
+    NormalDirection = Z
+    Format = JCM-ASCII
+    ScatteredFieldOnly = yes
+    NumericalAperture = %(na_super)e
+  }
+}
+
+PostProcess {
+  FourierTransform {
+    FieldBagPath = "./project_results/fieldbag.jcm"
+    OutputFileName = "./project_results/transmitted_diffraction_orders.jcm"
+    NormalDirection = -Z
+    NumericalAperture = %(na_sub)e
+    Format = JCM-ASCII
+  }
+}
+
+PostProcess {
+  DensityIntegration {
+    FieldBagPath = "./project_results/fieldbag.jcm"
+    OutputFileName = "./project_results/electric_field_energy.jcm"
+    OutputQuantity = ElectricFieldEnergy
+  }
+}
