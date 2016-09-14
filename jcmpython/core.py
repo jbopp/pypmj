@@ -1944,8 +1944,6 @@ class SimulationSet(object):
         (ignored if provided).
 
         """
-        self.logger.debug('Computing geometry.')
-
         if isinstance(simulation, int):
             simulation = self.simulations[simulation]
         if simulation not in self.simulations:
