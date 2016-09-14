@@ -116,6 +116,9 @@ class JCMPConfiguration(ConfigParser):
                 'JCMPYTHON_CONFIG_FILE' or otherwise in the current directory (must be
         named 'config.cfg'). Returns `None` if no config file is found.
         """
+        if 'JCMPYTHON_IGNORE_CONFIG_FILE' in os.environ:
+            if os.environ['JCMPYTHON_IGNORE_CONFIG_FILE'] == 'yes':
+                return
         if 'JCMPYTHON_CONFIG_FILE' in os.environ:
             config_file = os.environ['JCMPYTHON_CONFIG_FILE']
         else:
