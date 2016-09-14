@@ -1026,12 +1026,12 @@ class ResourceManager(object):
     
     def reset_daemon(self):
         """Resets the JCMdaemon, i.e. disconnects it and resets the queue."""
-        if NEW_DAEMON_DETECTED:
-            daemon.active_daemon.shutdown()
-            if not daemon.queue.is_empty():
-                daemon.queue.reset()
-        else:
-            daemon.shutdown()
+#         if NEW_DAEMON_DETECTED:
+#             daemon.active_daemon.shutdown()
+#             if not daemon.queue.is_empty():
+#                 daemon.queue.reset()
+#         else:
+        daemon.shutdown()
 
 
 # =============================================================================
