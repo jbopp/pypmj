@@ -12,26 +12,12 @@ Credit: Partly based on MATLAB-versions written by Sven Burger and Martin
 import numpy as np
 from numpy.linalg import norm
 from scipy import constants
-from warnings import warn
+# from warnings import warn
 
 Z0 = np.sqrt( constants.mu_0 / constants.epsilon_0 )
 
 # =============================================================================
 
-def cosd(angles):
-    """Shorthand for numpy's `cos` function for `angles` in degrees."""
-    return np.cos( np.deg2rad(angles) )
-
-def acosd(vals):
-    """Returns the arccos in degrees. Clips input and warns if necessary."""
-    if np.any(vals > 1.) or np.any(vals < 0.):
-        warn('Clipping data to calculate arccos.')
-        vals = np.clip(vals, 0., 1.)
-    return np.rad2deg(np.arccos(vals))
-
-def tand(arr):
-    """Shorthand for numpy's `tan` function for `angles` in degrees."""
-    return np.tan( np.deg2rad(arr) )
 
 class JCM_Post_Process(object):
     """An abstract class to hold JCM-PostProcess results. Must be subclassed!"""
@@ -122,10 +108,11 @@ def iterate_sources_for_pp(pp, class_):
 def get_energy_normalization(p, d, h, h_sup, pore_angle, n_sup):
     """Returns the energy normalization factor from the case of a plane wave.
     """
-    r1 = d/2. + h/2. * tand(pore_angle)
-    r2 = d/2. - h/2. * tand(pore_angle)
+    tan_pore_angle = np.tan(np.deg2rad(pore_angle))
+    r1 = d/2. + h/2. * tan_pore_angle
+    r2 = d/2. - h/2. * tan_pore_angle
     V1 = np.pi*h/3. * ( r1**2 + r1*r2 + r2**2 )
-    V2 = 6.*p**2/4. * h_sup * tand(30.)
+    V2 = 6.*p**2/4. * h_sup * np.tan(np.pi/6.)
     V = V1+V2
     return n_sup*constants.epsilon_0*V/4.
 

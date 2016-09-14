@@ -991,7 +991,7 @@ class ResourceManager(object):
                                  '`resource_nick` which is ' +
                                  'unknown. Leaving the configuration ' +
                                  'untouched.')
-            return
+                return
         
         resource = self.resources[resource_nick]
         
