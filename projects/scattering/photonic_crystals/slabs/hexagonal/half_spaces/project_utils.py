@@ -84,14 +84,15 @@ class PP_FourierTransform(JCM_Post_Process):
     def __repr__(self):
         return self.title+'(i_src={})'.format(self.i_src)
     
-    def _cos_factor(self, theta):
-        thetas = acosd( np.abs(self.K[:,-1]) / norm(self.K[0]) )
-        return cosd(thetas)/cosd(theta)
+    def _cos_factor(self, theta_rad):
+        thetas = np.arccos( np.abs(self.K[:,-1]) / norm(self.K[0]) )
+        return np.cos(thetas)/np.cos(theta_rad)
     
-    def get_refl_trans(self, theta, n=1):
-        cos_factor = self._cos_factor(theta)
-        rt = np.sum(np.square(np.abs(self.E_strength)),axis=1)
-        return np.sum(rt*cos_factor)
+    def get_refl_trans(self, theta_rad, n=1.):
+        """`theta_rad` is the incident angle in radians!"""
+        cos_factor = self._cos_factor(theta_rad)
+        rt = np.sum(np.square(np.abs(self.E_strength)), axis=1)
+        return np.sum(rt*cos_factor)*n
 
 class PP_DensityIntegration(JCM_Post_Process):
     """Holds the results of a JCM-DensityIntegration post process for the source
@@ -167,7 +168,7 @@ def processing_default(pps, keys):
     
     # Read the necessary input data from the keys
     wvl = keys['vacuum_wavelength']
-    theta_in = keys['theta']
+    theta_in = np.deg2rad(keys['theta'])
     uol = keys['uol'] # unit of length for geometry data
     p = uol*keys['p']
     d = uol*keys['d']
@@ -185,7 +186,7 @@ def processing_default(pps, keys):
 #     area_cd = p**2 # area of the computational domain
     # Fix for hexagon area (lengthy number = 3*sqrt(3)/8)
     area_cd = p**2*0.64951905283832898507 # area of the computational domain
-    p_in = cosd(theta_in)*(1./np.sqrt(2.))**2 *n_sup*area_cd / Z0
+    p_in = np.cos(theta_in)*(1./np.sqrt(2.))**2 *n_sup*area_cd / Z0
     
     # Save the refactive index data, real and imag parts marked
     # with '_n' and '_k'
@@ -193,6 +194,10 @@ def processing_default(pps, keys):
         nname = 'mat_{0}'.format(n[0])
         results[nname+'_n'] = np.real(n[1])
         results[nname+'_k'] = np.imag(n[1])
+    
+    # Calculate the energy normalization factor
+    e_norm = get_energy_normalization(p, d, h, h_sup, pore_angle, n_sup)
+    results['E_norm'] = e_norm
     
     # Iterate over the sources
     for i in sources:
@@ -202,8 +207,8 @@ def processing_default(pps, keys):
         
         # Reflection and transmission is calculated by the get_refl_trans
         # of the PP_FourierTransform class
-        refl = ffts[0][i].get_refl_trans(theta_in)
-        trans = ffts[1][i].get_refl_trans(theta_in)
+        refl = ffts[0][i].get_refl_trans(theta_in, n=results['mat_sup_n'])
+        trans = ffts[1][i].get_refl_trans(theta_in, n=results['mat_sub_n'])
     
         # The absorption depends on the imaginary part of the electric field
         # energy in the absorbing domains
@@ -229,11 +234,9 @@ def processing_default(pps, keys):
         # Calculate and save the energy conservation
         results['conservation{0}'.format(i+1)] = refl+trans+absorb_by_p_in
 
-        # Calculate the energy normalization factor
-        e_norm = get_energy_normalization(p, d, h, h_sup, pore_angle, n_sup)
+        # Calculate the log10 of the electric field enhancement coefficient
         E_total = results['e_{0}3'.format(i+1)] + results['e_{0}4'.format(i+1)]
         results['E_{0}'.format(i+1)] = np.log10(E_total/e_norm)
-#         E_enhance = np.log10((results['e_13'] + results['e_{0}1'.format(i+1)]) / e_norm)
     return results
 
 

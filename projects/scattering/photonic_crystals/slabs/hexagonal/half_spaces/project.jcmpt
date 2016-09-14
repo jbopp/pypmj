@@ -62,6 +62,7 @@ PostProcess {
     OutputFileName = "./project_results/reflected_diffraction_orders.jcm"
     NormalDirection = Z
     Format = JCM-ASCII
+    ScatteredFieldOnly = yes
     NumericalAperture = %(na_super)e
   }
 }
