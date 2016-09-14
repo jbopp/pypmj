@@ -160,13 +160,15 @@ def processing_default(pps, keys):
     p = uol*keys['p']
     d = uol*keys['d']
     h = uol*keys['h']
-    h_sup = uol*keys['h_sup']
+#     h_sup = uol*keys['h_sup']
+    h_coat = uol*keys['h_coating']
     pore_angle = keys['pore_angle']
     
     # Refractive indices
     n_sub = keys['mat_subspace'].getNKdata(wvl)
     n_phc = keys['mat_phc'].getNKdata(wvl)
     n_sup = keys['mat_superspace'].getNKdata(wvl)
+    n_coat = keys['mat_coating'].getNKdata(wvl)
     
     # Calculate simple derived quantities
     # TODO: check if this is really true if we use a hexagon here
@@ -177,13 +179,14 @@ def processing_default(pps, keys):
     
     # Save the refactive index data, real and imag parts marked
     # with '_n' and '_k'
-    for n in [['sub', n_sub], ['phc', n_phc], ['sup', n_sup]]:
+    for n in [['sub', n_sub], ['phc', n_phc], ['sup', n_sup], ['coat', n_coat]]:
         nname = 'mat_{0}'.format(n[0])
         results[nname+'_n'] = np.real(n[1])
         results[nname+'_k'] = np.imag(n[1])
     
     # Calculate the energy normalization factor
-    e_norm = get_energy_normalization(p, d, h, h_sup, pore_angle, n_sup)
+    
+    e_norm = get_energy_normalization(p, d, h, h_coat, pore_angle, n_coat)
     results['E_norm'] = e_norm
     
     # Iterate over the sources
@@ -224,7 +227,6 @@ def processing_default(pps, keys):
         # Calculate the log10 of the electric field enhancement coefficient
         # TODO: check if this is valid!
         E_total = results['e_{0}3'.format(i+1)] + \
-                  results['e_{0}4'.format(i+1)] + \
                   results['e_{0}5'.format(i+1)]
         results['E_{0}'.format(i+1)] = np.log10(E_total/e_norm)
     return results
