@@ -1,0 +1,195 @@
+<?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+# Imports
+from project_utils import Cone
+import numpy as np
+
+# Set default keys
+default_keys = {'min_mesh_angle' : 20.,
+				'refine_all_circle' : 2,
+				'uol' : 1.e-9,
+				'pore_angle' : 0.}
+
+for dkey, dval in default_keys.iteritems():
+	if not dkey in keys:
+		keys[dkey] = dval
+
+# Set all missing values for the z-direction maximum meshing side lengths using
+# the minimum of the two horizontal side lengths
+sl_z_default = min([keys['max_sl_polygon'], keys['max_sl_circle']])
+sl_z_keys = ['max_sl_z_sub', 'max_sl_z_slab', 'max_sl_z_coat', 'max_sl_z_sup']
+for zkey in sl_z_keys:
+	if not zkey in keys:
+		keys[zkey] = sl_z_default
+
+# Calculate the lower and upper radii of the cone from center diameter and
+# pore angle
+alpha = keys['pore_angle']
+d = keys['d']
+h = keys['h']
+# keys['radius_i'] = d/2. - h*np.tan(np.deg2rad(alpha))/2.
+# keys['radius_f'] = keys['d'] - keys['radius_i']
+
+# Calculate the radii of the inner and outer cones at the specific z-positions
+thickness = keys['h_coating']
+keys['main_slab_h'] = h-thickness
+keys['superspace_h'] = keys['h_sup']-thickness
+outer_cone = Cone(diameter_center=d, 
+				  height=h,
+				  angle_degrees=alpha)
+inner_cone = Cone(diameter_center=d-2*thickness,
+				  height=h,
+				  angle_degrees=alpha)
+
+z_positions = [0., thickness, h, h+thickness]
+for i, zp in enumerate(z_positions):
+	keys['radius_inner_{}'.format(i)] = inner_cone.diameter_at_height(zp)/2.
+	keys['radius_outer_{}'.format(i)] = outer_cone.diameter_at_height(zp)/2.
+
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+?>
+Layout {
+  UnitOfLength = %(uol)e
+  MeshOptions {
+    MinimumMeshAngle = %(min_mesh_angle)4f
+  }
+
+  Polygon { 
+    Name = "ComputationalDomain" 
+    DomainId = 1
+    Priority = -1 
+    PeriodicUnitCell {
+      LatticeVectorLengths = [%(p)4f %(p)4f]
+      LatticeAngle = 60
+      Shape = Hexagonal
+    }
+    MeshOptions {
+      MaximumSidelength = %(max_sl_polygon)4f
+    }
+  }
+  
+  Circle {
+    Name = "Cone_outer"
+    DomainId = 2
+    Priority = 1
+    Radius = %(radius_outer_0)4f
+    RefineAll = %(refine_all_circle)i
+    MeshOptions {
+      MaximumSidelength = %(max_sl_circle)4f
+    }
+  }
+  
+  Circle {
+    Name = "Cone_inner"
+    DomainId = 3
+    Priority = 1
+    Radius = %(radius_inner_0)4f
+    RefineAll = %(refine_all_circle)i
+    MeshOptions {
+      MaximumSidelength = %(max_sl_circle)4f
+    }
+  }
+  
+  # ----------------------------------------------------------------------------
+  # --- Extrusion --------------------------------------------------------------
+  # ----------------------------------------------------------------------------
+  
+  Extrusion {
+  
+    LayerInterface {
+	  Name = "BoundaryInterfaceBottom"
+      BoundaryClass = Transparent
+    }
+    
+    # --- Subspace -------------------------------------------------------------
+    
+    Layer {
+      Name = "Subspace"
+      Thickness = %(h_sub)4f
+      DomainId = 1
+      MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_sub)4f
+        MaximumSidelengthZLower = %(max_sl_z_sub)4f
+        MaximumSidelengthZUpper = %(max_sl_z_coat)4f
+      }
+    }
+	
+	# --- Lower slab layer with coating ----------------------------------------
+	
+	Layer {
+	  Name = "Slab_coated"
+	  Thickness = %(h_coating)4f
+	  DomainIdMapping = [1 2, 2 3, 3 3]
+	  MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_coat)4f
+	  }
+	}
+	
+	# --- Main slab layer with coating only at sides ---------------------------
+	
+	LayerInterface {
+	  Name = "InterfaceLowerCoating"
+      GeometryValues = [Cone_inner/Radius = %(radius_inner_1)4f,
+					    Cone_outer/Radius = %(radius_outer_1)4f]
+    }
+	
+    Layer {
+      Name = "Slab_uncoated"
+      Thickness = %(main_slab_h)4f
+      DomainIdMapping = [1 2, 2 3, 3 4]
+      MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_slab)4f
+        MaximumSidelengthZLower = %(max_sl_z_coat)4f
+        MaximumSidelengthZUpper = %(max_sl_z_coat)4f
+      }
+    }
+    
+    # --- Coated layer above the slab ------------------------------------------
+    
+    LayerInterface {
+	  Name = "InterfaceSlabMain"
+      GeometryValues = [Cone_inner/Radius = %(radius_inner_2)4f,
+					    Cone_outer/Radius = %(radius_outer_2)4f]
+    }
+    
+    Layer {
+      Name = "Coating"
+      Thickness = %(h_coating)4f
+      DomainIdMapping = [1 3, 2 3, 3 4]
+      MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_coat)4f
+      }
+    }
+    
+    # --- Superspace -----------------------------------------------------------
+    
+    LayerInterface {
+	  Name = "InterfaceTop"
+      GeometryValues = [Cone_inner/Radius = %(radius_inner_3)4f,
+					    Cone_outer/Radius = %(radius_outer_3)4f]
+    }
+    
+    Layer {
+      Name = "Superspace"
+      Thickness = %(superspace_h)4f
+      DomainIdMapping = [1 4]
+      MeshOptions {
+		MaximumSidelengthZ = %(max_sl_z_sup)4f
+        MaximumSidelengthZLower = %(max_sl_z_coat)4f
+        MaximumSidelengthZUpper = %(max_sl_z_sup)4f
+      }
+    }
+    
+    LayerInterface {
+	  Name = "BoundaryInterfaceTop"
+	  GeometryValues = [Cone_inner/Radius = %(radius_inner_3)4f,
+					    Cone_outer/Radius = %(radius_outer_3)4f]
+      BoundaryClass = Transparent
+    }
+  }
+}

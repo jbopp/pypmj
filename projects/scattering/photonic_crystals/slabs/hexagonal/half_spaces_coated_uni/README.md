@@ -1,6 +1,6 @@
 # Description
 
-Unit cell of a photonic crystal (PhC) slab with hexagonal lattice of conically shaped holes (if the side-wall angle is different from 0°). The slab is coated with a coating material that fills the holes and is surrounded by half-spaces of uniform material, called *subspace* below the PhC and *superspace* above the coating. The setup uses two orthogonal plane wave sources. Their direction of incidence can be controlled using to angles *theta* and *phi* (see [Simulation setup](#Simulation-setup)).
+Unit cell of a photonic crystal (PhC) slab with hexagonal lattice of conically shaped holes (if the side-wall angle is different from 0°). The slab is uniformly coated and surrounded by half-spaces of uniform material, called *subspace* below the PhC and *superspace* above the coating. The setup uses two orthogonal plane wave sources. Their direction of incidence can be controlled using to angles *theta* and *phi* (see [Simulation setup](#Simulation-setup)).
 
 ## Simulation setup
 
@@ -19,7 +19,7 @@ Key | Value
 `h` | 116.0
 `h_sup` | 250.0
 `h_sub` | 250.0
-`h_coating` | 60.0
+`h_coating` | 40.0
 `p` | 600.0
 `max_sl_polygon` | 100.0
 `max_sl_circle` | 140.0
@@ -30,7 +30,7 @@ Key | Value
 `fem_degree_max` | 2
 `precision_field_energy` | 0.02
 
-![Mesh side-view][mesh_1] ![Mesh top-view][mesh_2] ![Field][field]
+![Mesh side-view][mesh_1] ![Mesh top-view][mesh_2] ![Mesh coating-only][mesh_3] ![Field][field]
 
 **Fig. 2:** *Example of a mesh and calculated field.*
 
@@ -38,6 +38,7 @@ Key | Value
 
 [mesh_1]: example_mesh_side.png "Example mesh side"
 [mesh_2]: example_mesh_top.png "Example mesh top"
+[mesh_3]: example_mesh_slab_and_coating.png "Example mesh coating"
 [field]: example_field.png "Example field"
 
 # Parameters
@@ -87,7 +88,6 @@ Key | Default | Description
 :---|:-------:| -----------
 `mat_phc` | | Material of the PhC slab
 `mat_subspace` | | Material of the space below the PhC slab
-`mat_hole` | *same as* `mat_coating` | Material inside the holes of the PhC
 `mat_coating` | | Material of the coating
 `mat_superspace` | | Material of the space above the coating
 
