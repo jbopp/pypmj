@@ -114,7 +114,7 @@ def get_energy_normalization(p, d, h, h_sup, pore_angle, n_sup):
     V1 = np.pi*h/3. * ( r1**2 + r1*r2 + r2**2 )
     V2 = 6.*p**2/4. * h_sup * np.tan(np.pi/6.)
     V = V1+V2
-    return n_sup*constants.epsilon_0*V/4.
+    return n_sup**2*constants.epsilon_0*V/4.
 
 def processing_default(pps, keys):
     """Returns the reflection, transmission, absorption and electric field
