@@ -21,9 +21,13 @@ Key | Value
 `max_sl_polygon` | 80.
 `max_sl_circle` | 120.
 
-![Mesh side-view][mesh_1] ![Mesh top-view][mesh_2]
+------
 
-**Fig. 2:** *Example of a mesh.*
+**Fig. 1:** *Example of a mesh.*
+
+Side | Top
+:---:|:---:
+![Mesh side-view][mesh_1] | ![Mesh top-view][mesh_2]
 
 ------
 

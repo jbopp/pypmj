@@ -30,13 +30,14 @@ Key | Value
 `fem_degree_max` | 2
 `precision_field_energy` | 0.02
 
+------
+
+**Fig. 1:** *Example of a mesh and calculated field.*
+
 Side | Top | Coating | Field
 :---:|:---:|:-------:|:----:
 ![Mesh side-view][mesh_1] | ![Mesh top-view][mesh_2] | ![Mesh coating-only][mesh_3] | ![Field][field]
 
-**Fig. 2:** *Example of a mesh and calculated field.*
-
-------
 
 [mesh_1]: example_mesh_side.png "Example mesh side"
 [mesh_2]: example_mesh_top.png "Example mesh top"

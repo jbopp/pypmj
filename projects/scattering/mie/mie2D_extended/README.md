@@ -30,12 +30,14 @@ the unit of length that is specified in `layout.jcmt`. It also shows the
 computed electric field strength for this mesh.
 
 ------
-![Mesh example][mesh] ![Field example][field]
 
 **Fig. 2:** *Example of a mesh with radius 0.6 and the computed computed
 electric field strength.*
 
-------
+Mesh | Field
+:---:|:-----:
+![Mesh example][mesh] | ![Field example][field]
+
 
 [setup]: example_geometry.png "Example geometry"
 [mesh]: example_mesh.png "Example mesh"
