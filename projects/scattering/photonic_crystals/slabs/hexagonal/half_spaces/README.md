@@ -29,8 +29,6 @@ Side | Top
 :---:|:---:
 ![Mesh side-view][mesh_1] | ![Mesh top-view][mesh_2]
 
-------
-
 [mesh_1]: example_mesh_1.png "Example mesh side"
 [mesh_2]: example_mesh_2.png "Example mesh top"
 

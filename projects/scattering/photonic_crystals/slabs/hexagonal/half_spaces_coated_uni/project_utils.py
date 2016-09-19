@@ -1,9 +1,9 @@
-"""Collection of function that may be used by JCM template files (*.jcmt) to
+"""Collection of functions that may be used by JCM template files (*.jcmt) to
 create the project or that may be useful/necessary to process the results.
 
 Contains a default processing function (`processing_default`).
 
-Authors : Carlo Barth
+Authors: Carlo Barth
 
 Credit: Partly based on MATLAB-versions written by Sven Burger and Martin 
         Hammerschmidt.

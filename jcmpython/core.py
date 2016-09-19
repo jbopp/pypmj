@@ -35,11 +35,6 @@ logger = logging.getLogger(__name__)
 logger_JCMgeo = logging.getLogger('JCMgeo')
 logger_JCMsolve = logging.getLogger('JCMsolve')
 
-# Load values from configuration
-PROJECT_BASE = _config.get('Data', 'projects')
-DBASE_NAME = _config.get('DEFAULTS', 'database_name')
-DBASE_TAB = _config.get('DEFAULTS', 'database_tab_name')
-
 # Global defaults
 SIM_DIR_FMT = 'simulation{0:06d}'
 STANDARD_DATE_FORMAT = '%y%m%d'
@@ -118,14 +113,15 @@ class JCMProject(object):
                     return specifier
 
         # Treat the relative path
+        pbase = _config.get('Data', 'projects')
         err_msg = 'Unable to find the project source folder specified' +\
                   ' by {} (using project root: {})'.format(specifier,
-                                                           PROJECT_BASE)
+                                                           pbase)
         try:
             if isinstance(specifier, (list, tuple)):
-                source_folder = os.path.join(PROJECT_BASE, *specifier)
+                source_folder = os.path.join(pbase, *specifier)
             else:
-                source_folder = os.path.join(PROJECT_BASE, specifier)
+                source_folder = os.path.join(pbase, specifier)
         except:
             raise OSError(err_msg)
         if not os.path.isdir(source_folder):
@@ -1328,9 +1324,10 @@ class SimulationSet(object):
 
         """
         self.logger.debug('Initializing the HDF5 store')
-
-        self._database_file = os.path.join(self.storage_dir, DBASE_NAME)
-        if not os.path.splitext(DBASE_NAME)[1] == '.h5':
+        
+        dbase_name = _config.get('DEFAULTS', 'database_name')
+        self._database_file = os.path.join(self.storage_dir, dbase_name)
+        if not os.path.splitext(dbase_name)[1] == '.h5':
             self.logger.warn('The HDF5 store file has an unknown extension. ' +
                              'It should be `.h5`.')
         self.store = pd.HDFStore(self._database_file)
@@ -1366,7 +1363,8 @@ class SimulationSet(object):
 
     def is_store_empty(self):
         """Checks if the HDF5 store is empty."""
-        if DBASE_TAB not in self.store:
+        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        if dbase_tab not in self.store:
             return True
 
         # Check store validity
@@ -1381,7 +1379,8 @@ class SimulationSet(object):
         """Returns the data currently in the store."""
         if self.is_store_empty():
             return None
-        return self.store[DBASE_TAB]
+        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        return self.store[dbase_tab]
 
     def write_store_data_to_file(self, file_path=None, mode='CSV', **kwargs):
         """Writes the data that is currently in the store to a CSV or an Excel
@@ -1423,7 +1422,8 @@ class SimulationSet(object):
         if not isinstance(data, pd.DataFrame):
             raise ValueError('Can only append pandas DataFrames to the store.')
             return
-        self.store.append(DBASE_TAB, data)
+        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        self.store.append(dbase_tab, data)
 
     def make_simulation_schedule(self):
         """Makes a schedule by getting a list of simulations that must be
@@ -1790,7 +1790,8 @@ class SimulationSet(object):
 
         # Replace the data in the store with the new reindexed data
         self.logger.debug('Replacing store content with reindexed data.')
-        self.store.remove(DBASE_TAB)
+        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        self.store.remove(dbase_tab)
         self.append_store(data)
         self.store.flush()
 
