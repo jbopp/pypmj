@@ -12,6 +12,7 @@ import logging
 from jcmpython import (jcm, daemon, resources, __version__, __jcm_version__,
                        _config, ConfigurationError)
 from jcmpython.parallelization import ResourceDict
+from jcmpython.jupyter_tools import JupyterProgressDisplay
 from copy import deepcopy
 from datetime import date
 from glob import glob
@@ -26,6 +27,7 @@ from six import string_types
 import sys
 import tempfile
 import time
+from threading import Timer, Thread, Event
 from . import utils
 
 # Get special logger instances for output which is captured from JCMgeo and
@@ -2154,6 +2156,7 @@ class SimulationSet(object):
                     if not t_remaining == 0.:
                         self.logger.info('Approx. remaining time: {}'.format(
                             utils.tForm(t_remaining)))
+                    self._progress_view.update_remaining_time(t_remaining)
 
                     # Reset the round counter and timer
                     t0 = time.time()
@@ -2219,7 +2222,7 @@ class SimulationSet(object):
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
                     self.append_store(sim._get_DataFrame())
-                    self._set_pbar_state(add_to_value=1)
+                    self._progress_view.set_pbar_state(add_to_value=1)
 
                 # Remove/zip all working directories of the finished 
                 # simulations if wdir_mode is 'zip'/'delete'
@@ -2280,7 +2283,7 @@ class SimulationSet(object):
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
                     self.append_store(sim._get_DataFrame())
-                    self._set_pbar_state(add_to_value=1)
+                    self._progress_view.set_pbar_state(add_to_value=1)
 
             # Remove/zip all working directories of the finished simulations if
             # wdir_mode is 'zip'/'delete'
@@ -2428,8 +2431,9 @@ class SimulationSet(object):
             self.add_resources()
         
         # Initialize the progress bar if necessary
-        if show_progress_bar:
-            self._set_up_progress_bar()
+        self._progress_view = JupyterProgressDisplay(
+                                                num_sims=self.num_sims_to_do(),
+                                                show=show_progress_bar)
         
         # Start the simulations until all simulations are finished or the
         # maximum `auto_rerun_failed` is exceeded
@@ -2444,15 +2448,17 @@ class SimulationSet(object):
                                     jcm_solve_kwargs=jcm_solve_kwargs)
             n_trials += 1
             if len(self.failed_simulations) == 0:
-                self._set_pbar_state(description='Finished', 
-                                     bar_style='success')
+                self._progress_view.set_pbar_state(description='Finished', 
+                                                   bar_style='success')
+                self._progress_view.set_timer_to_zero()
                 break
             else:
                 self.logger.warn('The following simulations failed: {}'.format(
                 [sim.number for sim in self.failed_simulations]))
         if len(self.failed_simulations) != 0:
-            self._set_pbar_state(description='Failed', 
-                                 bar_style='warning')
+            self._progress_view.set_pbar_state(description='Failed', 
+                                               bar_style='warning')
+            self._progress_view.set_timer_to_zero()
 
         # Delete/zip working directories from previous runs if needed
         if wdir_mode in ['zip', 'delete'] and hasattr(self, '_wdirs_to_clean'):
@@ -2474,40 +2480,40 @@ class SimulationSet(object):
         self.logger.info('Total time for all simulations: {}'.format(
             utils.tForm(time.time() - t0)))
     
-    def _set_up_progress_bar(self):
-        """Initializes a jupyter notebook progress bar for the current run."""
-        self._pbar_ready = False
-        try:
-            from ipywidgets import FloatProgress
-            from IPython.display import display
-            self._progress_bar = FloatProgress(min=0, 
-                                               max=self.num_sims_to_do(),
-                                               description='Status:')
-            display(self._progress_bar)
-            self._pbar_ready = True
-        except:
-            self.logger.warn('Unable to set up the progress bar.')
-    
-    def _set_pbar_state(self, add_to_value=None, description=None,
-                        bar_style=None):
-        """Updates the progress bar with the given options."""
-        if not self._pbar_ready:
-            return
-        if add_to_value is not None:
-            try:
-                self._progress_bar.value += add_to_value
-            except:
-                pass
-        if description is not None:
-            try:
-                self._progress_bar.description = description
-            except:
-                pass
-        if bar_style is not None:
-            try:
-                self._progress_bar.bar_style = bar_style
-            except:
-                pass
+#     def _set_up_progress_bar(self):
+#         """Initializes a jupyter notebook progress bar for the current run."""
+#         self._pbar_ready = False
+#         try:
+#             from ipywidgets import FloatProgress
+#             from IPython.display import display
+#             self._progress_bar = FloatProgress(min=0, 
+#                                                max=self.num_sims_to_do(),
+#                                                description='Status:')
+#             display(self._progress_bar)
+#             self._pbar_ready = True
+#         except:
+#             self.logger.warn('Unable to set up the progress bar.')
+#     
+#     def _set_pbar_state(self, add_to_value=None, description=None,
+#                         bar_style=None):
+#         """Updates the progress bar with the given options."""
+#         if not self._pbar_ready:
+#             return
+#         if add_to_value is not None:
+#             try:
+#                 self._progress_bar.value += add_to_value
+#             except:
+#                 pass
+#         if description is not None:
+#             try:
+#                 self._progress_bar.description = description
+#             except:
+#                 pass
+#         if bar_style is not None:
+#             try:
+#                 self._progress_bar.bar_style = bar_style
+#             except:
+#                 pass
     
     def _copy_from_transitional_dir(self):
         """Moves the transitional storage directory to the taget storage
