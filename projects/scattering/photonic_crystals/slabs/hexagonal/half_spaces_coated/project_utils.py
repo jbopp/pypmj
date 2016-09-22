@@ -74,11 +74,21 @@ class PP_FourierTransform(JCM_Post_Process):
         thetas = np.arccos( np.abs(self.K[:,-1]) / norm(self.K[0]) )
         return np.cos(thetas)/np.cos(theta_rad)
     
-    def get_refl_trans(self, theta_rad, n=1.):
-        """`theta_rad` is the incident angle in radians!"""
+    def get_reflection(self, theta_rad):
+        """Returns the reflection. `theta_rad` is the incident angle in
+        radians!"""
         cos_factor = self._cos_factor(theta_rad)
         rt = np.sum(np.square(np.abs(self.E_strength)), axis=1)
-        return np.sum(rt*cos_factor)*n
+        return np.sum(rt*cos_factor)
+    
+    def get_transmission(self, theta_rad, n_subspace, n_superspace):
+        """Returns the transmission, which depends on the subspace and
+        superspace refractive index. `theta_rad` is the incident angle in
+        radians!"""
+        cos_factor = self._cos_factor(theta_rad)
+        rt = np.sum(np.square(np.abs(self.E_strength)), axis=1)
+        return np.sum(rt*cos_factor)*n_subspace/n_superspace
+
 
 class PP_DensityIntegration(JCM_Post_Process):
     """Holds the results of a JCM-DensityIntegration post process for the source
@@ -197,8 +207,10 @@ def processing_default(pps, keys):
         
         # Reflection and transmission is calculated by the get_refl_trans
         # of the PP_FourierTransform class
-        refl = ffts[0][i].get_refl_trans(theta_in, n=results['mat_sup_n'])
-        trans = ffts[1][i].get_refl_trans(theta_in, n=results['mat_sub_n'])
+        refl = ffts[0][i].get_reflection(theta_in)
+        trans = ffts[1][i].get_transmission(theta_in, 
+                                            n_subspace=results['mat_sub_n'],
+                                            n_superspace=results['mat_sup_n'])
     
         # The absorption depends on the imaginary part of the electric field
         # energy in the absorbing domains

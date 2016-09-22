@@ -62,14 +62,14 @@ if missing_dependencies:
                       format(missing_dependencies))
 del dependency
 
-def __version_to_tuple(version):
+def _version_to_tuple(version):
     """Returns a tuple of integers, given a `version` string. The version is
     assumed to be of the form: 'int.int.int...'."""
     return tuple([int(num_) for num_ in version.split('.') if num_.isdigit()])
 
 # Check if dependencies have a supported version
 import pandas as _pd
-if not __version_to_tuple(_pd.__version__) > (0,17,0):
+if not _version_to_tuple(_pd.__version__) > (0,17,0):
     raise ImportError('Your pandas version is {}, which is too old.'.
                       format(_pd.__version__) +
                       'jcmpython needs version 0.17.0 or higher.')

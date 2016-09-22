@@ -8,7 +8,7 @@ Authors : Carlo Barth
 
 """
 
-from jcmpython import _config, ConfigurationError, daemon
+from jcmpython import _config, ConfigurationError
 import logging
 import os
 from six import string_types
@@ -236,14 +236,24 @@ class DaemonResource(object):
             func = self.daemon.add_workstation
         else:
             func = self.daemon.add_queue
+        
+        from jcmpython import __jcm_version__, _version_to_tuple
         try:
-            IDs = func(Hostname=self.hostname,
-                       JCMROOT=self.JCM_root,
-                       Login=self.login,
-                       Multiplicity=self.multiplicity,
-                       NThreads=self.n_threads,
-                       JCMKERNEL=self.JCMKERNEL,
-                       **self.kwargs)
+            if _version_to_tuple(__jcm_version__)[0] >= 3:
+                IDs = func(Hostname=self.hostname,
+                           JCMROOT=self.JCM_root,
+                           Login=self.login,
+                           Multiplicity=self.multiplicity,
+                           NThreads=self.n_threads,
+                           **self.kwargs)
+            else:
+                IDs = func(Hostname=self.hostname,
+                           JCMROOT=self.JCM_root,
+                           Login=self.login,
+                           Multiplicity=self.multiplicity,
+                           NThreads=self.n_threads,
+                           JCMKERNEL=self.JCMKERNEL,
+                           **self.kwargs)
         except TypeError:
             # This is needed for backwards compatibility to JCMsuite 2.x
             try:
