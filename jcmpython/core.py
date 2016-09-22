@@ -2459,7 +2459,7 @@ class SimulationSet(object):
             self._progress_view.set_pbar_state(description='Failed', 
                                                bar_style='warning')
             self._progress_view.set_timer_to_zero()
-
+        
         # Delete/zip working directories from previous runs if needed
         if wdir_mode in ['zip', 'delete'] and hasattr(self, '_wdirs_to_clean'):
             self.logger.info('Treating old working directories with mode: {}'.

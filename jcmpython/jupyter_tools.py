@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Defines classes which are used to provide extended output in the juypter
 notebook using widgets, e.g. a progress form.
 
@@ -9,6 +10,7 @@ Authors : Carlo Barth
 # =============================================================================
 import logging
 import numpy as np
+import sys
 from threading import Timer
 from . import utils
 
@@ -19,11 +21,11 @@ class PerpetualTimer(object):
     continously until `cancel` is called.
     
     """
-    
     def __init__(self, t, hFunction):
         self.t = t
         self.hFunction = hFunction
         self.thread = Timer(self.t, self.handle_function)
+        self.thread.setDaemon(True)
 
     def handle_function(self):
         self.hFunction()
@@ -38,6 +40,62 @@ class PerpetualTimer(object):
 
 
 # =============================================================================
+class TerminalProgressDisplay(object):
+    """Class that displays status information for a `SimulationSet.run`-method
+    call. It displays the remaining runtime (if it can be calculated) and the
+    progress of simulation solving in percent and using a progress bar.
+    
+    """
+    def __init__(self, num_sims, prefix='Progress:', suffix='Finished',
+                 decimals=1, bar_length=50):
+        self.num_sims = num_sims
+        self.prefix = prefix
+        self.suffix = suffix
+        self.decimals = decimals
+        self.bar_length = bar_length
+        self.i = 0
+        self.t_remaining = None
+        self._finished = False
+        
+    def print_progress(self):
+        """Prints the current progress to stdout.
+        
+        Based on: https://gist.github.com/vladignatyev/06860ec2040cb497f0f3
+        
+        """
+        if self._finished:
+            return
+        formatStr = "{0:." + str(self.decimals) + "f}"
+        percents = formatStr.format(100 * (self.i / float(self.num_sims)))
+        filledLength = int(round(
+                               self.bar_length * self.i / float(self.num_sims)))
+        bar = '█' * filledLength + '-' * (self.bar_length - filledLength)
+        if self.t_remaining is None:
+            tstr = ''
+        else:
+            if self.i == self.num_sims:
+                self.t_remaining = 0.
+            tstr = ', approx. remaining time: {}'.format(
+                                        utils.tForm(np.round(self.t_remaining)))
+        sys.stdout.write('\r{} |{}| {}% {}{}'.
+                         format(self.prefix, bar, percents, self.suffix, tstr))
+        if self.i == self.num_sims:
+            sys.stdout.write('\n')
+            self._finished = True
+        sys.stdout.flush()
+    
+    def set_pbar_state(self, add_to_value):
+        """Adds `add_to_value` to the current state and updates the display."""
+        self.i += add_to_value
+        self.print_progress()
+    
+    def update_remaining_time(self, seconds):
+        """Sets the current remaining time to `seconds` and updates the
+        display."""
+        self.t_remaining = seconds
+        self.print_progress()
+
+# =============================================================================
 class JupyterProgressDisplay(object):
     """Class that displays a jupyter notebook widget if possible, holding
     status information for a `SimulationSet.run`-method call. It displays
@@ -46,19 +104,23 @@ class JupyterProgressDisplay(object):
     
     """
     def __init__(self, num_sims=None, show=True):
-        self._pbar_ready = False
-        if not show:
+        self._jupyter_mode = False
+        self.show = show
+        if not self.show:
             return
         if num_sims is None:
             return
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
         self.num_sims = num_sims
+        self._timer_ready = False
         try:
             self._set_up()
-            self._pbar_ready = True
-            self._timer_ready = False
+            self._jupyter_mode = True
         except:
-            self.logger.warn('Unable to set up the progress display.')
+            self.logger.info('Disabling logging for this run to display '+
+                             'the terminal progress bar...')
+            logging.disable(logging.ERROR)
+            self._terminal_display = TerminalProgressDisplay(num_sims)
     
     def _set_up(self):
         """Makes the necessary imports and initializes the jupyter notebook
@@ -105,7 +167,11 @@ class JupyterProgressDisplay(object):
     def set_pbar_state(self, add_to_value=None, description=None,
                         bar_style=None):
         """Updates the progress section with the given options."""
-        if not self._pbar_ready:
+        if not self.show:
+            return
+        if not self._jupyter_mode:
+            if add_to_value is not None:
+                self._terminal_display.set_pbar_state(add_to_value=add_to_value)
             return
         if add_to_value is not None:
             try:
@@ -138,13 +204,18 @@ class JupyterProgressDisplay(object):
         """Updates the time label with the current remaining runtime."""
         if self._seconds_remaining <= 0.:
             self._timer.cancel()
-            return
-        self._time_label.value = utils.tForm(np.round(self._seconds_remaining))
+            self._timer_ready = False
+        if self._jupyter_mode:
+            self._time_label.value = utils.tForm(
+                                              np.round(self._seconds_remaining))
+        else:
+            self._terminal_display.update_remaining_time(
+                                                        self._seconds_remaining)
         self._seconds_remaining -= 1.
     
     def update_remaining_time(self, seconds):
         """Updates the current remaining runtime value (in seconds)."""
-        if not self._pbar_ready:
+        if not self.show:
             return
         self._seconds_remaining = seconds
         if not self._timer_ready:
@@ -152,11 +223,14 @@ class JupyterProgressDisplay(object):
     
     def set_timer_to_zero(self):
         """Sets the time label to 0 and cancels the timer."""
-        self._timer.cancel()
+        if not self.show:
+            return
         self._seconds_remaining = 0.
-        self._time_label.value = utils.tForm(0.)
-        del self._timer
-        self._timer_ready = False
+        if self._jupyter_mode:
+            self._display_remaining_time()
+        else:
+            logging.disable(logging.NOTSET)
+            self.logger.info('...Logging is enabled again. ')
 
 
 if __name__ == "__main__":
