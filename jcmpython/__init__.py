@@ -7,6 +7,7 @@ element Maxwell solver JCMsuite, distributed by the JCMwave GmbH.
 
 It simplifies the setup, execution and data storage of JCMsuite simulations.
 Some of the main advantages are:
+
   - The JCMsuite installation directory, the preferred storage directories and
     computation resources can be set up using a configuration file. 
   - Projects can be collected in one place as a project library and used from
@@ -20,7 +21,7 @@ Some of the main advantages are:
   - Automatic detection of known results in the database.
 
 Copyright(C) 2016 Carlo Barth.
-(* This software project is controlled using git *)
+(This software project is controlled using git)
 """
 __author__ = 'Carlo Barth'
 __copyright__ = 'Copyright 2016'

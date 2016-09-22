@@ -17,6 +17,7 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
+os.environ['JCMPYTHON_IGNORE_CONFIG_FILE'] = 'yes'
 if 'JCMPYTHON_CONFIG_FILE' in os.environ:
     del os.environ['JCMPYTHON_CONFIG_FILE']
 import sphinx_rtd_theme
@@ -36,7 +37,7 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.coverage',
     'sphinx.ext.githubpages',
-    'numpydoc'
+    'sphinxcontrib.napoleon'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -150,7 +151,7 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
 #
-html_logo = 'jcmpython_horizontal.png'
+# html_logo = 'jcmpython_horizontal.png'
 
 # The name of an image file (relative to this directory) to use as a favicon of
 # the docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32

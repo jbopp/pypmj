@@ -327,8 +327,8 @@ def rm_empty_directory_tail(path, stop_at=None):
 
 
 def split_path_to_parts(path):
-    """Splits a path to its parts, so that os.path.join(*parts) gives the input
-    path again."""
+    """Splits a path to its parts, so that `os.path.join(*parts)` gives the
+    input path again."""
     parts = []
     head, tail = os.path.split(path)
     while head and head != os.path.sep:
@@ -687,6 +687,8 @@ def _wait_pid(pid, timeout=None):
                 raise RuntimeError("unknown process exit status")
 
 def _get_daemon_pids():
+    """Returns the PIDs for all currently running JCMdaemon processes on UNIX
+    systems."""
     procs = []
     for proc in psutil.process_iter():
         try:
@@ -699,7 +701,12 @@ def _get_daemon_pids():
     return procs
 
 def wait_for_all_other_daemons():
+    """Waits for all other currently active JCMdaemon processes to finish on
+    UNIX systems.""" 
     _daemon_pids = _get_daemon_pids()
     while len(_daemon_pids) > 0:
         _wait_pid(_daemon_pids[0])
         _daemon_pids = _get_daemon_pids()
+
+if __name__ == "__main__":
+    pass

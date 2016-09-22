@@ -327,7 +327,7 @@ class Simulation(object):
     ----------
     keys : dict
         The keys dict passed as the `keys` argument of jcmwave.solve. Used to
-        translate JCM template files (i.e. *.jcmt-files).
+        translate JCM template files (i.e. `*.jcmt`-files).
     project : JCMProject, default None
         The JCMProject instance related to this simulation.
     number : int
@@ -1046,6 +1046,7 @@ class SimulationSet(object):
         project[1])).
     keys : dict
         There are two possible use cases:
+        
           1. The keys are the normal keys as defined by JCMsuite, containing
              all the values that need to passed to parse the JCM-template
              files. In this case, a single computation is performed using these
@@ -1061,6 +1062,7 @@ class SimulationSet(object):
              store! Consequently, this information is lost, but also adds the
              flexibility to path arbitrary data types to JCMsuite that could
              not be stored in the HDF5 format.
+             
     duplicate_path_levels : int, default 0
         For clearly arranged data storage, the folder structure of the current
         working directory can be replicated up to the level given here. I.e.,
@@ -1084,11 +1086,13 @@ class SimulationSet(object):
     combination_mode : {'product', 'list'}
         Controls the way in which sequences in the `geometry` or `parameters`
         keys are treated.
-          * If `product`, all possible combinations of the provided keys are
+        
+          - If `product`, all possible combinations of the provided keys are
             used.
-          * If `list`, all provided sequences need to be of the same length N,
+          - If `list`, all provided sequences need to be of the same length N,
             so that N simulations are performed, using the value of the i-th
             element of each sequence in simulation i.
+            
     check_version_match : bool, default True
         Controls whether the versions of JCMsuite and jcmpython are compared
         to the versions that were used when the HDF5 store was created. This
@@ -2573,6 +2577,7 @@ class ConvergenceTest(object):
         `keys_ref` must correspond to a single simulation. The syntax is the
         same as for SimulationSet, which we repeat here:
         There are two possible use cases:
+        
           1. The keys are the normal keys as defined by JCMsuite, containing
              all the values that need to passed to parse the JCM-template
              files. In this case, a single computation is performed using
@@ -2588,6 +2593,7 @@ class ConvergenceTest(object):
              store! Consequently, this information is lost, but also adds the
              flexibility to path arbitrary data types to JCMsuite that could
              not be stored in the HDF5 format.
+        
     duplicate_path_levels : int, default 0
         For clearly arranged data storage, the folder structure of the current
         working directory can be replicated up to the level given here. I.e.,
@@ -2613,11 +2619,13 @@ class ConvergenceTest(object):
     combination_mode : {'product', 'list'}
         Controls the way in which sequences in the `geometry` or `parameters`
         keys are treated.
-          * If `product`, all possible combinations of the provided keys are
+        
+          - If `product`, all possible combinations of the provided keys are
             used.
-          * If `list`, all provided sequences need to be of the same length N,
+          - If `list`, all provided sequences need to be of the same length N,
             so that N simulations are performed, using the value of the i-th
             element of each sequence in simulation i.
+        
     check_version_match : bool, default True
         Controls if the versions of JCMsuite and jcmpython are compared to the
         versions that were used when the HDF5 store was used. This has no
