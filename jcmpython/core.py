@@ -27,7 +27,6 @@ from six import string_types
 import sys
 import tempfile
 import time
-from threading import Timer, Thread, Event
 from . import utils
 
 # Get special logger instances for output which is captured from JCMgeo and
@@ -2304,8 +2303,8 @@ class SimulationSet(object):
             # Update the number of finished jobs and the list with 
             # ids_to_wait_for
             nFinished += len(indices)
-            ids_to_wait_for = [ID for ID in ids_to_wait_for 
-                               if ID not in finishedIDs]
+            ids_to_wait_for = [ID_ for ID_ in ids_to_wait_for 
+                               if ID_ not in finishedIDs]
 
     def _is_scheduled(self):
         """Checks if make_simulation_schedule was executed."""
