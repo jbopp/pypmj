@@ -1,10 +1,12 @@
+# coding: utf-8
+
 """
 pypmj
 =====
 
-The pypmj (*py*thon *p*roject *m*anager for *J*CMsuite; pronounce "pie pee em
-jay") package extends the python interface shipped with the finite element
-Maxwell solver JCMsuite, distributed by the JCMwave GmbH.
+The pypmj (python project manager for JCMsuite; pronounce "*pie pee em jay*")
+package extends the python interface shipped with the finite element Maxwell
+solver JCMsuite, distributed by the JCMwave GmbH.
 
 It simplifies the setup, execution and data storage of JCMsuite simulations.
 Some of the main advantages are:
