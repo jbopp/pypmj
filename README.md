@@ -1,6 +1,6 @@
-# jcmpython
+# pypmj
 
-The jcmpython package extends the python interface shipped with the excellent
+The pypmj package extends the python interface shipped with the excellent
 commercial finite element Maxwell solver [JCMsuite](http://www.jcmwave.com/),
 distributed by the JCMwave GmbH.
 
@@ -20,7 +20,7 @@ Some of the main advantages are:
 
 ## Dependencies
 
-jcmpython is tested under Python 2.7. It is tried to assure full compatibility
+pypmj is tested under Python 2.7. It is tried to assure full compatibility
 to Python 3.x. Feedback is highly appreciated.
 
 The following packages are required:
@@ -34,18 +34,18 @@ Many example notebook need matplotlib and largely profit from seaborn.
 
 ## Installation
 
-Yet no installation via pip or package managers is possible. Anyhow, jcmpython
+Yet no installation via pip or package managers is possible. Anyhow, pypmj
 is a Python-only solution, so you simply need to download the source code and
-append the jcmpython subfolder to your Python path.
+append the pypmj subfolder to your Python path.
 
 ## Usage
 
-Use a configuration file or import jcmpython and jcmwave by providing the
+Use a configuration file or import pypmj and jcmwave by providing the
 path to your JCMsuite installation directory manually:
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ python
 import numpy as np
-import jcmpython as jpy
+import pypmj as jpy
 jpy.import_jcmwave('/path/to/your/JCMsuite/installation/directory')
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -79,7 +79,7 @@ The examples directory contains a collection of ipython/jupyter notebooks. If
 you have ipython/jupyter, you can start by making a copy of the examples
 directory (in the same parent folder!), e.g. to a folder my_examples. The
 *Getting started - for the impatient*-notebook gives you a fast access to
-jcmpython. Other notebooks may require a configuration file, which is very
+pypmj. Other notebooks may require a configuration file, which is very
 easily and fastly created using the *Setting up a configuration file*-notebook.
-The *Using jcmpython - the mie2D-project* gives you a rigorous introduction
-to the basic usage of jcmpython. Check out the other notebooks as well.
+The *Using pypmj - the mie2D-project* gives you a rigorous introduction
+to the basic usage of pypmj. Check out the other notebooks as well.

@@ -1,4 +1,4 @@
-"""Helper functions to set up the configuration file for jcmpython.
+"""Helper functions to set up the configuration file for pypmj.
 
 Authors : Carlo Barth
 """
@@ -9,7 +9,7 @@ DEFAULT_SECTIONS = ['User', 'Preferences', 'Storage', 'Data', 'JCMsuite',
                     'Logging', 'DEFAULTS']
 
 def get_config_parser():
-    """Returns a RawConfigParser properly set up to write a jcmpython config
+    """Returns a RawConfigParser properly set up to write a pypmj config
     file."""
     config = ConfigParser.RawConfigParser()
     config.optionxform = str # this is needed for case sensitive options

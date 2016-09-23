@@ -1,6 +1,6 @@
 # Description
 
-The **mie2D-project** is the default test example of jcmpython. It is also used
+The **mie2D-project** is the default test example of pypmj. It is also used
 as the example project in the [online JCMsuite python tutorial][JCMtutorial].
 It describes the light scattering off an infinite glass rod The surroundings 
 consist of air. The incoming light field has a vacuum wavelength of
@@ -59,7 +59,7 @@ electric field strength.*
 
 This section lists tested processing functions which can be used for the 
 `processing_func`-argument, e.g. for the `run`-method of
-`jcmpython.SimulationSet`.
+`pypmj.SimulationSet`.
 
 ---
 
@@ -76,8 +76,8 @@ def read_scs(pp):
 
 # Notes
 
-Please see the *Using jcmpython - the mie2D-project* notebook in the `examples`
-directory shipped with jcmpython. It provides a detailed explanation on how to
+Please see the *Using pypmj - the mie2D-project* notebook in the `examples`
+directory shipped with pypmj. It provides a detailed explanation on how to
 run this project.
 
 

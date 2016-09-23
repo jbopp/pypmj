@@ -22,14 +22,14 @@ sys.path.append('..')
 
 #  Check if the configuration file is present in the cwd or if the path is set
 import os
-if 'JCMPYTHON_CONFIG_FILE' in os.environ:
-    _CONFIG_FILE = os.environ['JCMPYTHON_CONFIG_FILE']
+if 'PYPMJ_CONFIG_FILE' in os.environ:
+    _CONFIG_FILE = os.environ['PYPMJ_CONFIG_FILE']
 else:
     _CONFIG_FILE = os.path.abspath('config.cfg')
 if not os.path.isfile(_CONFIG_FILE):
     raise EnvironmentError('Please specify the path to the configuration' +
                            ' file using the environment variable ' +
-                           '`JCMPYTHON_CONFIG_FILE` or put it to the ' +
+                           '`PYPMJ_CONFIG_FILE` or put it to the ' +
                            'current directory (name must be config.cfg).')
 
 # We check the configuration file before importing pypmj

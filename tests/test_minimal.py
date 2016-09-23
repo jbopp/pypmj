@@ -30,7 +30,7 @@ if not 'bin' in os.listdir(JCMROOT):
     raise ValueError('Provided JCMROOT path does not seem to be a valid ' +
                      'JCMsuite installation directory.')
 
-jpc_env = 'JCMPYTHON_CONFIG_FILE'
+jpc_env = 'PYPMJ_CONFIG_FILE'
 if jpc_env in os.environ:
     del os.environ[jpc_env]
 

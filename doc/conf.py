@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# jcmpython documentation build configuration file, created by
+# pypmj documentation build configuration file, created by
 # sphinx-quickstart on Mon Aug 29 15:07:09 2016.
 #
 # This file is execfile()d with the current directory set to its
@@ -17,12 +17,12 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 import os
-os.environ['JCMPYTHON_IGNORE_CONFIG_FILE'] = 'yes'
-if 'JCMPYTHON_CONFIG_FILE' in os.environ:
-    del os.environ['JCMPYTHON_CONFIG_FILE']
+os.environ['PYPMJ_IGNORE_CONFIG_FILE'] = 'yes'
+if 'PYPMJ_CONFIG_FILE' in os.environ:
+    del os.environ['PYPMJ_CONFIG_FILE']
 import sphinx_rtd_theme
 import sys
-sys.path.insert(0, os.path.abspath('../jcmpython'))
+sys.path.insert(0, os.path.abspath('../pypmj'))
 
 # -- General configuration ------------------------------------------------
 
@@ -57,7 +57,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'jcmpython'
+project = u'pypmj'
 copyright = u'2016, Carlo Barth'
 author = u'Carlo Barth'
 
@@ -142,7 +142,7 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 # The name for this set of Sphinx documents.
 # "<project> v<release> documentation" by default.
 #
-# html_title = u'jcmpython v2.1.1'
+# html_title = u'pypmj v2.1.1'
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
 #
@@ -151,7 +151,7 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
 #
-# html_logo = 'jcmpython_horizontal.png'
+# html_logo = 'pypmj_horizontal.png'
 
 # The name of an image file (relative to this directory) to use as a favicon of
 # the docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
@@ -242,7 +242,7 @@ html_static_path = ['.static']
 # html_search_scorer = 'scorer.js'
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'jcmpythondoc'
+htmlhelp_basename = 'pypmjdoc'
 
 # -- Options for LaTeX output ---------------------------------------------
 
@@ -268,7 +268,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'jcmpython.tex', u'jcmpython Documentation',
+    (master_doc, 'pypmj.tex', u'pypmj Documentation',
      u'Carlo Barth', 'manual'),
 ]
 
@@ -310,7 +310,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'jcmpython', u'jcmpython Documentation',
+    (master_doc, 'pypmj', u'pypmj Documentation',
      [author], 1)
 ]
 
@@ -325,8 +325,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'jcmpython', u'jcmpython Documentation',
-     author, 'jcmpython', 'One line description of project.',
+    (master_doc, 'pypmj', u'pypmj Documentation',
+     author, 'pypmj', 'One line description of project.',
      'Miscellaneous'),
 ]
 

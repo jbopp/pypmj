@@ -85,7 +85,7 @@ class JCMPConfiguration(ConfigParser):
     A custom configuration parser based on the `ConfigParser`.
     
     This configuration parser automatically looks for a configuration file on
-    init in the environment variable 'JCMPYTHON_CONFIG_FILE' or otherwise in
+    init in the environment variable 'PYPMJ_CONFIG_FILE' or otherwise in
     the current directory (must be named 'config.cfg'). A default configuration
     for pypmj is generated and, if a config file was found, updated with
     present values in the config file. Setting a config file is also possible
@@ -113,14 +113,14 @@ class JCMPConfiguration(ConfigParser):
     
     def search_config_file(self):
         """Looks for a configuration file in the environment variable
-                'JCMPYTHON_CONFIG_FILE' or otherwise in the current directory (must be
+                'PYPMJ_CONFIG_FILE' or otherwise in the current directory (must be
         named 'config.cfg'). Returns `None` if no config file is found.
         """
-        if 'JCMPYTHON_IGNORE_CONFIG_FILE' in os.environ:
-            if os.environ['JCMPYTHON_IGNORE_CONFIG_FILE'] == 'yes':
+        if 'PYPMJ_IGNORE_CONFIG_FILE' in os.environ:
+            if os.environ['PYPMJ_IGNORE_CONFIG_FILE'] == 'yes':
                 return
-        if 'JCMPYTHON_CONFIG_FILE' in os.environ:
-            config_file = os.environ['JCMPYTHON_CONFIG_FILE']
+        if 'PYPMJ_CONFIG_FILE' in os.environ:
+            config_file = os.environ['PYPMJ_CONFIG_FILE']
         else:
             config_file = os.path.abspath('config.cfg')
         if not os.path.isfile(config_file):
@@ -200,7 +200,7 @@ class JCMPConfiguration(ConfigParser):
         
     def init_config(self):
         """Initializes the configuration. Sets default values and looks for a
-        configuration file in the environment variable 'JCMPYTHON_CONFIG_FILE'
+        configuration file in the environment variable 'PYPMJ_CONFIG_FILE'
         or the current working directory. If found, overwrites the default
         configuration values with values from the file.
         """
@@ -230,7 +230,7 @@ class JCMPConfiguration(ConfigParser):
         if not os.path.isfile(filepath):
             raise ValueError('Expecting an existing file for `filepath`.')
             return
-        os.environ['JCMPYTHON_CONFIG_FILE'] = filepath
+        os.environ['PYPMJ_CONFIG_FILE'] = filepath
         self.init_config()
     
     def set_jcm_install_dir(self, path):

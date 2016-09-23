@@ -48,7 +48,7 @@ Key | Default | Description
 
 This section lists tested processing functions which can be used for the 
 `processing_func`-argument, e.g. for the `run`-method of
-`jcmpython.SimulationSet`.
+`pypmj.SimulationSet`.
 
 ---
 

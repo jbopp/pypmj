@@ -69,7 +69,7 @@ Key | Default | Description
 
 This section lists tested processing functions which can be used for the 
 `processing_func`-argument, e.g. for the `run`-method of
-`jcmpython.SimulationSet`.
+`pypmj.SimulationSet`.
 
 ---
 
@@ -86,8 +86,8 @@ def read_scs(pp):
 
 # Notes
 
-Please see the *Using jcmpython - the mie2D-project* notebook in the `examples`
-directory shipped with jcmpython. It provides a detailed explanation on how to
+Please see the *Using pypmj - the mie2D-project* notebook in the `examples`
+directory shipped with pypmj. It provides a detailed explanation on how to
 run the mie2D project, which is the less parameterized version of this project.
 A tutorial on running convergence tests can be found in the *Running
 convergence tests* notebook, which uses this project. 

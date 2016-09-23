@@ -1,34 +1,34 @@
-jcmpython package
+pypmj package
 =================
 
 Module contents
 ---------------
 
-.. automodule:: jcmpython
+.. automodule:: pypmj
     :members:
     :undoc-members:
     :show-inheritance:
 
-jcmpython.core module
+pypmj.core module
 ---------------------
 
-.. automodule:: jcmpython.core
+.. automodule:: pypmj.core
     :members:
     :undoc-members:
     :show-inheritance:
 
-jcmpython.parallelization module
+pypmj.parallelization module
 --------------------------------
 
-.. automodule:: jcmpython.parallelization
+.. automodule:: pypmj.parallelization
     :members:
     :undoc-members:
     :show-inheritance:
 
-jcmpython.utils module
+pypmj.utils module
 ----------------------
 
-.. automodule:: jcmpython.utils
+.. automodule:: pypmj.utils
     :members:
     :undoc-members:
     :show-inheritance:

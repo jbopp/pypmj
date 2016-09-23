@@ -1,10 +1,10 @@
 Extensions
 ==========
 
-jcmpython.extension_antenna
+pypmj.extension_antenna
 --------------------------------
 
-.. automodule:: jcmpython.extension_antenna
+.. automodule:: pypmj.extension_antenna
     :members:
     :undoc-members:
     :show-inheritance:

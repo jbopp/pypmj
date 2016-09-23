@@ -1,12 +1,12 @@
-.. jcmpython documentation master file, created by
+.. pypmj documentation master file, created by
    sphinx-quickstart on Mon Aug 29 15:07:09 2016.
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to jcmpython's documentation!
+Welcome to pypmj's documentation!
 =====================================
 
-The jcmpython package extends the python interface shipped with the finite
+The pypmj package extends the python interface shipped with the finite
 element Maxwell solver JCMsuite, distributed by the JCMwave GmbH.
 
 It simplifies the setup, execution and data storage of JCMsuite simulations.
@@ -30,7 +30,7 @@ Contents
 .. toctree::
    :maxdepth: 2
 
-   source/jcmpython
+   source/pypmj
    source/extensions
 
 
