@@ -7,7 +7,7 @@ Authors : Carlo Barth
 # Start up by parsing the configuration file and importing jcmwave
 from datetime import date
 import os
-from jcmpython.internals import _config
+from pypmj.internals import _config
 
 # At first the logging is configured, as considered as best practice in
 # http://victorlin.me/posts/2012/08/26/good-logging-practice-in-python
@@ -41,7 +41,7 @@ class Blacklist(logging.Filter):
 
 class JCMPLogging(object):
     """
-    A logging manager for jcmpython.
+    A logging manager for pypmj.
     
     The logging is configured using values from the
     `JCMPConfiguration`-instance. Logger names can be black listed on init and

@@ -1,4 +1,4 @@
-"""Minimal unit test for jcmpython.
+"""Minimal unit test for pypmj.
 
 Authors : Carlo Barth
 
@@ -7,17 +7,17 @@ Authors : Carlo Barth
 from datetime import date
 import os
 import sys
-if 'jcmpython' not in os.listdir('..'):
-    raise OSError('Unable to find the jcmpython module in the parent ' +
+if 'pypmj' not in os.listdir('..'):
+    raise OSError('Unable to find the pypmj module in the parent ' +
                   'directory. Make sure that the `test` folder is in the ' +
-                  'same directory as the `jcmpython` folder.')
+                  'same directory as the `pypmj` folder.')
     exit()
 sys.path.append('..')
 
 # Set up argparse
 import argparse
 parser = argparse.ArgumentParser(description='Runs a minimal test of ' +
-                                 '`jcmpython`')
+                                 '`pypmj`')
 parser.add_argument('JCMROOT', 
                     help='Path to the JCMsuite installation directory')
 args = parser.parse_args()
@@ -34,8 +34,8 @@ jpc_env = 'JCMPYTHON_CONFIG_FILE'
 if jpc_env in os.environ:
     del os.environ[jpc_env]
 
-# Import jcmpython and jcmwave
-import jcmpython as jpy
+# Import pypmj and jcmwave
+import pypmj as jpy
 jpy.import_jcmwave(JCMROOT)
 
 # Import remaining modules

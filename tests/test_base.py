@@ -1,10 +1,10 @@
-"""Basic unit tests for jcmpython.
+"""Basic unit tests for pypmj.
 
 Authors : Carlo Barth
 
 """
 
-# Append the parent dir to the path in order to import jcmpython
+# Append the parent dir to the path in order to import pypmj
 # Check if the current python version is python 3
 import sys
 if sys.version_info >= (3, 0):
@@ -13,10 +13,10 @@ else:
     from ConfigParser import ConfigParser, NoOptionError
 from datetime import date
 import os
-if 'jcmpython' not in os.listdir('..'):
-    raise OSError('Unable to find the jcmpython module in the parent ' +
+if 'pypmj' not in os.listdir('..'):
+    raise OSError('Unable to find the pypmj module in the parent ' +
                   'directory. Make sure that the `test` folder is in the ' +
-                  'same directory as the `jcmpython` folder.')
+                  'same directory as the `pypmj` folder.')
     exit()
 sys.path.append('..')
 
@@ -32,7 +32,7 @@ if not os.path.isfile(_CONFIG_FILE):
                            '`JCMPYTHON_CONFIG_FILE` or put it to the ' +
                            'current directory (name must be config.cfg).')
 
-# We check the configuration file before importing jcmpython
+# We check the configuration file before importing pypmj
 # ==============================================================================
 DEFAULT_CNF_SECTIONS = ['User', 'Preferences', 'Storage', 'Data', 'JCMsuite',
                         'Logging', 'DEFAULTS']
@@ -41,7 +41,7 @@ ALLOWED_LOG_LEVELS = ['DEBUG', 'INFO',
 
 
 def check_configuration(cnf):
-    """Checks if the configuration file for jcmpython is valid with regard to
+    """Checks if the configuration file for pypmj is valid with regard to
     its syntax and contents."""
 
     # Define a standard error format for this function
@@ -129,9 +129,9 @@ except:
 if not check_configuration(_config):
     exit()
 
-# Import jcmpython
-import jcmpython as jpy
-from jcmpython.internals import ConfigurationError
+# Import pypmj
+import pypmj as jpy
+from pypmj.internals import ConfigurationError
 jpy.load_extension('materials')
 EXT_MATERIALS_LOADED = hasattr(jpy, 'MaterialData')
 

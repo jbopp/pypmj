@@ -1,4 +1,4 @@
-"""Defines the centerpiece class `SimulationSet` of jcmpython and the
+"""Defines the centerpiece class `SimulationSet` of pypmj and the
 abstraction layers for projects, single simulations. Also, more specialized
 simulation sets such as the `ConvergenceTest`-class are defined here.
 
@@ -9,10 +9,10 @@ Authors : Carlo Barth
 # Imports
 # =============================================================================
 import logging
-from jcmpython import (jcm, daemon, resources, __version__, __jcm_version__,
+from pypmj import (jcm, daemon, resources, __version__, __jcm_version__,
                        _config, ConfigurationError)
-from jcmpython.parallelization import ResourceDict
-from jcmpython.jupyter_tools import JupyterProgressDisplay
+from pypmj.parallelization import ResourceDict
+from pypmj.jupyter_tools import JupyterProgressDisplay
 from copy import deepcopy
 from datetime import date
 from glob import glob
@@ -1065,8 +1065,8 @@ class SimulationSet(object):
     duplicate_path_levels : int, default 0
         For clearly arranged data storage, the folder structure of the current
         working directory can be replicated up to the level given here. I.e.,
-        if the current dir is /path/to/your/jcmpython/ and
-        duplicate_path_levels=2, the subfolders your/jcmpython will be created
+        if the current dir is /path/to/your/pypmj/ and
+        duplicate_path_levels=2, the subfolders your/pypmj will be created
         in the storage base dir (which is controlled using the configuration
         file). This is not done if duplicate_path_levels=0.
     storage_folder : str, default 'from_date'
@@ -1093,7 +1093,7 @@ class SimulationSet(object):
             element of each sequence in simulation i.
             
     check_version_match : bool, default True
-        Controls whether the versions of JCMsuite and jcmpython are compared
+        Controls whether the versions of JCMsuite and pypmj are compared
         to the versions that were used when the HDF5 store was created. This
         has no effect if no HDF5 store is present, i.e. if you are starting
         with an empty working directory.
@@ -1321,7 +1321,7 @@ class SimulationSet(object):
     def _initialize_store(self, check_version_match=False):
         """Initializes the HDF5 store and sets the `store` attribute. If
         `check_version_match` is True, the current versions of JCMsuite and
-        jcmpython are compared to the stored versions.
+        pypmj are compared to the stored versions.
 
         The file name and the name of the data section inside the file
         are configured in the DEFAULTS section of the configuration
@@ -1343,7 +1343,7 @@ class SimulationSet(object):
             self._check_store_version_match()
 
     def _check_store_version_match(self):
-        """Compares the currently used versions of jcmpython and JCMsuite to
+        """Compares the currently used versions of pypmj and JCMsuite to
         the versions that were used when the store was created."""
         version_df = self.store[self.STORE_VERSION_GROUP]
 
@@ -1362,7 +1362,7 @@ class SimulationSet(object):
             return
         if not stored_jpy_version == __version__:
             self.logger.warn('Version mismatch! HDF5 store was created ' +
-                             'using jcmpython version {}, the current '.
+                             'using pypmj version {}, the current '.
                              format(stored_jpy_version) +
                              'version is {}.'.format(__version__))
 
@@ -1642,12 +1642,12 @@ class SimulationSet(object):
 
     def __get_version_dframe(self):
         """Returns a pandas DataFrame from the version info of JCMsuite and
-        jcmpython which can be stored in the HDF5 store."""
+        pypmj which can be stored in the HDF5 store."""
         return pd.DataFrame({'__version__': __version__,
                              '__jcm_version__': __jcm_version__}, index=[0])
 
     def _store_version_data(self):
-        """Stores metadata of the JCMsuite and jcmpython versions."""
+        """Stores metadata of the JCMsuite and pypmj versions."""
         self.store[self.STORE_VERSION_GROUP] = self.__get_version_dframe()
 
     def __get_meta_dframe(self, which):
@@ -1777,7 +1777,7 @@ class SimulationSet(object):
                                       ' not match simulations that are ' +
                                       'currently planned. Treating this case' +
                                       ' will be implemented in a future ' +
-                                      'version of jcmpython. The HDF5 store' +
+                                      'version of pypmj. The HDF5 store' +
                                       ' is now closed.')
 
         # If indices match exactly, set the finished_sim_numbers list
@@ -2596,8 +2596,8 @@ class ConvergenceTest(object):
     duplicate_path_levels : int, default 0
         For clearly arranged data storage, the folder structure of the current
         working directory can be replicated up to the level given here. I.e.,
-        if the current dir is /path/to/your/jcmpython/ and
-        duplicate_path_levels=2, the subfolders your/jcmpython will be created
+        if the current dir is /path/to/your/pypmj/ and
+        duplicate_path_levels=2, the subfolders your/pypmj will be created
         in the storage base dir (which is controlled using the configuration
         file). This is not done if duplicate_path_levels=0.
     storage_folder : str, default 'from_date'
@@ -2626,7 +2626,7 @@ class ConvergenceTest(object):
             element of each sequence in simulation i.
         
     check_version_match : bool, default True
-        Controls if the versions of JCMsuite and jcmpython are compared to the
+        Controls if the versions of JCMsuite and pypmj are compared to the
         versions that were used when the HDF5 store was used. This has no
         effect if no HDF5 is present, i.e. if you are starting with an empty
         working directory.

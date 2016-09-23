@@ -1,4 +1,4 @@
-"""Outputs info on the environment in which jcmpython runs and other specific
+"""Outputs info on the environment in which pypmj runs and other specific
 data useful for bug filing to an output text file.
 
 Authors : Carlo Barth
@@ -24,7 +24,7 @@ def fmt(key_, val_):
 SEP = '\n'+80*'='+'\n'
 
 def main():
-    fout = open('jcmpython_env_info.log', 'w')
+    fout = open('pypmj_env_info.log', 'w')
     
     fout.write(SEP)
     fout.write(' Platform and version data')
@@ -54,19 +54,19 @@ def main():
         return
     
     try:
-        import jcmpython as jpy
+        import pypmj as jpy
     except Exception as e:
-        fout.write(fmt('jcmpython->ImportError', e))
+        fout.write(fmt('pypmj->ImportError', e))
         fout.write('\nLeaving.')
         fout.close()
         return
     
-    fout.write(fmt('jcmpython version', jpy.__version__))
+    fout.write(fmt('pypmj version', jpy.__version__))
     fout.write(fmt('JCMsuite version', jpy.__jcm_version__))
     fout.write(SEP)
     fout.write(' The config file')
     fout.write(SEP+'\n')
-    from jcmpython.internals import _CONFIG_FILE
+    from pypmj.internals import _CONFIG_FILE
     with open(_CONFIG_FILE, 'r') as f:
         fout.write(f.read())
     fout.write(SEP)

@@ -1,8 +1,8 @@
 """
-jcmpython
+pypmj
 =========
 
-The jcmpython package extends the python interface shipped with the finite
+The pypmj package extends the python interface shipped with the finite
 element Maxwell solver JCMsuite, distributed by the JCMwave GmbH.
 
 It simplifies the setup, execution and data storage of JCMsuite simulations.
@@ -72,14 +72,14 @@ import pandas as _pd
 if not _version_to_tuple(_pd.__version__) > (0,17,0):
     raise ImportError('Your pandas version is {}, which is too old.'.
                       format(_pd.__version__) +
-                      'jcmpython needs version 0.17.0 or higher.')
+                      'pypmj needs version 0.17.0 or higher.')
 
 
 # Configuration and logging initialization
 # ==============================================================================
 
 # Start up by setting up the configuration
-from jcmpython.internals import (_config, ConfigurationError, NotSetUpError,
+from pypmj.internals import (_config, ConfigurationError, NotSetUpError,
                                  _JCMPNotLoadedExceptionRaiser)
 __jcm_version__ = None
 jcm = None
@@ -136,7 +136,7 @@ def jcm_license_info(log=True, return_output=False):
         return out.strip()
 
 def import_jcmwave(jcm_install_path=None):
-    """Imports jcmwave as jcm and jcmwave.daemon as daemon into the jcmpython
+    """Imports jcmwave as jcm and jcmwave.daemon as daemon into the pypmj
     namespace and sets the __jcm_version__ module attribute.
     
     Parameters
@@ -249,9 +249,9 @@ def _set_up_resources(daemon_):
 extensions = ['materials', 'antenna'] # Lists all known extensions
 
 def load_extension(ext_name):
-    """Loads the specified extension of jcmpython.
+    """Loads the specified extension of pypmj.
  
-    See `jcmpython.extensions` for a list of extensions.
+    See `pypmj.extensions` for a list of extensions.
  
     """
     if ext_name not in extensions:

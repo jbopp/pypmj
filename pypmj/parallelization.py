@@ -8,7 +8,7 @@ Authors : Carlo Barth
 
 """
 
-from jcmpython import _config, ConfigurationError
+from pypmj import _config, ConfigurationError
 import logging
 import os
 from six import string_types
@@ -237,7 +237,7 @@ class DaemonResource(object):
         else:
             func = self.daemon.add_queue
         
-        from jcmpython import __jcm_version__, _version_to_tuple
+        from pypmj import __jcm_version__, _version_to_tuple
         try:
             if _version_to_tuple(__jcm_version__)[0] >= 3:
                 IDs = func(Hostname=self.hostname,

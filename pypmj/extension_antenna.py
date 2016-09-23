@@ -8,7 +8,7 @@ import logging
 import os
 import numpy as np
 from scipy import constants
-import jcmpython as jpy
+import pypmj as jpy
 
 # Constants
 Z0 = constants.c*constants.epsilon_0/2.
@@ -111,7 +111,7 @@ class FarFieldEvaluation(object):
     
     Parameters
     ----------
-    simulation : jcmpython.core.Simulation
+    simulation : pypmj.core.Simulation
         The simulation instance for which the far field evaluation should be
         performed.
     direction : {'half_space_up', 'half_space_down', 'point_up',

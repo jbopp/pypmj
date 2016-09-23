@@ -22,7 +22,7 @@ if missing_dependencies:
     raise ImportError("Missing required dependencies {0}".format(
         missing_dependencies))
 
-from jcmpython.internals import _config, ConfigurationError
+from pypmj.internals import _config, ConfigurationError
 import numpy as np
 import os
 from scipy.interpolate import pchip

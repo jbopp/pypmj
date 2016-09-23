@@ -1,13 +1,13 @@
 """Defines functions and classes which are internally used in all parts of
-jcmpython, but may also be relevant to the user. Most importantly, the
+pypmj, but may also be relevant to the user. Most importantly, the
 functions `run_simusets_in_save_mode` and `send_status_email` are defined here.
 
 Authors : Carlo Barth
 
 """
 
-from jcmpython import _config, daemon
-from jcmpython.internals import _IS_PYTHON3
+from pypmj import _config, daemon
+from pypmj.internals import _IS_PYTHON3
 import collections
 if _IS_PYTHON3:
     from io import StringIO

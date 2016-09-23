@@ -23,7 +23,7 @@ else:
 
 
 class NotSetUpError(Exception):
-    """Exception raised if `jcmpython` is not fully set up.
+    """Exception raised if `pypmj` is not fully set up.
 
     Attributes
     ----------
@@ -35,7 +35,7 @@ class NotSetUpError(Exception):
     """
 
     def __init__(self, message):
-        self.message = '`jcmpython` is not ready to run. ' + message
+        self.message = '`pypmj` is not ready to run. ' + message
 
     def __str__(self):
         return self.message
@@ -63,7 +63,7 @@ class ConfigurationError(Exception):
 class _JCMPNotLoadedExceptionRaiser(object):
     """
     Placeholder class for module classes which are not yet accessible due to
-    an incomplete set-up of `jcmpython`. This is the case if jcmwave is not
+    an incomplete set-up of `pypmj`. This is the case if jcmwave is not
     properly imported. If an instance of this class is called, it raises a
     `NotSetUpError`.
     """
@@ -87,7 +87,7 @@ class JCMPConfiguration(ConfigParser):
     This configuration parser automatically looks for a configuration file on
     init in the environment variable 'JCMPYTHON_CONFIG_FILE' or otherwise in
     the current directory (must be named 'config.cfg'). A default configuration
-    for jcmpython is generated and, if a config file was found, updated with
+    for pypmj is generated and, if a config file was found, updated with
     present values in the config file. Setting a config file is also possible
     after initialization using the `set_config_file`-method.
     

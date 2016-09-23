@@ -1,23 +1,23 @@
-"""Basic unit tests for jcmpython.
+"""Basic unit tests for pypmj.
 
 Authors : Carlo Barth
 
 """
 
-# Append the parent dir to the path in order to import jcmpython
+# Append the parent dir to the path in order to import pypmj
 from datetime import date
 import os
 import sys
-if 'jcmpython' not in os.listdir('..'):
-    raise OSError('Unable to find the jcmpython module in the parent' +
+if 'pypmj' not in os.listdir('..'):
+    raise OSError('Unable to find the pypmj module in the parent' +
                   ' directory. Make sure that the `test` folder is in the' +
-                  ' same directory as the `jcmpython` folder.')
+                  ' same directory as the `pypmj` folder.')
     exit()
 sys.path.append('..')
 
-import jcmpython as jpy
-from jcmpython import _config
-from jcmpython.internals import ConfigurationError
+import pypmj as jpy
+from pypmj import _config
+from pypmj.internals import ConfigurationError
 import logging
 import numpy as np
 from shutil import rmtree
