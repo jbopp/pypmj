@@ -1,5 +1,2 @@
 ###### Requirements without Version Specifiers ######
-numpy
-scipy
-pandas
 sphinxcontrib-napoleon

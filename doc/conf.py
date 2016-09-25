@@ -16,12 +16,19 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+
+import mock
+import sys
+MOCK_MODULES = ['numpy', 'scipy', 'matplotlib', 'matplotlib.pyplot',
+                'scipy.interpolate', 'tables', 'pandas']
+for mod_name in MOCK_MODULES:
+    sys.modules[mod_name] = mock.Mock()
+
 import os
 os.environ['PYPMJ_IGNORE_CONFIG_FILE'] = 'yes'
 if 'PYPMJ_CONFIG_FILE' in os.environ:
     del os.environ['PYPMJ_CONFIG_FILE']
 import sphinx_rtd_theme
-import sys
 sys.path.insert(0, os.path.abspath('../pypmj'))
 
 # -- General configuration ------------------------------------------------
