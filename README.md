@@ -78,7 +78,7 @@ simuset.run()
 ### Documentation
 
 The pypmj-documentation is available online at 
-[Raed the Docs](pypmj.readthedocs.io). You can also download a 
+[Read the Docs](http://pypmj.readthedocs.io). You can also download a 
 [PDF version](http://readthedocs.org/projects/pypmj/downloads/pdf/latest/).
 
 ### Examples
