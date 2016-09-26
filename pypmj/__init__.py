@@ -4,7 +4,7 @@
 pypmj
 =====
 
-The pypmj (python project manager for JCMsuite; pronounce "*pie pee em jay*")
+The pypmj (python project manager for JCMsuite; pronounce "*py pi ɛm dʒe*")
 package extends the python interface shipped with the finite element Maxwell
 solver JCMsuite, distributed by the JCMwave GmbH.
 
