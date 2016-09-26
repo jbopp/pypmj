@@ -72,10 +72,11 @@ def _version_to_tuple(version):
 
 # Check if dependencies have a supported version
 import pandas as _pd
-if not _version_to_tuple(_pd.__version__) > (0,17,0):
-    raise ImportError('Your pandas version is {}, which is too old.'.
-                      format(_pd.__version__) +
-                      'pypmj needs version 0.17.0 or higher.')
+if hasattr(_pd, '__version__'): # <- needed to import pypmj with mocked pandas
+    if not _version_to_tuple(_pd.__version__) > (0,17,0):
+        raise ImportError('Your pandas version is {}, which is too old.'.
+                          format(_pd.__version__) +
+                          'pypmj needs version 0.17.0 or higher.')
 
 
 # Configuration and logging initialization

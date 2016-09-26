@@ -10,8 +10,11 @@ import numpy as np
 from scipy import constants
 import pypmj as jpy
 
-# Constants
-Z0 = constants.c*constants.epsilon_0/2.
+# Constants. try/except is needed for doc generation with mocked scipy
+try:
+    Z0 = constants.c*constants.epsilon_0/2.
+except:
+    pass
 
 # The .jcmpt far field post processing default file
 FAR_FIELD_JCMPT_CONTENT='''

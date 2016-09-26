@@ -22,7 +22,6 @@ from numbers import Number
 import numpy as np
 import os
 import pandas as pd
-import psutil
 from six import string_types
 import sys
 from tempfile import mktemp
@@ -689,6 +688,7 @@ def _wait_pid(pid, timeout=None):
 def _get_daemon_pids():
     """Returns the PIDs for all currently running JCMdaemon processes on UNIX
     systems."""
+    import psutil
     procs = []
     for proc in psutil.process_iter():
         try:
