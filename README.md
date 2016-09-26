@@ -73,7 +73,15 @@ simuset.run()
 
 *See the examples section for more info.*
 
-## Examples
+## Help and support
+
+### Documentation
+
+The pypmj-documentation is available online at 
+[Raed the Docs](pypmj.readthedocs.io). You can also download a 
+[PDF version](http://readthedocs.org/projects/pypmj/downloads/pdf/latest/).
+
+### Examples
 
 The examples directory contains a collection of ipython/jupyter notebooks. If
 you have ipython/jupyter, you can start by making a copy of the examples
