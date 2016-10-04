@@ -23,7 +23,7 @@ Some of the main advantages are:
     data base.
   - Automatic detection of known results in the database.
 
-Copyright(C) 2016 Carlo Barth.
+Copyright(C) 2016 Carlo Barth, Helmholtz Zentrum Berlin für Materialien und Energie GmbH.
 (This software project is controlled using git)
 
 This program is free software: you can redistribute it and/or modify

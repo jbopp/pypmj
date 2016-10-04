@@ -92,3 +92,9 @@ pypmj. Other notebooks may require a configuration file, which is very
 easily and fastly created using the *Setting up a configuration file*-notebook.
 The *Using pypmj - the mie2D-project* gives you a rigorous introduction
 to the basic usage of pypmj. Check out the other notebooks as well.
+
+## Funding
+
+The *German Federal Ministry of Education and Research* is acknowledged for
+funding research activities  within the program NanoMatFutur (No. 03X5520)
+which made this software project possible.
