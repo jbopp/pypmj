@@ -2443,8 +2443,11 @@ class SimulationSet(object):
         
         # Initialize the progress bar if necessary
         self._progress_view = JupyterProgressDisplay(
-                                                num_sims=self.num_sims_to_do(),
+                                                num_sims=self.num_sims,
                                                 show=show_progress_bar)
+        if len(self.finished_sim_numbers) > 0:
+            self._progress_view.set_pbar_state(
+                                    add_to_value=len(self.finished_sim_numbers))
         
         # Start the simulations until all simulations are finished or the
         # maximum `auto_rerun_failed` is exceeded
