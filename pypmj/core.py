@@ -2224,7 +2224,15 @@ class SimulationSet(object):
                     # process them, ...
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
-                    self.append_store(sim._get_DataFrame())
+                    try:
+                        self.append_store(sim._get_DataFrame())
+                    except ValueError as e:
+                        self.logger.critical('A critical problem occured when' +
+                                ' trying to append the data to the HDF5 ' +
+                                'store. The data that should have been '+
+                                'appended has the following columns: {}. '.
+                                format(sim._get_DataFrame().columns))
+                        self.logger.exception(e)
                     self._progress_view.set_pbar_state(add_to_value=1)
 
                 # Remove/zip all working directories of the finished 
