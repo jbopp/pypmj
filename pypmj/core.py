@@ -23,6 +23,7 @@ import numpy as np
 from shutil import copytree, rmtree, move
 import os
 import pandas as pd
+import pickle
 from six import string_types
 import sys
 import tempfile
@@ -1335,6 +1336,11 @@ class SimulationSet(object):
         if not os.path.splitext(dbase_name)[1] == '.h5':
             self.logger.warn('The HDF5 store file has an unknown extension. ' +
                              'It should be `.h5`.')
+        if hasattr(self, '_start_withclean_H5_store'):
+            if (self._start_withclean_H5_store and 
+                    os.path.isfile(self._database_file)):
+                self.logger.warn('Deleting existing H5 store.')
+                os.remove(self._database_file)
         self.store = pd.HDFStore(self._database_file)
 
         # Version comparison
@@ -2956,6 +2962,145 @@ class ConvergenceTest(object):
             writer = pd.ExcelWriter(file_path)
             self.analyzed_data.to_excel(writer, 'data', **kwargs)
             writer.save()
+
+
+# =============================================================================
+
+
+class QuantityMinimizer(SimulationSet):
+    """
+
+    """
+    
+    def __init__(self, project, fixed_keys, duplicate_path_levels=0, 
+                 storage_folder='from_date', storage_base='from_config', 
+                 combination_mode='product', resource_manager=None):
+        self._start_withclean_H5_store = True
+        SimulationSet.__init__(self, project, fixed_keys, 
+                           duplicate_path_levels=duplicate_path_levels,
+                           storage_folder=storage_folder,
+                           storage_base=storage_base,
+                           combination_mode=combination_mode,
+                           resource_manager=resource_manager)
+        self.check_validity_of_input_args()
+        self.current_sim_index = 0
+    
+    def check_validity_of_input_args(self):
+        """Checks if the provided `fixed_keys` describe a single simulation."""
+        with utils.DisableLogger():
+            self._get_simulation_list()
+        if self.num_sims > 1:
+            raise ValueError('The `fixed_keys` must describe a single ' +
+                             'simulation, i.e. must not contain iterables for' +
+                             'any parameter (except in `constants`).')
+            return
+        self.simulations = []
+        del self._loop_props
+        self.num_sims = 0
+        self._flat_keys = self.constants
+        self._flat_keys.update(self.geometry)
+        self._flat_keys.update(self.parameters)
+    
+    def minimize_quantity(self, x, quantity_to_minimize, maximize_instead=False,
+                          processing_func=None, wdir_mode='keep',
+                          jcm_geo_kwargs=None, jcm_solve_kwargs=None,
+                          **scipy_minimize_kwargs):
+        """TODO
+
+        Parameters
+        ----------
+        x : string type
+            Name of the input parameter which is the input argument to the
+            function that will be minimized.
+        quantity_to_minimize : string type
+            The result quantity for which the minimium should be found. This
+            must be calculated by the `processing_func`.
+        maximize_instead : bool, default False
+            Whether to search for the maximum instead of the minimum.
+        processing_func : callable or NoneType, default None
+            Function for result processing. If None, only a standard processing
+            will be executed. See the docs of the
+            Simulation.process_results-method for more info on how to use this
+            parameter.
+        wdir_mode : {'keep', 'delete'}, default 'keep'
+            The way in which the working directories of the simulations are
+            treated. If 'keep', they are left on disk. If 'delete', they are
+            deleted.
+        jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
+            Keyword arguments which are directly passed to jcm.geo and
+            jcm.solve, respectively.
+        
+        `scipy_minimize_kwargs` will be passed to the `scipy.optimize.minimize`
+        function.
+
+        """
+        from scipy.optimize import minimize
+        self.logger.info('Starting minimization for {} as a function of {}'.
+                         format(quantity_to_minimize, x))
+        
+        self.finished_sim_numbers = []
+        self.failed_simulations = []
+        self._run_args = dict(processing_func=processing_func, 
+                              wdir_mode=wdir_mode,
+                              jcm_geo_kwargs=jcm_geo_kwargs,
+                              jcm_solve_kwargs=jcm_solve_kwargs)
+        self._maximize_instead = maximize_instead
+        
+        self._current_x = x
+        self._current_y = quantity_to_minimize
+        
+        x0 = self._flat_keys[x]
+        
+        if not 'method' in scipy_minimize_kwargs:
+            scipy_minimize_kwargs['method'] = 'nelder-mead'
+        if not 'options' in scipy_minimize_kwargs:
+            scipy_minimize_kwargs['options'] = {'disp': True}
+
+        self.minimization_result = minimize(self._solve_new_simulation, x0,
+                                            **scipy_minimize_kwargs)
+    
+    def pickle_optimization_results(self, file_name='optimization_results.pkl'):
+        file_ = os.path.join(self.storage_dir, file_name)
+        f = open(file_, 'w')
+        pickle.dump(self.minimization_result, f)
+        f.close()
+    
+    def make_simulation_schedule(self):
+        self.logger.info('This function is ignored in `QuantityMinimizer`.')
+    
+    def _append_simulation(self, parameter, value):
+        """Appends a new simulation to the simulation list with the updated 
+        `value` for `parameter`.
+        
+        """
+        self._flat_keys[parameter] = value
+        self.simulations.append(Simulation(number=self.current_sim_index,
+                                           keys=self._flat_keys,
+                                           stored_keys=self.stored_keys,
+                                           storage_dir=self.storage_dir,
+                                           project=self.project,
+                                           rerun_JCMgeo=True))
+        self.current_sim_index += 1
+        self.num_sims += 1
+    
+    def _get_single_result_from_simulation(self, quantity, sim_index=-1):
+        """Return the result for the given quantity of the simulation with
+        index `sim_index`."""
+        return self.simulations[sim_index]._results_dict[quantity]
+    
+    def _solve_new_simulation(self, x):
+        """Solves a new simulation with the value of `x` for the `_current_x`
+        parameter and returns the result for the `_current_y` quantity.
+        """
+        self.logger.info('Solving for {} = {}'.format(self._current_x, x[0]))
+        self._append_simulation(self._current_x, x)
+        with utils.DisableLogger():
+            self.run(**self._run_args)
+        y = self._get_single_result_from_simulation(self._current_y)
+        self.logger.info('... result {} = {}'.format(self._current_y, y))
+        if self._maximize_instead:
+            y *= -1
+        return y
 
 
 if __name__ == "__main__":

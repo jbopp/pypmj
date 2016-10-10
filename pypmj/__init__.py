@@ -108,6 +108,7 @@ Simulation = _JCMPNotLoadedExceptionRaiser('Simulation')
 ResourceManager = _JCMPNotLoadedExceptionRaiser('ResourceManager')
 SimulationSet = _JCMPNotLoadedExceptionRaiser('SimulationSet')
 ConvergenceTest = _JCMPNotLoadedExceptionRaiser('ConvergenceTest')
+QuantityMinimizer = _JCMPNotLoadedExceptionRaiser('QuantityMinimizer')
 
 
 # Module methods for info, jcmwave import and configuration/logging set-up
@@ -201,8 +202,9 @@ def import_jcmwave(jcm_install_path=None):
     global ResourceManager
     global SimulationSet
     global ConvergenceTest
+    global QuantityMinimizer
     from .core import (JCMProject, Simulation, ResourceManager, SimulationSet,
-                       ConvergenceTest)
+                       ConvergenceTest, QuantityMinimizer)
 
 def set_log_file(directory='logs', filename='from_date'):
     """Sets up the logging to a log-file if this is not already configured.
