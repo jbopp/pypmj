@@ -27,6 +27,7 @@ from six import string_types
 import sys
 import tempfile
 import time
+import traceback
 from . import utils
 
 # Get special logger instances for output which is captured from JCMgeo and
@@ -654,8 +655,9 @@ class Simulation(object):
         try:
             # anything might happen
             eres = processing_func(*procargs)
-        except Exception as e:
-            self.logger.warn('Call of `processing_func` failed: {}'.format(e))
+        except:
+            self.logger.warn('Call of `processing_func` failed: Exception: {}'.
+                             format(traceback.format_exc()))
             return
         if not isinstance(eres, dict):
             self.logger.warn('The return value of `processing_func` must be ' +
@@ -2226,14 +2228,15 @@ class SimulationSet(object):
                     # and append them to the HDF5 store
                     try:
                         self.append_store(sim._get_DataFrame())
+                        self._progress_view.set_pbar_state(add_to_value=1)
                     except ValueError as e:
-                        self.logger.critical('A critical problem occured when' +
-                                ' trying to append the data to the HDF5 ' +
+                        self.logger.exception('A critical problem occured ' +
+                                'when trying to append the data to the HDF5 ' +
                                 'store. The data that should have been '+
                                 'appended has the following columns: {}. '.
                                 format(sim._get_DataFrame().columns))
-                        self.logger.exception(e)
-                    self._progress_view.set_pbar_state(add_to_value=1)
+                        self.finished_sim_numbers.remove(sim.number)
+                        self.failed_simulations.append(sim)
 
                 # Remove/zip all working directories of the finished 
                 # simulations if wdir_mode is 'zip'/'delete'

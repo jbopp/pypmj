@@ -66,6 +66,13 @@ class PP_FourierTransform(JCM_Post_Process):
         self.header = self.jcm_dict['header']
         self.N1 = self.jcm_dict['N1']
         self.N2 = self.jcm_dict['N2']
+        
+        # We treat a special case that occurs if the permittivity of the
+        # superspace is higher than that of the subspace and a critical angle
+        # is exceeded. In this case, the transmitted reflection orders post
+        # process returns empty results. We simply return 0 for the transmission
+        # in this case
+        self._return_transmission_of_zero = len(self.K) == 0
     
     def __repr__(self):
         return self.title+'(i_src={})'.format(self.i_src)
@@ -85,6 +92,8 @@ class PP_FourierTransform(JCM_Post_Process):
         """Returns the transmission, which depends on the subspace and
         superspace refractive index. `theta_rad` is the incident angle in
         radians!"""
+        if self._return_transmission_of_zero:
+            return 0.
         cos_factor = self._cos_factor(theta_rad)
         rt = np.sum(np.square(np.abs(self.E_strength)), axis=1)
         return np.sum(rt*cos_factor)*n_subspace/n_superspace
