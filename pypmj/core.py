@@ -2229,7 +2229,7 @@ class SimulationSet(object):
                     try:
                         self.append_store(sim._get_DataFrame())
                         self._progress_view.set_pbar_state(add_to_value=1)
-                    except ValueError as e:
+                    except ValueError:
                         self.logger.exception('A critical problem occured ' +
                                 'when trying to append the data to the HDF5 ' +
                                 'store. The data that should have been '+
@@ -2496,41 +2496,6 @@ class SimulationSet(object):
         
         self.logger.info('Total time for all simulations: {}'.format(
             utils.tForm(time.time() - t0)))
-    
-#     def _set_up_progress_bar(self):
-#         """Initializes a jupyter notebook progress bar for the current run."""
-#         self._pbar_ready = False
-#         try:
-#             from ipywidgets import FloatProgress
-#             from IPython.display import display
-#             self._progress_bar = FloatProgress(min=0, 
-#                                                max=self.num_sims_to_do(),
-#                                                description='Status:')
-#             display(self._progress_bar)
-#             self._pbar_ready = True
-#         except:
-#             self.logger.warn('Unable to set up the progress bar.')
-#     
-#     def _set_pbar_state(self, add_to_value=None, description=None,
-#                         bar_style=None):
-#         """Updates the progress bar with the given options."""
-#         if not self._pbar_ready:
-#             return
-#         if add_to_value is not None:
-#             try:
-#                 self._progress_bar.value += add_to_value
-#             except:
-#                 pass
-#         if description is not None:
-#             try:
-#                 self._progress_bar.description = description
-#             except:
-#                 pass
-#         if bar_style is not None:
-#             try:
-#                 self._progress_bar.bar_style = bar_style
-#             except:
-#                 pass
     
     def _copy_from_transitional_dir(self):
         """Moves the transitional storage directory to the taget storage
