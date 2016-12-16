@@ -336,7 +336,6 @@ class FarFieldEvaluation(object):
         directivity_unn = {}
         
         phi = np.linspace(0., 2.*np.pi, self.resolution)
-        
         # Complete case
         if self.direction is None:
             # Up
@@ -425,8 +424,8 @@ class FarFieldEvaluation(object):
 
         """
         # Calculate the Poynting vectors
-        (r, theta, _, poynting_S, poynting_Abs_xpol, poynting_Abs_ypol, 
-         poynting_Abs_zpol) = self._calc_poynting(refractive_index, 
+        (r, theta, _, poynting_S, poynting_Abs_xdir, poynting_Abs_ydir, 
+         poynting_Abs_zdir) = self._calc_poynting(refractive_index, 
                                                   E_field_strength, 
                                                   cartesian_points)
         
@@ -452,12 +451,11 @@ class FarFieldEvaluation(object):
                                     x=phi_i[0:i+1])
                 power[i] = integral * r.real**2
                 NA[i]  = refractive_index.real * np.sin(theta[i][0])
-        
         # We calculate the unnormalized directivity
         scale = 4. * np.pi * r**2
-        d_val_unn = np.array([scale*poynting_Abs_xpol,
-                              scale*poynting_Abs_ypol,
-                              scale*poynting_Abs_zpol])
+        d_val_unn = np.array([scale*poynting_Abs_xdir,
+                              scale*poynting_Abs_ydir,
+                              scale*poynting_Abs_zdir])
         return power, NA, d_val_unn
     
     def _calc_poynting(self, refractive_index, E_field_strength, 
@@ -480,7 +478,7 @@ class FarFieldEvaluation(object):
         tuple
             r, theta, phi : spherical coordinates 
             poynting_S : Poynting vectors in spherical coordinates
-            poynting_Abs_xpol, poynting_Abs_ypol, poynting_Abs_zpol : Poynting
+            poynting_Abs_xdir, poynting_Abs_ydir, poynting_Abs_zdir : Poynting
                 vectors in cartesian coordinates
 
         """
@@ -497,17 +495,17 @@ class FarFieldEvaluation(object):
         poynting_zdir = poynting_spherical * np.cos(theta)
         
         # Summing over all Poynting vector polarizations gives the absolute
-        # Poynting vector for each polarization
-        poynting_Abs_xpol = np.sum(poynting_xdir, axis=0)
-        poynting_Abs_ypol = np.sum(poynting_ydir, axis=0)
-        poynting_Abs_zpol = np.sum(poynting_zdir, axis=0)
+        # Poynting vector for each direction
+        poynting_Abs_xdir = np.sum(poynting_xdir, axis=0)
+        poynting_Abs_ydir = np.sum(poynting_ydir, axis=0)
+        poynting_Abs_zdir = np.sum(poynting_zdir, axis=0)
         
         # Poynting vector lengths in spherical coordinates
         poynting_S = np.sum(poynting_spherical, axis=0)
         
         return (r[0], theta, phi, 
                 poynting_S, 
-                poynting_Abs_xpol, poynting_Abs_ypol, poynting_Abs_zpol)
+                poynting_Abs_xdir, poynting_Abs_ydir, poynting_Abs_zdir)
     
     def _convert_points(self, points):
         """Converts (x, y, z) points, as returned by JCMsuite, into 

@@ -146,6 +146,12 @@ class MaterialData(object):
             'sets': ['Szczurowski.yml'],
             'preferredDbase': 'RefractiveIndex.info'
         },
+        'silicon_alpha': {
+            'shelf': 'custom',
+            'book': 'Si',
+            'sets': ['SiAmorphous_Isabelle.yml'],
+            'preferredDbase': 'RefractiveIndex.info'
+        },
         'silicon': {
             'shelf': 'main',
             'book': 'Si',
@@ -179,6 +185,13 @@ class MaterialData(object):
             'book': 'Ag',
             'sets': ['Rakic.yml'],
             'fimetricsFile': 'Ag.txt',
+            'preferredDbase': 'RefractiveIndex.info'
+        },
+        'diamond': {
+            'shelf': 'main',
+            'book': 'C',
+            'sets': ['Peter.yml'],
+            'fimetricsFile': '',
             'preferredDbase': 'RefractiveIndex.info'
         },
         'sol_gel': {
