@@ -106,11 +106,21 @@ class MaterialData(object):
         'air': {
             'fixedN': 1.
         },
+        'alluminium(90)_gallium(10)_arsenide': {
+            'fimetricsFile': 'Al90Ga10As.txt',
+            'preferredDbase': 'filmetrics'
+        },
         'gallium_arsenide': {
             'shelf': 'main',
             'book': 'GaAs',
             'sets': ['Aspnes.yml', 'Skauli.yml'],
             'fimetricsFile': 'GaAs.txt',
+            'preferredDbase': 'filmetrics'
+        },
+        'gallium_arsenide_fit': {
+            'shelf': 'custom',
+            'book': 'GaAs',
+            'sets': ['GaAs_OzakiAdachi.yml'],
             'preferredDbase': 'RefractiveIndex.info'
         },
         'gallium_nitride': {
@@ -196,6 +206,13 @@ class MaterialData(object):
         },
         'sol_gel': {
             'fixedN': 1.42
+        },
+	'water': {
+            'shelf': 'main',
+            'book': 'H2O',
+            'sets': ['Kedenburg.yml'],
+            'fimetricsFile': '',
+            'preferredDbase': 'RefractiveIndex.info'
         }
     }
 
