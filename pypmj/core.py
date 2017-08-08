@@ -2864,7 +2864,7 @@ class ConvergenceTest(object):
         self.deviation_columns = list(df_.columns)
         return df_
 
-    def analyze_convergence_results(self, dev_columns, sort_by=None):
+    def analyze_convergence_results(self, dev_columns, sort_by=None, data_ref=None):
         """Calculates the relative deviations to the reference data for the
         columns in the `dev_columns`. A new DataFrame containing the test
         simulation data and the relative deviations is created (as class
@@ -2897,7 +2897,8 @@ class ConvergenceTest(object):
 
         # Load the data
         data_test = self.sset_test.get_store_data()
-        data_ref = self.sset_ref.get_store_data()
+        if data_ref is None:
+            data_ref = self.sset_ref.get_store_data()
 
         # Calculate the deviations
         self.logger.debug('Calculating relative deviations for: {}'.format(
