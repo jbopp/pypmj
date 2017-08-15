@@ -240,7 +240,8 @@ def computational_costs_to_flat_dict(ccosts, _sub=False):
 
     This is useful to store the computational costs in a pandas
     DataFrame. Keys which have sequence values with a length other than
-    1 are ignored.
+    1 are converted to single values, while appending an underscore plus
+    index to the key.
 
     """
 
@@ -264,13 +265,25 @@ def computational_costs_to_flat_dict(ccosts, _sub=False):
             val = ccosts[key]
             if is_sequence(val):
                 if len(val) == 1:
-                    val = val[0]
-            if isinstance(val, (string_types, Number)):
-                converted[key] = val
-            elif isinstance(val, dict):
-                subdict = computational_costs_to_flat_dict(val, _sub=True)
-                for skey in subdict:
-                    converted[skey] = subdict[skey]
+                    if isinstance(val[0], (string_types, Number)):
+                        converted[key] = val[0]
+                else:
+                    # Sequences longer than 1 occur if a refinement loop was
+                    # used
+                    for i,v in enumerate(val):
+                        digits = int(np.log10(len(val)))+1
+                        strfmt = '_{0:0'+str(digits)+'d}'
+                        # We do not allow nested sequences
+                        if not is_sequence(v):
+                            if isinstance(v, (string_types, Number)):
+                                converted[key+strfmt.format(i)] = v
+            else:
+                if isinstance(val, (string_types, Number)):
+                    converted[key] = val
+                elif isinstance(val, dict):
+                    subdict = computational_costs_to_flat_dict(val, _sub=True)
+                    for skey in subdict:
+                        converted[skey] = subdict[skey]
     return converted
 
 
