@@ -23,20 +23,25 @@ class PerpetualTimer(object):
     """
     def __init__(self, t, hFunction):
         self.t = t
+        self.was_cancelled = False
         self.hFunction = hFunction
         self.thread = Timer(self.t, self.handle_function)
         self.thread.setDaemon(True)
 
     def handle_function(self):
+        if self.was_cancelled:
+            return
         self.hFunction()
         self.thread = Timer(self.t, self.handle_function)
         self.thread.start()
 
     def start(self):
         self.thread.start()
+        self.was_cancelled = False
 
     def cancel(self):
         self.thread.cancel()
+        self.was_cancelled = True
 
 
 # =============================================================================
