@@ -1,0 +1,55 @@
+<?
+from warnings import warn
+if 'slc_wvl_ratio' in keys:
+    slc_wvl_r = keys['slc_wvl_ratio']
+    for _k in ['slc_circle', 'slc_domain']:
+        if _k in keys:
+            warn("key 'slc_wvl_ratio' overrides settings for '"+_k+"'")
+    slc_air = slc_wvl_r*0.55
+    keys['slc_domain'] = slc_air
+    keys['slc_circle'] = slc_air/keys['n_sphere']
+?>
+
+Layout {
+  UnitOfLength = 1e-06
+  CoordinateSystem = Cylindrical
+  
+  MeshOptions {
+   MinimumMeshAngle = 15.0
+  }
+  
+  # Computational domain
+  Parallelogram {
+    Name = "CD"
+    Height = 4
+    Width = 2
+    Port = West
+    GlobalPosition = [0 0]
+    DomainId = 1
+    Priority = ComputationalDomain
+    MeshOptions {
+      MaximumSidelength = %(slc_domain)4f
+    }
+    
+    # set transparent boundary conditions
+    BoundarySegment {
+      BoundaryClass = Transparent
+    }
+  }
+  
+  # Scatterer (sphere)
+  CircleSector {
+    Radius = %(radius)e
+    AngleRange = [-90 90]
+    GlobalPosition = [0 0]
+    DomainId = 2
+    Priority = 1
+    RefineAll = %(refine_all_circle)i
+    MeshOptions {
+      MaximumSidelength = %(slc_circle)4f
+    }
+  }
+}
+
+
+ 

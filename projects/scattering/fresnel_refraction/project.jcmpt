@@ -1,0 +1,77 @@
+<?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+# Set default keys
+default_keys = {'info_level' : 10,
+				'storage_format' : 'Binary',
+				'initial_p_adaption' : True,
+				'n_refinement_steps' : 0,
+				'refinement_strategy' : 'HAdaptive'}
+for dkey in default_keys:
+	if not dkey in keys:
+		keys[dkey] = default_keys[dkey]
+
+# Handle name ambiguities
+if 'precision_field_energy' in keys:
+    if 'precision' in keys:
+        raise ValueError('Name clash with `precision` and ' +
+                         '`precision_field_energy`! Use only one of them.')
+    keys['precision'] = keys['precision_field_energy']
+
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+?>
+
+Project {
+  InfoLevel = %(info_level)i
+  StorageFormat = %(storage_format)s
+  Electromagnetics {
+    TimeHarmonic {
+      Scattering {
+        FieldComponents = Electric
+        Accuracy {
+<? # --------------------------------- Python ----------------------------------
+if keys['initial_p_adaption']:
+    ?> #------------------------------------------------------------------------
+          FiniteElementDegree {
+            Adaptive{
+              MaximumDegree = %(fem_degree_max)i
+            }
+          }
+<? # --------------------------------- Python ----------------------------------
+else:
+    ?> #------------------------------------------------------------------------
+          FiniteElementDegree = %(fem_degree_max)i
+<? # ----------------------- End of python if-statement ------------------------
+?>
+          Precision = %(precision)e
+          Refinement {
+            MaxNumberSteps = %(n_refinement_steps)i
+            Strategy = %(refinement_strategy)s
+          }
+        }
+      }
+    }
+  }
+}
+
+PostProcess {
+  FourierTransform {
+    FieldBagPath = "project_results/fieldbag.jcm"
+    OutputFileName = "project_results/transmitted_diffraction_orders.jcm"
+    NormalDirection = Y
+    Rotation = X:Z:-Y
+  }
+}
+
+PostProcess {
+  FourierTransform {
+    FieldBagPath = "project_results/fieldbag.jcm"
+    OutputFileName = "project_results/reflected_diffraction_orders.jcm"
+    NormalDirection = -Y
+    Rotation = X:-Z:Y
+  }
+}
