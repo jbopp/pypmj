@@ -5,6 +5,7 @@
 
 # Imports
 import numpy as np
+from warnings import warn
 
 # Set default keys
 default_keys = {'min_mesh_angle' : 20.,
@@ -16,7 +17,42 @@ for dkey, dval in default_keys.iteritems():
 	if not dkey in keys:
 		keys[dkey] = dval
 
-# Set all missing values for the z-direction maximum meshing side lengths using
+# Maximum side length keys
+max_sl_keys = ['max_sl_circle', 'max_sl_polygon', 
+               'max_sl_z_slab', 'max_sl_z_sub',
+               'max_sl_z_sup']
+
+# Set maximum side lengths using the 'slc_wvl_ratio' if set
+if 'slc_wvl_ratio' in keys:
+    slc_wvl_r = keys['slc_wvl_ratio']
+    for _k in max_sl_keys:
+        if _k in keys:
+            warn("key 'slc_wvl_ratio' overwrides settings for '"+_k+"'")
+    
+    # Calculate the resulting maximum side length in air
+    wvl = keys['vacuum_wavelength']
+    slc_air = slc_wvl_r * wvl / keys['uol']
+    
+    # Load the refractive indices
+    n_sub = np.real(keys['mat_subspace'].getNKdata(wvl))
+    n_super = np.real(keys['mat_superspace'].getNKdata(wvl))
+    n_phc = np.real(keys['mat_phc'].getNKdata(wvl))
+    
+    # The slab region consists of two materials: the PhC-material
+    # and the superspace-material. The maximum side length in
+    # z-direction must hence be set using the maximum of both
+    # refractive indices
+    n_slab_max = max([n_phc, n_super])
+    
+    # Set the resulting maximum side lengths using the material
+    # properties
+    keys['max_sl_circle'] = slc_air/n_super
+    keys['max_sl_polygon'] = slc_air/n_phc
+    keys['max_sl_z_slab'] = slc_air/n_slab_max
+    keys['max_sl_z_sub'] = slc_air/n_sub
+    keys['max_sl_z_sup'] = slc_air/n_super
+
+# Set all missing values for the z-direction maximum side lengths using
 # the minimum of the two horizontal side lengths
 sl_z_default = min([keys['max_sl_polygon'], keys['max_sl_circle']])
 sl_z_keys = ['max_sl_z_sub', 'max_sl_z_slab', 'max_sl_z_sup']
