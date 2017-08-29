@@ -29,6 +29,7 @@ import sys
 import tempfile
 import time
 import traceback
+import warnings
 from . import utils
 
 # Get special logger instances for output which is captured from JCMgeo and
@@ -349,16 +350,23 @@ class Simulation(object):
     rerun_JCMgeo : bool, default False
         Controls if JCMgeo needs to be called before execution in a series of
         simulations.
+    store_logs : bool, default True
+        If True, the 'Error' and 'Out' data of the logs returned by JCMsuite
+        will be added to the results `dict` returned by `process_results`, and
+        consequently stored in the HDF5 store by the parent `SimulationSet`
+        instance.
 
     """
 
     def __init__(self, keys, project=None, number=0, stored_keys=None, 
-                 storage_dir=None, rerun_JCMgeo=False, **kwargs):
+                 storage_dir=None, rerun_JCMgeo=False, store_logs=True,
+                 **kwargs):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
         self.keys = keys
         self.project = project
         self.number = number
         self.rerun_JCMgeo = rerun_JCMgeo
+        self.store_logs = store_logs
         self.status = 'Pending'
         
         # If no list of stored_keys is provided, use all keys for which values
@@ -380,7 +388,7 @@ class Simulation(object):
         if 'project_file_name' in kwargs:
             self._deprecated_pfilename = kwargs['project_file_name']
             self.logger.warn('Passing only the project file name is ' +
-                             'deprecated. Please path the complete ' +
+                             'deprecated. Please pass the complete ' +
                              'JCMProject-instance.')
         else:
             if self.project is None:
@@ -576,7 +584,8 @@ class Simulation(object):
         # jcm_results list
         self.jcm_results += pp_results
 
-    def process_results(self, processing_func=None, overwrite=False):
+    def process_results(self, processing_func=None, overwrite=False,
+                        add_logs=True):
         """Process the raw results from JCMsolve with a function
         `processing_func` of one input argument. The input argument, which is
         the list of results as it was set in `_set_jcm_results_and_logs`, is
@@ -620,6 +629,13 @@ class Simulation(object):
         # Process the computational costs
         self._results_dict = utils.computational_costs_to_flat_dict(
             self.jcm_results[0]['computational_costs'])
+        
+        # Add the logs if desired
+        if self.store_logs:
+            try:
+                self._results_dict.update(self.logs)
+            except:
+                self.logger.warn('Unable to add logs to `_results_dict`.')
         self.status = 'Finished and processed'
 
         # Stop here if processing_func is None
@@ -1100,11 +1116,14 @@ class SimulationSet(object):
         to the versions that were used when the HDF5 store was created. This
         has no effect if no HDF5 store is present, i.e. if you are starting
         with an empty working directory.
-    resource_manager: ResourceManager or NoneType, default None
+    resource_manager : ResourceManager or NoneType, default None
         You can pass your own `ResourceManager`-instance here, e.g. to
         configure the resources to use before the `SimulationSet` is
         initialized. If `None`, a `ResourceManager`-instance will be created
         automatically.
+    store_logs : bool, default True
+        Whether to store the JCMsuite logs to the HDF5 file (these may be
+        cropped in some cases).
 
     """
 
@@ -1116,11 +1135,12 @@ class SimulationSet(object):
                  storage_folder='from_date', storage_base='from_config',
                  transitional_storage_base=None,
                  combination_mode='product', check_version_match=True,
-                 resource_manager=None):
+                 resource_manager=None, store_logs=True):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Save initialization arguments into namespace
         self.combination_mode = combination_mode
+        self.store_logs = store_logs
 
         # Analyze the provided keys
         self._check_keys(keys)
@@ -1343,7 +1363,8 @@ class SimulationSet(object):
                     os.path.isfile(self._database_file)):
                 self.logger.warn('Deleting existing H5 store.')
                 os.remove(self._database_file)
-        self.store = pd.HDFStore(self._database_file)
+        self.store = pd.HDFStore(self._database_file, complevel=9,
+                                 complib='blosc')
 
         # Version comparison
         if not self.is_store_empty() and check_version_match:
@@ -1436,7 +1457,39 @@ class SimulationSet(object):
             raise ValueError('Can only append pandas DataFrames to the store.')
             return
         dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
-        self.store.append(dbase_tab, data)
+        
+        # If logs are recorded, the columns contain the key 'Out'.
+        # In this case, we need to make sure that the HDF5-column
+        # provides enough space to store long strings.
+        if 'Out' in data.columns:
+            # We take a sample of the log length
+            if not hasattr(self, '_log_itemsize_sample'):
+                self._log_itemsize_sample = len(data['Out'].iloc[0])
+                
+                # If the logs are longer than the default min size
+                # of 10000, we increase this number
+                if self._log_itemsize_sample > 10000:
+                    self._log_itemsize_sample *= 2
+                else:
+                    self._log_itemsize_sample = 10000
+                self.logger.debug('Using `min_itemsize` of {}'.format(
+                                    self._log_itemsize_sample) +\
+                                  ' to store the log output in HDF5.')
+            # If the new logs that need to be stored exceed the maximum
+            # size, we need to crop it
+            icol = data.columns.tolist().index('Out')
+            _log_samp = data.iat[0,icol]
+            if len(_log_samp) > self._log_itemsize_sample:
+                data.iat[0,icol] = _log_samp[:self._log_itemsize_sample-20] +\
+                                                    '\n[...] LOGS CROPPED!'
+            
+            # We can now store, ignoring some unwanted warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self.store.append(dbase_tab, data, 
+                                  min_itemsize={'Out': self._log_itemsize_sample})
+        else:
+            self.store.append(dbase_tab, data)
 
     def make_simulation_schedule(self):
         """Makes a schedule by getting a list of simulations that must be
@@ -1567,7 +1620,8 @@ class SimulationSet(object):
             self.simulations.append(Simulation(number=i, keys=keys,
                                                stored_keys=self.stored_keys,
                                                storage_dir=self.storage_dir,
-                                               project=self.project))
+                                               project=self.project,
+                                               store_logs=self.store_logs))
 
         # We generate a pandas DataFrame that holds all the parameter and
         # geometry properties for each simulation, with the simulation number
@@ -3059,7 +3113,8 @@ class QuantityMinimizer(SimulationSet):
                                            stored_keys=self.stored_keys,
                                            storage_dir=self.storage_dir,
                                            project=self.project,
-                                           rerun_JCMgeo=True))
+                                           rerun_JCMgeo=True,
+                                           store_logs=self.store_logs))
         self.current_sim_index += 1
         self.num_sims += 1
     

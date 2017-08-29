@@ -5,10 +5,10 @@
 
 # Set default keys
 default_keys = {'info_level' : 10,
-				'storage_format' : 'Binary',
-				'fem_degree_min' : 1,
+                'storage_format' : 'Binary',
+                'fem_degree_min' : 1,
                 'initial_p_adaption' : True,
-				'n_refinement_steps' : 0,
+                'n_refinement_steps' : 0,
                 'refinement_strategy' : 'HAdaptive'}
 for dkey in default_keys:
 	if not dkey in keys:

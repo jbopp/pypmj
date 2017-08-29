@@ -7,11 +7,39 @@
 import numpy as np
 from warnings import warn
 
+# Some function for geometry computation ---------------------------------------
+def calc_circle_segment_length_from_refinement(diameter, refine_all_circle):
+    """Returns the side length of the edges of a polygon representing a circle
+    with diameter `diameter` using `RefineAll`-parameter of 
+    `refine_all_circle` in the JCMsuite layout definition.
+    
+    """
+    
+    def calc_circle_segment_length(radius, n_segments):
+        """Returns the side length of the edges of a polygon representing a circle
+        with `radius` using `n_segments` points.
+
+        """
+        import numpy as np
+        angle = 2.*np.pi/n_segments
+        return 2.*radius * np.sin(angle/2.)
+
+    def n_edges_circle_polygon(refine_all_circle):
+        """Returns the number of edges of a polygon representing a circle in
+        JCMsuite based on the `RefineAll`-parameter."""
+        return 4*2**refine_all_circle
+    
+    return calc_circle_segment_length(diameter/2., 
+                                    n_edges_circle_polygon(refine_all_circle))
+
+# ------------------------------------------------------------------------------
+
 # Set default keys
 default_keys = {'min_mesh_angle' : 20.,
-				'refine_all_circle' : 2,
-				'uol' : 1.e-9,
-				'pore_angle' : 0.}
+                'refine_all_circle' : 2,
+                'elements_max_z_ratio' : 2.,
+                'uol' : 1.e-9,
+                'pore_angle' : 0.}
 
 for dkey, dval in default_keys.iteritems():
 	if not dkey in keys:
@@ -44,13 +72,27 @@ if 'slc_wvl_ratio' in keys:
     # refractive indices
     n_slab_max = max([n_phc, n_super])
     
+    # The optimum meshing in z-direction depends on the `RefineAll`
+    # of the cirlce, as this may cause very small side lengths
+    # in the x-y-plane. Consequently, the side lengths in z-direction
+    # must not be much longer than the minimum side length on the
+    # circle edges, to avoid very thin and long elements. We
+    # estimate the minimum x-y-side length from the number of
+    # circle refinements and the radius:
+    circ_edge_min = calc_circle_segment_length_from_refinement(
+                                        keys['d'], 
+                                        keys['refine_all_circle'])
+    
+    # We may allow for multiples of this value, set by the keys
+    z_min_by_circ = circ_edge_min * keys['elements_max_z_ratio']
+    
     # Set the resulting maximum side lengths using the material
     # properties
     keys['max_sl_circle'] = slc_air/n_super
     keys['max_sl_polygon'] = slc_air/n_phc
-    keys['max_sl_z_slab'] = slc_air/n_slab_max
-    keys['max_sl_z_sub'] = slc_air/n_sub
-    keys['max_sl_z_sup'] = slc_air/n_super
+    keys['max_sl_z_slab'] = min([slc_air/n_slab_max, z_min_by_circ])
+    keys['max_sl_z_sub'] = min([slc_air/n_sub, z_min_by_circ])
+    keys['max_sl_z_sup'] = min([slc_air/n_super, z_min_by_circ])
 
 # Set all missing values for the z-direction maximum side lengths using
 # the minimum of the two horizontal side lengths
