@@ -47,6 +47,11 @@ NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
 if not NEW_DAEMON_DETECTED:
     logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
 
+# Set warning filters
+warnings.filterwarnings(action='ignore',
+                        message= '.*The\\ Leaf.*is\\ exceeding\\ the\\' + \
+                                 ' maximum\\ recommended\\ rowsize.*\\Z(?ms)')
+    
 
 def _default_sim_wdir(storage_dir, sim_number):
     """Returns the default working directory path for a given storage folder
@@ -1484,10 +1489,8 @@ class SimulationSet(object):
                                                     '\n[...] LOGS CROPPED!'
             
             # We can now store, ignoring some unwanted warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.store.append(dbase_tab, data, 
-                                  min_itemsize={'Out': self._log_itemsize_sample})
+            self.store.append(dbase_tab, data, 
+                              min_itemsize={'Out': self._log_itemsize_sample})
         else:
             self.store.append(dbase_tab, data)
 
