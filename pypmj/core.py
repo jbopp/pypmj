@@ -2917,6 +2917,8 @@ class ConvergenceTest(object):
                                                                 values,
                                                                 ref[dcol])
         if len(dev_columns) > 1:
+            df_['deviation_min'] = df_.min(axis=1)
+            df_['deviation_max'] = df_.max(axis=1)
             df_['deviation_mean'] = df_.mean(axis=1)
         self.deviation_columns = list(df_.columns)
         return df_
