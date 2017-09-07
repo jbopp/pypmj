@@ -16,6 +16,7 @@ from pypmj.jupyter_tools import JupyterProgressDisplay
 from copy import deepcopy
 from datetime import date
 from glob import glob
+import fnmatch
 import inspect
 from itertools import product
 from numbers import Number
