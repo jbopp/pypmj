@@ -422,7 +422,7 @@ class Simulation(object):
         found, or raises a `RuntimeError` if multiple files are found.
         
         """
-        return self.find_files(self, pattern, only_one=True)
+        return self.find_files(pattern, only_one=True)
     
     def find_files(self, pattern, only_one = False):
         """ Finds files in the working directory (see method `working_dir()`)
