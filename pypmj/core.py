@@ -412,6 +412,32 @@ class Simulation(object):
 
         """
         return _default_sim_wdir(self.storage_dir, self.number)
+    
+    def find_files(self, pattern, only_one = False):
+        """ Finds files in the working directory (see method `working_dir()`)
+        matching the given (`fnmatch.filer`-) `pattern`. The working directory
+        is scanned recursively.
+
+        If `only_one` is False (default), returns a list with matching file
+        paths. Else, returns `None` if no match is found, the file path if a
+        single file is found, or raises a `RuntimeError` if multiple files are
+        found.
+
+        """
+        matches = []
+        for root, dirnames, filenames in os.walk(self.working_dir()):
+            for filename in fnmatch.filter(filenames, pattern):
+                matches.append(os.path.join(root, filename))
+
+        if not only_one:
+            return matches
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) == 0:
+            return None
+        else:
+            raise RuntimeError('Multiple results found:\n\t{}'.format(matches))
 
     def solve(self, pp_file=None, additional_keys=None, **jcm_kwargs):
         """Starts the simulation (i.e. runs jcm.solve) and returns the job ID.
@@ -1126,7 +1152,7 @@ class SimulationSet(object):
         configure the resources to use before the `SimulationSet` is
         initialized. If `None`, a `ResourceManager`-instance will be created
         automatically.
-    store_logs : bool, default True
+    store_logs : bool, default False
         Whether to store the JCMsuite logs to the HDF5 file (these may be
         cropped in some cases).
 
@@ -1140,7 +1166,7 @@ class SimulationSet(object):
                  storage_folder='from_date', storage_base='from_config',
                  transitional_storage_base=None,
                  combination_mode='product', check_version_match=True,
-                 resource_manager=None, store_logs=True):
+                 resource_manager=None, store_logs=False):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Save initialization arguments into namespace
@@ -1610,6 +1636,12 @@ class SimulationSet(object):
                              'parameter(s): {}'.format(self._loop_props))
             self.logger.info('Total number of simulations: {}'.format(
                 self.num_sims))
+        
+        # Warn if log-storing is enabled for many simulations
+        if self.store_logs and self.num_sims > 5000:
+            self.logger.warn('Setting `store_logs` to `True` for a large ' +
+                             'number of simulations causes massive memory ' +
+                             'usage and a huge database!')
 
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed

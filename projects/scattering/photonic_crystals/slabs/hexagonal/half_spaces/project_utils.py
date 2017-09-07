@@ -142,7 +142,7 @@ def processing_default(pps, keys):
     results = {}
     
     # Check if the correct number of post processes was passed
-    if not len(pps) == 3:
+    if len(pps) < 3:
         raise ValueError('This processing function is designed for a list of 3'+
                          ' post processes, but these are {}'.format(len(pps)))
         return
