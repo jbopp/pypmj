@@ -413,6 +413,17 @@ class Simulation(object):
         """
         return _default_sim_wdir(self.storage_dir, self.number)
     
+    def find_file(self, pattern):
+        """Finds a file in the working directory (see method `working_dir()`)
+        matching the given (`fnmatch.filer`-) `pattern`. The working directory
+        is scanned recursively.
+
+        Returns `None` if no match is found, the file path if a single file is
+        found, or raises a `RuntimeError` if multiple files are found.
+        
+        """
+        return self.find_files(self, pattern, only_one=True)
+    
     def find_files(self, pattern, only_one = False):
         """ Finds files in the working directory (see method `working_dir()`)
         matching the given (`fnmatch.filer`-) `pattern`. The working directory
