@@ -478,6 +478,10 @@ class Simulation(object):
                                  ' argument for jcm.solve. It is already set' +
                                  ' by the Simulation instance.')
                 del jcm_kwargs[key]
+        
+        # Handle old versions without the resultbag feature
+        if not hasattr(jcm, 'Resultbag') and 'resultbag' in jcm_kwargs:
+            del jcm_kwargs['resultbag']
 
         # Make directories if necessary
         wdir = self.working_dir()
@@ -901,8 +905,11 @@ class Simulation(object):
         # This is the new daemon style version
         if NEW_DAEMON_DETECTED:
             self.solve(**jcm_solve_kwargs)
-            results = daemon.wait(return_style='new',
-                                  resultbag=self._resultbag)
+            if hasattr(jcm, 'Resultbag'):
+                results = daemon.wait(return_style='new',
+                                      resultbag=self._resultbag)
+            else:
+                results = daemon.wait(return_style='new')
             result = results.values()[0]
             self._set_jcm_results_and_logs(result)
             ret1, ret2 = (result['results'], result['logs'])
@@ -911,7 +918,10 @@ class Simulation(object):
         else:
             with utils.Capturing() as output:
                 self.solve(**jcm_solve_kwargs)
-                results, logs = daemon.wait(resultbag=self._resultbag)
+                if hasattr(jcm, 'Resultbag'):
+                    results, logs = daemon.wait(resultbag=self._resultbag)
+                else:
+                    results, logs = daemon.wait()
             for line in output:
                 logger_JCMsolve.debug(line)
     
@@ -940,8 +950,11 @@ class Simulation(object):
                     self.solve(pp_file=f,
                                additional_keys=additional_keys_for_pps,
                                **jcm_solve_kwargs)
-                    pp_results = daemon.wait(return_style='new',
-                                             resultbag=self._resultbag)
+                    if hasattr(jcm, 'Resultbag'):
+                        pp_results = daemon.wait(return_style='new',
+                                                 resultbag=self._resultbag)
+                    else:
+                        pp_results = daemon.wait(return_style='new')
                     pp_result = pp_results.values()[0]
                     # Add the post process results
                     self._add_post_process_results(pp_result)
@@ -951,8 +964,11 @@ class Simulation(object):
                         self.solve(pp_file=f,
                                    additional_keys=additional_keys_for_pps,
                                    **jcm_solve_kwargs)
-                        pp_results, pp_logs = daemon.wait(
+                        if hasattr(jcm, 'Resultbag'):
+                            pp_results, pp_logs = daemon.wait(
                                         resultbag=self._resultbag)
+                        else:
+                            pp_results, pp_logs = daemon.wait()
                     for line in output:
                         logger_JCMsolve.debug(line)
                     # Add the post process results
@@ -1222,6 +1238,12 @@ class SimulationSet(object):
         self.transitional_storage_base = transitional_storage_base
         
         # Check resultbag setting
+        if not hasattr(jcm, 'Resultbag'):
+            self.logger.warn('Cannot use a resultbag as it is not ' +
+                             'implemented in the current JCMsuite version. ' +
+                             'Try using a newer one. Falling back to ' +
+                             '`use_resultbag=False`.')
+            use_resultbag = False
         self.use_resultbag = use_resultbag
         self._initialize_resultbag()
 
@@ -2412,9 +2434,13 @@ class SimulationSet(object):
         self.logger.debug('Waiting for job_ids: {}'.format(ids_to_wait_for))
         while nFinished < nTotal:
             # wait until any of the simulations is finished
-            results = daemon.wait(ids_to_wait_for, break_condition='any',
-                                  return_style='new',
-                                  resultbag=self._resultbag)
+            if hasattr(jcm, 'Resultbag'):
+                results = daemon.wait(ids_to_wait_for, break_condition='any',
+                                      return_style='new',
+                                      resultbag=self._resultbag)
+            else:
+                results = daemon.wait(ids_to_wait_for, break_condition='any',
+                                      return_style='new')
 
             # Get lists for the IDs of the finished jobs and the corresponding
             # simulation numbers
@@ -2479,7 +2505,12 @@ class SimulationSet(object):
             # deepcopy is needed to protect ids_to_wait_for from being modified
             # by the old daemon.wait implementation
             with utils.Capturing() as output:
-                indices, thisResults, logs = daemon.wait(
+                if not hasattr(jcm, 'Resultbag'):
+                    indices, thisResults, logs = daemon.wait(
+                                                    deepcopy(ids_to_wait_for),
+                                                    break_condition='any')
+                else:
+                    indices, thisResults, logs = daemon.wait(
                                                     deepcopy(ids_to_wait_for),
                                                     break_condition='any',
                                                     resultbag=self._resultbag)
