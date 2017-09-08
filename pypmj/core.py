@@ -901,7 +901,8 @@ class Simulation(object):
         # This is the new daemon style version
         if NEW_DAEMON_DETECTED:
             self.solve(**jcm_solve_kwargs)
-            results = daemon.wait(return_style='new')
+            results = daemon.wait(return_style='new',
+                                  resultbag=self._resultbag)
             result = results.values()[0]
             self._set_jcm_results_and_logs(result)
             ret1, ret2 = (result['results'], result['logs'])
@@ -910,7 +911,7 @@ class Simulation(object):
         else:
             with utils.Capturing() as output:
                 self.solve(**jcm_solve_kwargs)
-                results, logs = daemon.wait()
+                results, logs = daemon.wait(resultbag=self._resultbag)
             for line in output:
                 logger_JCMsolve.debug(line)
     
@@ -939,7 +940,8 @@ class Simulation(object):
                     self.solve(pp_file=f,
                                additional_keys=additional_keys_for_pps,
                                **jcm_solve_kwargs)
-                    pp_results = daemon.wait(return_style='new')
+                    pp_results = daemon.wait(return_style='new',
+                                             resultbag=self._resultbag)
                     pp_result = pp_results.values()[0]
                     # Add the post process results
                     self._add_post_process_results(pp_result)
@@ -949,7 +951,8 @@ class Simulation(object):
                         self.solve(pp_file=f,
                                    additional_keys=additional_keys_for_pps,
                                    **jcm_solve_kwargs)
-                        pp_results, pp_logs = daemon.wait()
+                        pp_results, pp_logs = daemon.wait(
+                                        resultbag=self._resultbag)
                     for line in output:
                         logger_JCMsolve.debug(line)
                     # Add the post process results
@@ -1137,6 +1140,23 @@ class SimulationSet(object):
     storage_base : str, default 'from_config'
         Directory to use as the base storage folder. If 'from_config', the
         folder set by the configuration option Storage->base is used.
+    use_resultbag : bool, str (file path) or jcmwave.Resultbag, default False
+        
+        *Experimental!*
+        
+        Whether to use a resultbag (see jcmwave.resultbag for details). If a
+        `str` is given, it is considered as the path to the resultbag-file.
+        If a `False`, the standard saving process using directories and data
+        files is used. If `True`, the standard resultbag file `'resultbag.db'`
+        in the storage directory is used. You can also pass a
+        `jcmwave.Resultbag`-instance.
+        Use the `get_resultbag_path()`-method to get the path of the current
+        resultbag. `resultbag()` returns the `jcmwave.Resultbag`-instance.
+        Use the methods `rb_get_log_for_sim` and `rb_get_result_for_sim`
+        to get logs and results from the resultbag for a particular
+        simulation.
+        Note: using a resultsbag will ignore settings for `store_logs` and
+        the settings for `wdir_mode` in the `run()`-method.
     transitional_storage_base: str, default None
         Use this directory as the "real" storage_base during the execution,
         and move all files to the path configured using `storage_base` and
@@ -1176,7 +1196,7 @@ class SimulationSet(object):
 
     def __init__(self, project, keys, duplicate_path_levels=0,
                  storage_folder='from_date', storage_base='from_config',
-                 transitional_storage_base=None,
+                 use_resultbag=False, transitional_storage_base=None,
                  combination_mode='product', check_version_match=True,
                  resource_manager=None, store_logs=False):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
@@ -1184,7 +1204,7 @@ class SimulationSet(object):
         # Save initialization arguments into namespace
         self.combination_mode = combination_mode
         self.store_logs = store_logs
-
+        
         # Analyze the provided keys
         self._check_keys(keys)
         self.keys = keys
@@ -1200,6 +1220,10 @@ class SimulationSet(object):
                                             storage_folder,
                                             transitional_storage_base)
         self.transitional_storage_base = transitional_storage_base
+        
+        # Check resultbag setting
+        self.use_resultbag = use_resultbag
+        self._initialize_resultbag()
 
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
@@ -1383,7 +1407,80 @@ class SimulationSet(object):
         self._copying_needed = True
         self._final_storage_dir = fsd
         self.storage_dir = tsd
-
+    
+    def _initialize_resultbag(self):
+        """Initializes the resultbag if `use_resultbag` is not False. If as
+        `jcmwave.Resultbag` is provided for `use_resultbag`, a reference is
+        stored in the attribute `_resultbag`. Else, a resultbag is
+        initialized using the specified path or the standard path and
+        filename.
+        
+        """
+        if self.use_resultbag is False:
+            self._resultbag = None
+            return
+        
+        # Set `store_logs` to False and warn user if it was True
+        if self.use_resultbag:
+            if self.store_logs:
+                self.logger.warn('Using a resultbag sets `store_logs` to' +
+                                 ' `False`.')
+                self.store_logs = False
+        
+        # Use the resultbag if a proper class instance was provided
+        if isinstance(self.use_resultbag, jcm.Resultbag):
+            self._resultbag = self.use_resultbag
+            return
+        
+        # Else, set the standard path or use the provided path to initialize
+        # the `jcm.Resultbag`
+        elif self.use_resultbag is True or self.use_resultbag == 1:
+            rbfpath = os.path.join(self.storage_dir, 'resultbag.db')
+        else:
+            rbfpath = self.use_resultbag
+        self._resultbag = jcm.Resultbag(rbfpath)
+    
+    def resultbag(self):
+        """Returns the resultbag (`jcmwave.Resultbag`-instance) if configured
+        using the class attribute `use_resultbag`. Else, raises RuntimeError.
+        
+        """
+        if not self._resultbag is None:
+            return self._resultbag
+        raise RuntimeError('No resultbag in use. Initialize the class with a'+
+                           ' valid setting for `use_resultbag` to use a '+
+                           'resultbag instead.')
+        
+    def _get_sim_flexible(self, sim):
+        """Tries to return a Simulation-instance based on type og `sim`.
+        
+        """
+        if isinstance(sim, int):
+            sim = self.simulations[sim]
+        if not hasattr(sim, 'keys'):
+            raise ValueError('`sim` must be int (i.e. a sim_number) or a ' +
+                             '`Simulation`-instance')
+        return sim
+    
+    def rb_get_log_for_sim(self, sim):
+        """Returns the logs for the simulation `sim` from the resultbag.
+        `sim` must be simulation number or a `Simulation`-instance of the
+        current `simulations`-list.
+        
+        """
+        return self.resultbag().get_log(self._get_sim_flexible(sim).keys)
+    
+    def rb_get_result_for_sim(self, sim):
+        """Returns the logs for the simulation `sim` from the resultbag.
+        `sim` must be simulation number or a `Simulation`-instance of the
+        current `simulations`-list.
+        
+        """
+        return self.resultbag().get_result(self._get_sim_flexible(sim).keys)
+    
+    def get_resultbag_path(self):
+        return self._resultbag._filepath
+    
     def _initialize_store(self, check_version_match=False):
         """Initializes the HDF5 store and sets the `store` attribute. If
         `check_version_match` is True, the current versions of JCMsuite and
@@ -2112,6 +2209,8 @@ class SimulationSet(object):
             jcm_geo_kwargs = {}
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
+        if not 'resultbag' in jcm_solve_kwargs:
+            jcm_solve_kwargs['resultbag'] = self._resultbag
 
         if isinstance(simulation, int):
             simulation = self.simulations[simulation]
@@ -2186,6 +2285,8 @@ class SimulationSet(object):
             jcm_geo_kwargs = {}
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
+        if not 'resultbag' in jcm_solve_kwargs:
+            jcm_solve_kwargs['resultbag'] = self._resultbag
 
         # We only want to compute the geometry if necessary, which is
         # controlled using the `rerun_JCMgeo`-attribute of the Simulation-
@@ -2312,7 +2413,8 @@ class SimulationSet(object):
         while nFinished < nTotal:
             # wait until any of the simulations is finished
             results = daemon.wait(ids_to_wait_for, break_condition='any',
-                                  return_style='new')
+                                  return_style='new',
+                                  resultbag=self._resultbag)
 
             # Get lists for the IDs of the finished jobs and the corresponding
             # simulation numbers
@@ -2379,7 +2481,8 @@ class SimulationSet(object):
             with utils.Capturing() as output:
                 indices, thisResults, logs = daemon.wait(
                                                     deepcopy(ids_to_wait_for),
-                                                    break_condition='any')
+                                                    break_condition='any',
+                                                    resultbag=self._resultbag)
             for line in output:
                 logger_JCMsolve.debug(line)
 
