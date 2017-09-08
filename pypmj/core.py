@@ -1171,8 +1171,7 @@ class SimulationSet(object):
         Use the methods `rb_get_log_for_sim` and `rb_get_result_for_sim`
         to get logs and results from the resultbag for a particular
         simulation.
-        Note: using a resultsbag will ignore settings for `store_logs` and
-        the settings for `wdir_mode` in the `run()`-method.
+        Note: using a resultbag will ignore settings for `store_logs`.
     transitional_storage_base: str, default None
         Use this directory as the "real" storage_base during the execution,
         and move all files to the path configured using `storage_base` and
