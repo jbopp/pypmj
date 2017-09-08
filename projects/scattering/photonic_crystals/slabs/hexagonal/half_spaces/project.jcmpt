@@ -9,7 +9,8 @@ default_keys = {'info_level' : 10,
                 'fem_degree_min' : 1,
                 'initial_p_adaption' : True,
                 'n_refinement_steps' : 0,
-                'refinement_strategy' : 'HAdaptive'}
+                'refinement_strategy' : 'HAdaptive',
+                'clustering_efield_output' : False}
 for dkey in default_keys:
 	if not dkey in keys:
 		keys[dkey] = default_keys[dkey]
@@ -104,3 +105,20 @@ PostProcess {
     OutputQuantity = ElectricFieldEnergy
   }
 }
+
+
+<? # --------------------------------- Python ----------------------------------
+if keys['clustering_efield_output']:
+    ?> #------------------------------------------------------------------------
+PostProcess {
+  ExportFields {
+    FieldBagPath = "project_results/fieldbag.jcm"
+    OutputFileName = "project_results/efield_3D.jcm"
+    OutputQuantity = ElectricFieldStrength
+    Cartesian {
+      Spacing = 2.e-8
+    }
+  }
+}
+<? # ----------------------- End of python if-statement ------------------------
+?>

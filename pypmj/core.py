@@ -1454,12 +1454,15 @@ class SimulationSet(object):
             return
         
         # Else, set the standard path or use the provided path to initialize
-        # the `jcm.Resultbag`
+        # the `jcm.Resultbag`. Note: keys in constants are not stored as they
+        # do not contain lists and may contain unpicklable objects which are
+        # incompatible with the current implementation of jcmwave.Resultbag.
         elif self.use_resultbag is True or self.use_resultbag == 1:
             rbfpath = os.path.join(self.storage_dir, 'resultbag.db')
         else:
             rbfpath = self.use_resultbag
-        self._resultbag = jcm.Resultbag(rbfpath)
+        self._resultbag = jcm.Resultbag(rbfpath, 
+                                 self.parameters.keys()+self.geometry.keys())
     
     def resultbag(self):
         """Returns the resultbag (`jcmwave.Resultbag`-instance) if configured
