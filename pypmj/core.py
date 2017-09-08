@@ -2210,6 +2210,7 @@ class SimulationSet(object):
             This calls jcmwave.solve with mode `post_process` internally. The
             results are appended to the `jcm_results`-list of the `Simulation`
             instance.
+            Note: this feature is yet incompatible with `use_resultbag`!
         additional_keys_for_pps : dict or NoneType, default None
             dict which will be merged to the `keys`-dict of the `Simulation`
             instance before passing them to the jcmwave.solve-method in the
@@ -2232,6 +2233,12 @@ class SimulationSet(object):
             jcm_solve_kwargs = {}
         if not 'resultbag' in jcm_solve_kwargs:
             jcm_solve_kwargs['resultbag'] = self._resultbag
+            
+        if not self._resultbag is None:
+            if not run_post_process_files is None:
+                raise ValueError('`run_post_process_files` is yet ' +
+                                 'incompatible with `use_resultbag`')
+                return
 
         if isinstance(simulation, int):
             simulation = self.simulations[simulation]
