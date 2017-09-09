@@ -52,6 +52,10 @@ if not NEW_DAEMON_DETECTED:
 warnings.filterwarnings(action='ignore',
                         message= '.*The\\ Leaf.*is\\ exceeding\\ the\\' + \
                                  ' maximum\\ recommended\\ rowsize.*\\Z(?ms)')
+warnings.filterwarnings(action='ignore',
+                        message= '.*your\\ performance\\ may\\ suffer\\ ' + \
+                        'as\\ PyTables\\ will\\ pickle\\ object\\ types\\' + \
+                        ' that\\ it\\ cannot.*\\Z(?ms)')
     
 
 def _default_sim_wdir(storage_dir, sim_number):
