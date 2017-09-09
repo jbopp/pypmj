@@ -10,7 +10,7 @@ Authors : Carlo Barth
 # =============================================================================
 import logging
 from pypmj import (jcm, daemon, resources, __version__, __jcm_version__,
-                       _config, ConfigurationError)
+                   _config, ConfigurationError)
 from pypmj.parallelization import ResourceDict
 from pypmj.jupyter_tools import JupyterProgressDisplay
 from copy import deepcopy
@@ -56,7 +56,13 @@ warnings.filterwarnings(action='ignore',
                         message= '.*your\\ performance\\ may\\ suffer\\ ' + \
                         'as\\ PyTables\\ will\\ pickle\\ object\\ types\\' + \
                         ' that\\ it\\ cannot.*\\Z(?ms)')
-    
+
+# Set text template for strings replacing class attributes deleted for
+# memory efficiency (occurs if `minimize_memory_usage=True`
+# in `SimulationSet`-instances)
+_DA_REASON_TMPL = 'Attribute {} was deleted because `minimize_memory_usage`' +
+                  ' was set to True.'
+
 
 def _default_sim_wdir(storage_dir, sim_number):
     """Returns the default working directory path for a given storage folder
@@ -886,6 +892,7 @@ class Simulation(object):
             automatically (ignored if provided).
 
         """
+        
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
         
@@ -986,6 +993,15 @@ class Simulation(object):
             if wdir_mode == 'delete':
                 self.remove_working_directory()
         return ret1, ret2
+    
+    def _forget_attr(self, attr_name):
+        if not hasattr(self, attr_name):
+            return
+        setattr(self, attr_name, _DA_REASON_TMPL.format(attr_name))
+    
+    def forget_jcm_results_and_logs(self):
+        for attr_name in ['jcm_results', 'logs']:
+            self._forget_attr(attr_name)
 
 
 # =============================================================================
@@ -1206,6 +1222,11 @@ class SimulationSet(object):
     store_logs : bool, default False
         Whether to store the JCMsuite logs to the HDF5 file (these may be
         cropped in some cases).
+    minimize_memory_usage : bool, default False
+        Huge parameter scans can cause python to need massive memory because
+        the results and logs are kept for each simulation. Set this parameter
+        to true to minimize the memory usage. Caution: you will loose all the
+        `jcm_results` and `logs` in the `Simulation`-instances.
 
     """
 
@@ -1217,12 +1238,14 @@ class SimulationSet(object):
                  storage_folder='from_date', storage_base='from_config',
                  use_resultbag=False, transitional_storage_base=None,
                  combination_mode='product', check_version_match=True,
-                 resource_manager=None, store_logs=False):
+                 resource_manager=None, store_logs=False, 
+                 minimize_memory_usage=False):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Save initialization arguments into namespace
         self.combination_mode = combination_mode
         self.store_logs = store_logs
+        self.minimize_memory_usage = minimize_memory_usage
         
         # Analyze the provided keys
         self._check_keys(keys)
@@ -2476,6 +2499,9 @@ class SimulationSet(object):
                     # and append them to the HDF5 store
                     try:
                         self.append_store(sim._get_DataFrame())
+                        if self.minimize_memory_usage:
+                            # Delete jcm_results and logs attributes on sim
+                            sim.forget_jcm_results_and_logs()
                         self._progress_view.set_pbar_state(add_to_value=1)
                     except ValueError:
                         self.logger.exception('A critical problem occured ' +
@@ -2551,6 +2577,9 @@ class SimulationSet(object):
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
                     self.append_store(sim._get_DataFrame())
+                    if self.minimize_memory_usage:
+                        # Delete jcm_results and logs attributes on sim
+                        sim.forget_jcm_results_and_logs()
                     self._progress_view.set_pbar_state(add_to_value=1)
 
             # Remove/zip all working directories of the finished simulations if
