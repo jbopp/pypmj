@@ -383,6 +383,7 @@ class Simulation(object):
         self.number = number
         self.rerun_JCMgeo = rerun_JCMgeo
         self.store_logs = store_logs
+        self.pass_computational_costs = False
         self.status = 'Pending'
         
         # If no list of stored_keys is provided, use all keys for which values
@@ -460,6 +461,12 @@ class Simulation(object):
             return None
         else:
             raise RuntimeError('Multiple results found:\n\t{}'.format(matches))
+    
+    def set_pass_computational_costs(self, val):
+        """Sets the value of `pass_computational_costs`.""" 
+        if not isinstance(val, bool):
+            raise ValueError('val must be of type `bool`.')
+        self.pass_computational_costs = val
 
     def solve(self, pp_file=None, additional_keys=None, **jcm_kwargs):
         """Starts the simulation (i.e. runs jcm.solve) and returns the job ID.
@@ -641,8 +648,7 @@ class Simulation(object):
         # jcm_results list
         self.jcm_results += pp_results
 
-    def process_results(self, processing_func=None, overwrite=False,
-                        add_logs=True):
+    def process_results(self, processing_func=None, overwrite=False):
         """Process the raw results from JCMsolve with a function
         `processing_func` of one input argument. The input argument, which is
         the list of results as it was set in `_set_jcm_results_and_logs`, is
@@ -713,19 +719,26 @@ class Simulation(object):
                              'input Please consult the docs of ' +
                              '`process_results`.')
             return
-
+        
+        # Set the post processes which should be passed to the processing
+        # function
+        if self.pass_computational_costs:
+            jcm_results_to_pass = self.jcm_results
+        else:
+            jcm_results_to_pass = self.jcm_results[1:]
+        
         # We try to call the processing_func now. If it fails or its results
         # are not of type dict, it is ignored and the user will be warned
         signature = inspect.getargspec(processing_func)
         if len(signature.args) == 1:
-            procargs = [self.jcm_results[1:]]
+            procargs = [jcm_results_to_pass]
         elif len(signature.args) == 2:
             if not signature.args[1] == 'keys':
                 self.logger.warn('Call of `processing_func` failed. If your ' +
                                  'function uses two input arguments, the ' +
                                  'second one must be named `keys`.')
                 return
-            procargs = [self.jcm_results[1:], self.keys]
+            procargs = [jcm_results_to_pass, self.keys]
         try:
             # anything might happen
             eres = processing_func(*procargs)
@@ -2630,7 +2643,8 @@ class SimulationSet(object):
     def run(self, processing_func=None, N='all', auto_rerun_failed=1,
             run_post_process_files=None, additional_keys=None,
             wdir_mode='keep', zip_file_path=None, show_progress_bar=False,
-            jcm_geo_kwargs=None, jcm_solve_kwargs=None):
+            jcm_geo_kwargs=None, jcm_solve_kwargs=None, 
+            pass_ccosts_to_processing_func=False):
         """Convenient function to add the resources, run all necessary
         simulations and save the results to the HDF5 store.
 
@@ -2679,6 +2693,9 @@ class SimulationSet(object):
         jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
             Keyword arguments which are directly passed to jcm.geo and
             jcm.solve, respectively.
+        pass_ccosts_to_processing_func : bool, default False
+            Whether to pass the computational costs as the 0th list element
+            to the processing_func.
 
         """
         if self.all_done():
@@ -2707,6 +2724,11 @@ class SimulationSet(object):
             jcm_geo_kwargs = {}
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
+            
+        # Set-up changed result-passing to the processing function
+        if pass_ccosts_to_processing_func:
+            for sim in self.simulations:
+                sim.set_pass_computational_costs(True)
         
         # Add class attributes for `_wait_for_simulations`
         self._wdir_mode = wdir_mode
