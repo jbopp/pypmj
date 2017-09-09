@@ -60,7 +60,7 @@ warnings.filterwarnings(action='ignore',
 # Set text template for strings replacing class attributes deleted for
 # memory efficiency (occurs if `minimize_memory_usage=True`
 # in `SimulationSet`-instances)
-_DA_REASON_TMPL = 'Attribute {} was deleted because `minimize_memory_usage`' +
+_DA_REASON_TMPL = 'Attribute {} was deleted because `minimize_memory_usage`' + \
                   ' was set to True.'
 
 
