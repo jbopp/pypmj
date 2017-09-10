@@ -116,7 +116,7 @@ PostProcess {
     OutputFileName = "project_results/efield_3D.jcm"
     OutputQuantity = ElectricFieldStrength
     Cartesian {
-      Spacing = 2.e-8
+      Spacing = 4.e-8
     }
   }
 }

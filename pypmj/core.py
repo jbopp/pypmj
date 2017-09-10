@@ -1693,10 +1693,74 @@ class SimulationSet(object):
         else:
             self.store.append(dbase_tab, data)
 
-    def make_simulation_schedule(self):
+    def fix_h5_store(self, try_restructure=True):
+        """Tries to remove duplicated rows in the HDF5 store based on the
+        stored keys. If `try_restructure` is True, the HDF5 store is also
+        restructured using `ptrepack` to possibly free disc space and optimize
+        the compression.
+
+        """
+        data = self.get_store_data()
+        dupl_index = data[data.duplicated(self.stored_keys)].index
+        if len(dupl_index) == 0:
+            self.logger.info('No duplicated rows found. Leaving HDF5 store ' +
+                             'untouched.')
+            return
+
+        # Remove duplicated rows
+        self.logger.debug('Trying to remove duplicated rows from HDF5 store.')
+        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        self.store.remove(key=dbase_tab, where=dupl_index)
+
+        # Check success
+        data = self.get_store_data()
+        dupl_index = data[data.duplicated(self.stored_keys)].index
+        if not len(dupl_index) == 0:
+            raise AssertionError('Although duplicated-rows removal on HDF5 ' +
+                                 'was successful, there still are duplicated' +
+                                 ' entries. Try fixing manually.')
+            return
+        self.logger.info('Success on duplicated-rows removal from HDF5.')
+        if not try_restructure:
+            return
+
+        # Try to restructure the data
+        from subprocess import call
+        self.close_store()
+        h5f = self._database_file
+        _bas, _ext = os.path.splitext(h5f)
+        h5texmp = _bas + '_ptrepack_tmp' + _ext
+        command = ['ptrepack', '-o', '--chunkshape=auto', '--propindexes',
+                   '--complevel=9', '--complib=blosc', h5f, h5texmp]
+        retcode = call(command)
+        if retcode != 0:
+            self.logger.warn('Unknown error on HDF5 store restructuring.' +
+                             'Return code: {}'.format(retcode))
+            return
+
+        # Replace old HDF5 store with fixed one
+        try:
+            os.remove(h5f)
+            os.rename(h5texmp, h5f)
+        except Exception as e:
+            self.logger.warn('Error on moving fixed HDF5 file {} to old one {}.'.\
+                             format(h5texmp, h5f) + '\nException was:\n{}'.\
+                             format(e))
+            return
+
+        self.open_store()
+        self.logger.info('Successfully restructured HDF5 store.')
+            
+    def make_simulation_schedule(self, fix_h5_duplicated_rows=False):
         """Makes a schedule by getting a list of simulations that must be
         performed, reorders them to avoid unnecessary calls of JCMgeo, and
-        checks the HDF5 store for simulation data which is already known."""
+        checks the HDF5 store for simulation data which is already known.
+        If duplicated rows are found, a `RuntimeError` is raised. In this
+        case, you can rerun `make_simulation_schedule` with 
+        `fix_h5_duplicated_rows=True` to try to automatically fix it.
+        Alternatively, you could call the `fix_h5_store`-method yourself.
+        
+        """
         self._get_simulation_list()
         self._sort_simulations()
         
@@ -1724,7 +1788,19 @@ class SimulationSet(object):
                              'HDF5 store. Number of stored simulations: {}'.
                              format(len(self.finished_sim_numbers)))
         elif precheck == 'Match':
-            self.finished_sim_numbers = list(self.get_store_data().index)
+            stored_sim_numbers = list(self.get_store_data().index)
+            if len(stored_sim_numbers) > self.num_sims:
+                if fix_h5_duplicated_rows:
+                    self.fix_h5_store()
+                    self.logger.info('Rerunning `make_simulation_schedule`.')
+                    self.make_simulation_schedule()
+                    return
+                else:
+                    raise RuntimeError('Found duplicated rows in the HDF5' +
+                                       ' store! Try again with ' +
+                                       '`fix_h5_duplicated_rows=True`.')
+                    return
+            self.finished_sim_numbers = stored_sim_numbers
             self.logger.info('Found a match in the pre-check of the HDF5 ' +
                              'store. Number of stored simulations: {}'.format(
                                  len(self.finished_sim_numbers)))
