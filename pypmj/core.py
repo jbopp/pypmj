@@ -1654,6 +1654,11 @@ class SimulationSet(object):
         self.logger.debug('Opening the HDF5 store: {}'.format(
             self._database_file))
         self.store.open()
+        
+    def _reboot_store(self):
+        """Closes and opens the store without logger messages."""
+        self.store.close()
+        self.store.open()
 
     def append_store(self, data):
         """Appends a new row or multiple rows to the HDF5 store."""
@@ -1693,37 +1698,62 @@ class SimulationSet(object):
         else:
             self.store.append(dbase_tab, data)
 
-    def fix_h5_store(self, try_restructure=True):
-        """Tries to remove duplicated rows in the HDF5 store based on the
-        stored keys. If `try_restructure` is True, the HDF5 store is also
-        restructured using `ptrepack` to possibly free disc space and optimize
-        the compression.
+    def _get_duplicate_H5_rows(self, check_index_only=False):
+        """Find duplicate rows in the HDF5 store based on stored keys if
+        `check_index_only=False`, else only the index (i.e. sim_number) is
+        considered.
 
         """
         data = self.get_store_data()
-        dupl_index = data[data.duplicated(self.stored_keys)].index
+        if check_index_only:
+            sim_nums  = pd.Series(data.index.tolist())
+            dupl_index = pd.Int64Index(sim_nums[sim_nums.duplicated()].values,
+                                       name=u'number')
+        else:
+            dupl_index = data[data.duplicated(self.stored_keys)].index
+        return dupl_index
+
+    def fix_h5_store(self, try_restructure=True, brute_force=False):
+        """Tries to remove duplicate rows in the HDF5 store based on the
+        stored keys. If `try_restructure` is True, the HDF5 store is also
+        restructured using `ptrepack` to possibly free disc space and optimize
+        the compression. If problems persist, set `brute_force=True` which will
+        remove all rows with duplicate indices (warning: data gets lost!).
+
+        """
+        dupl_index = self._get_duplicate_H5_rows(brute_force)
+
         if len(dupl_index) == 0:
             self.logger.info('No duplicated rows found. Leaving HDF5 store ' +
                              'untouched.')
             return
 
-        # Remove duplicated rows
+        # Remove duplicated rows by rewriting the complete store (due to bugs
+        # in the single row removal)
         self.logger.debug('Trying to remove duplicated rows from HDF5 store.')
         dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
-        self.store.remove(key=dbase_tab, where=dupl_index)
+        data = self.get_store_data()
+        if brute_force:
+            data = data.drop(dupl_index)
+        else:
+            data = data[~data.index.duplicated(keep='first')]
+        del self.store[dbase_tab]
+        self._reboot_store()
+        self.append_store(data)
+        self._reboot_store()
 
         # Check success
-        data = self.get_store_data()
-        dupl_index = data[data.duplicated(self.stored_keys)].index
+        dupl_index = self._get_duplicate_H5_rows(brute_force)
         if not len(dupl_index) == 0:
             raise AssertionError('Although duplicated-rows removal on HDF5 ' +
                                  'was successful, there still are duplicated' +
-                                 ' entries. Try fixing manually.')
+                                 ' entries:\n\n{}\n\nTry fixing manually.'.\
+                                 format(dupl_index))
             return
         self.logger.info('Success on duplicated-rows removal from HDF5.')
         if not try_restructure:
             return
-
+        
         # Try to restructure the data
         from subprocess import call
         self.close_store()
@@ -2458,7 +2488,7 @@ class SimulationSet(object):
             i = sim.number
 
             # Start the simulation if it is not already finished
-            if sim.number not in self.finished_sim_numbers:
+            if not sim.number in self.finished_sim_numbers:
                 # Compute the geometry if necessary
                 if sim.rerun_JCMgeo or force_geo_run:
                     self.compute_geometry(sim, **jcm_geo_kwargs)
@@ -2694,8 +2724,8 @@ class SimulationSet(object):
         return hasattr(self, 'simulations')
 
     def num_sims_to_do(self):
-        """Returns the number of simulations still needs to be solved, i.e.
-        which are not already in the store."""
+        """Returns the number of simulations that still needs to be solved,
+        i.e. which are not already in the store."""
         if not hasattr(self, 'num_sims'):
             # TODO: check if '_is_scheduled' can be used instead
             self.logger.info('Cannot count simulations before ' +
