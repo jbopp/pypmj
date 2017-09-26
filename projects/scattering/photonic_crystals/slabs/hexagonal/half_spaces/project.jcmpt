@@ -122,3 +122,36 @@ PostProcess {
 }
 <? # ----------------------- End of python if-statement ------------------------
 ?>
+
+
+<? # --------------------------------- Python ----------------------------------
+if 'hex_np_xy' in keys:
+    from hex_plane_tools import hex_planes_point_list_for_keys
+    keys['hex_points'], _ = hex_planes_point_list_for_keys(keys, plane_indices=[0,3,6])
+    ?> #------------------------------------------------------------------------
+PostProcess {
+  ExportFields {
+    FieldBagPath = "project_results/fieldbag.jcm"
+    OutputFileName = "project_results/efield_hex_planes.jcm"
+    OutputQuantity = ElectricFieldStrength
+    PointList {
+      Points = %(hex_points)e
+    }
+  }
+}
+<? # ----------------------- End of python if-statement ------------------------
+if 'hex_also_magnetic' in keys and 'hex_points' in keys:
+    if keys['hex_also_magnetic']:
+        ?> #--------------------------------------------------------------------
+PostProcess {
+  ExportFields {
+    FieldBagPath = "project_results/fieldbag.jcm"
+    OutputFileName = "project_results/hfield_hex_planes.jcm"
+    OutputQuantity = MagneticFieldStrength
+    PointList {
+      Points = %(hex_points)e
+    }
+  }
+}
+<? # ----------------------- End of python if-statement ------------------------
+?>

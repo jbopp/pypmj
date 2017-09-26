@@ -12,7 +12,7 @@ Credit: Partly based on MATLAB-versions written by Sven Burger and Martin
 import numpy as np
 from numpy.linalg import norm
 from scipy import constants
-# from warnings import warn
+from warnings import warn
 
 Z0 = np.sqrt( constants.mu_0 / constants.epsilon_0 )
 
@@ -187,12 +187,17 @@ def processing_default(pps, keys):
     n_phc = keys['mat_phc'].getNKdata(wvl)
     n_sup = keys['mat_superspace'].getNKdata(wvl)
     
+    k_sup = np.imag(n_sup)
+    n_sup = np.real(n_sup)
+    if k_sup != 0.:
+        warn('This project may not work using absorptive superspaces!')
+    
     # Calculate simple derived quantities
     # TODO: check if this is really true if we use a hexagon here
 #     area_cd = p**2 # area of the computational domain
     # Fix for hexagon area (lengthy number = 3*sqrt(3)/8)
     area_cd = p**2*0.64951905283832898507 # area of the computational domain
-    p_in = np.cos(theta_in)*(1./np.sqrt(2.))**2 *n_sup*area_cd / Z0
+    p_in = 0.5*np.cos(theta_in) * n_sup * area_cd / Z0
     
     # Save the refactive index data, real and imag parts marked
     # with '_n' and '_k'

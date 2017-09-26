@@ -14,6 +14,26 @@ import sys
 from threading import Timer
 from . import utils
 
+# =============================================================================
+def isnotebook():
+    """Checks if the coe is currently executed in the ipython/jupyter-notebook.
+    Returns false if it is likely the standard python interpreter.
+    
+    From (line folded!):
+        https://stackoverflow.com/questions/15411967/how-can-i-check-if-code
+        -is-executed-in-the-ipython-notebook
+    
+    """
+    try:
+        shell = get_ipython().__class__.__name__
+        if shell == 'ZMQInteractiveShell':
+            return True   # Jupyter notebook or qtconsole
+        elif shell == 'TerminalInteractiveShell':
+            return False  # Terminal running IPython
+        else:
+            return False  # Other type (?)
+    except NameError:
+        return False      # Probably standard Python interpreter
 
 # =============================================================================
 class PerpetualTimer(object):
@@ -109,7 +129,9 @@ class JupyterProgressDisplay(object):
     
     """
     def __init__(self, num_sims=None, show=True):
-        self._jupyter_mode = False
+        
+        # Check whether we are in
+        self._jupyter_mode = isnotebook()
         self.show = show
         if not self.show:
             return
@@ -118,14 +140,19 @@ class JupyterProgressDisplay(object):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
         self.num_sims = num_sims
         self._timer_ready = False
-        try:
-            self._set_up()
-            self._jupyter_mode = True
-        except:
-            self.logger.info('Disabling logging for this run to display '+
-                             'the terminal progress bar...')
-            logging.disable(logging.ERROR)
-            self._terminal_display = TerminalProgressDisplay(num_sims)
+        if self._jupyter_mode:
+            try:
+                self._set_up()
+                return
+            except:
+                self._jupyter_mode = False
+        
+        # This is only for the TerminalProgressDisplay, i.e. if not in
+        # jupyter notebook
+        self.logger.info('Disabling logging for this run to display '+
+                         'the terminal progress bar...')
+        logging.disable(logging.ERROR)
+        self._terminal_display = TerminalProgressDisplay(num_sims)
     
     def _set_up(self):
         """Makes the necessary imports and initializes the jupyter notebook

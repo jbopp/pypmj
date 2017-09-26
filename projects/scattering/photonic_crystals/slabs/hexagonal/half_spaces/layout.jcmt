@@ -42,8 +42,8 @@ default_keys = {'min_mesh_angle' : 20.,
                 'pore_angle' : 0.}
 
 for dkey, dval in default_keys.iteritems():
-	if not dkey in keys:
-		keys[dkey] = dval
+    if not dkey in keys:
+        keys[dkey] = dval
 
 # Maximum side length keys
 max_sl_keys = ['max_sl_circle', 'max_sl_polygon', 
@@ -99,8 +99,8 @@ if 'slc_wvl_ratio' in keys:
 sl_z_default = min([keys['max_sl_polygon'], keys['max_sl_circle']])
 sl_z_keys = ['max_sl_z_sub', 'max_sl_z_slab', 'max_sl_z_sup']
 for zkey in sl_z_keys:
-	if not zkey in keys:
-		keys[zkey] = sl_z_default
+    if not zkey in keys:
+        keys[zkey] = sl_z_default
 
 # Calculate the lower and upper radii of the cone from center diameter and
 # pore angle
@@ -148,7 +148,7 @@ Layout {
   Extrusion {
   
     LayerInterface {
-	  Name = "BoundaryInterfaceBottom"
+      Name = "BoundaryInterfaceBottom"
       BoundaryClass = Transparent
     }
     
@@ -157,7 +157,7 @@ Layout {
       Thickness = %(h_sub)4f
       DomainId = 1
       MeshOptions {
-		MaximumSidelengthZ = %(max_sl_z_sub)4f
+        MaximumSidelengthZ = %(max_sl_z_sub)4f
         MaximumSidelengthZLower = %(max_sl_z_sub)4f
         MaximumSidelengthZUpper = %(max_sl_z_slab)4f
       }
@@ -173,7 +173,7 @@ Layout {
     }
     
     LayerInterface {
-	  Name = "InterfaceTop"
+      Name = "InterfaceTop"
       GeometryValues = [Cone/Radius = %(radius_f)4f]
     }
     
@@ -182,15 +182,15 @@ Layout {
       Thickness = %(h_sup)4f
       DomainIdMapping = [1 4]
       MeshOptions {
-		MaximumSidelengthZ = %(max_sl_z_sup)4f
+        MaximumSidelengthZ = %(max_sl_z_sup)4f
         MaximumSidelengthZLower = %(max_sl_z_slab)4f
         MaximumSidelengthZUpper = %(max_sl_z_sup)4f
       }
     }
     
     LayerInterface {
-	  Name = "BoundaryInterfaceTop"
-	  GeometryValues = [Cone/Radius = %(radius_f)4f]
+      Name = "BoundaryInterfaceTop"
+      GeometryValues = [Cone/Radius = %(radius_f)4f]
       BoundaryClass = Transparent
     }
   }
