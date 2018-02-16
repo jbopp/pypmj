@@ -1,9 +1,9 @@
-from scipy.linalg import expm3, norm
+from scipy.linalg import expm, norm
 import numpy as np
 
 
 def rot_mat(axis, theta):
-    return expm3(np.cross(np.eye(3), axis/norm(axis)*theta))
+    return expm(np.cross(np.eye(3), axis/norm(axis)*theta))
 
 def rotate_vector(v, axis, theta):
     M = rot_mat(axis, theta)
