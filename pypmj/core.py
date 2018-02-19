@@ -371,12 +371,17 @@ class Simulation(object):
         will be added to the results `dict` returned by `process_results`, and
         consequently stored in the HDF5 store by the parent `SimulationSet`
         instance.
+    resultbag : jcmwave.Resultbag or None, default None
+        
+        *Experimental!*
+        
+        Assign a resultbag (see jcmwave.resultbag for details).
 
     """
 
     def __init__(self, keys, project=None, number=0, stored_keys=None, 
                  storage_dir=None, rerun_JCMgeo=False, store_logs=True,
-                 **kwargs):
+                 resultbag=None, **kwargs):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
         self.keys = keys
         self.project = project
@@ -385,6 +390,7 @@ class Simulation(object):
         self.store_logs = store_logs
         self.pass_computational_costs = False
         self.status = 'Pending'
+        self._resultbag = resultbag
         
         # If no list of stored_keys is provided, use all keys for which values
         # are of types that could be stored to H5
@@ -1935,7 +1941,8 @@ class SimulationSet(object):
                                                stored_keys=self.stored_keys,
                                                storage_dir=self.storage_dir,
                                                project=self.project,
-                                               store_logs=self.store_logs))
+                                               store_logs=self.store_logs,
+                                               resultbag=self._resultbag))
 
         # We generate a pandas DataFrame that holds all the parameter and
         # geometry properties for each simulation, with the simulation number
