@@ -160,6 +160,16 @@ def processing_default(pps, keys):
     for dkey in default_keys:
         if not dkey in keys:
             keys[dkey] = default_keys[dkey]
+            
+    # Set hole diameter `d` based on `d_by_p_ratio` if provided
+    if 'd_by_p_ratio' in keys:
+        if 'd' is keys:
+            warn("key 'd_by_p_ratio' overwrites settings for 'd'")
+        keys['d'] = keys['d_by_p_ratio'] * keys['p']
+    else:
+        if not 'd' is keys:
+            raise ValueError("layout.jcm: one key of ('d', 'd_by_p_ratio') " +
+                             "must be provided.")
     
     # Create the appropriate JCM_Post_Process subclass instances,
     # which will also check the results for validity.

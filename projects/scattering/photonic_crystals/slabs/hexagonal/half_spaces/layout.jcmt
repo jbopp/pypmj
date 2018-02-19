@@ -39,21 +39,19 @@ default_keys = {'min_mesh_angle' : 20.,
                 'refine_all_circle' : 2,
                 'elements_max_z_ratio' : 2.,
                 'uol' : 1.e-9,
-                'pore_angle' : 0.,
-                'd' : None,
-                'd_by_p_ratio' : None}
+                'pore_angle' : 0.}
 
 for dkey, dval in default_keys.iteritems():
     if not dkey in keys:
         keys[dkey] = dval
 
 # Set hole diameter `d` based on `d_by_p_ratio` if provided
-if not keys['d_by_p_ratio'] is None:
-    if not keys['d'] is None:
-        warn("key 'd_by_p_ratio' overwrides settings for 'd'")
+if 'd_by_p_ratio' in keys:
+    if 'd' is keys:
+        warn("key 'd_by_p_ratio' overwrites settings for 'd'")
     keys['d'] = keys['d_by_p_ratio'] * keys['p']
 else:
-    if keys['d'] is None:
+    if not 'd' is keys:
         raise ValueError("layout.jcm: one key of ('d', 'd_by_p_ratio') " +
                          "must be provided.")
 
@@ -67,7 +65,7 @@ if 'slc_wvl_ratio' in keys:
     slc_wvl_r = keys['slc_wvl_ratio']
     for _k in max_sl_keys:
         if _k in keys:
-            warn("key 'slc_wvl_ratio' overwrides settings for '"+_k+"'")
+            warn("key 'slc_wvl_ratio' overwrites settings for '"+_k+"'")
     
     # Calculate the resulting maximum side length in air
     wvl = keys['vacuum_wavelength']

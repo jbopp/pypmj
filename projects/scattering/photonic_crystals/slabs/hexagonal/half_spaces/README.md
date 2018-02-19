@@ -55,7 +55,8 @@ Key | Default | Description
 :---|:-------:| -----------
 `uol` | `1.e-9` | Scaling parameter for dimensions used in `layout.jcmt` (default: nm)
 `p` |  | Pitch, i.e. lattice constant of the hexagonal lattice
-`d` |  | Center diameter of the holes
+`d` |  | Center diameter of the holes; if not set, `d_by_p_ratio` must be specified
+`d_by_p_ratio` |  | Hole center diameter to pitch ratio; overwrites `d`; if not set, `d` must be specified
 `h` |  | Height, i.e. extent in *z*-direction, of the slab
 `pore_angle` | `0.` | Side-wall angle of the holes in degrees
 `h_sub` |  | Height, i.e. extent in *z*-direction of the substrate material
@@ -66,6 +67,9 @@ Key | Default | Description
 `max_sl_z_sub` | *minimum of horizontal constraints* | Maximum side length in *z*-direction for the subspace
 `max_sl_z_slab` | *minimum of horizontal constraints* | Maximum side length in *z*-direction for the slab
 `max_sl_z_sup` | *minimum of horizontal constraints* | Maximum side length in *z*-direction for the superspace
+`slc_wvl_ratio` |  | Maximum side length to wavelength ratio; sets (or overwrites) all `max_sl_*` keys
+`elements_max_z_ratio` | 2. | Maximum ratio between the extent in z-direction and the in-plane
+extent of the elements; only used if `slc_wvl_ratio` is specified!
 `min_mesh_angle` | `20.` | Global minimum mesh angle
 
 
