@@ -78,7 +78,9 @@ class PP_FourierTransform(JCM_Post_Process):
         return self.title+'(i_src={})'.format(self.i_src)
     
     def _cos_factor(self, theta_rad):
-        thetas = np.arccos( np.abs(self.K[:,-1]) / norm(self.K[0]) )
+        k_norm = np.abs(self.K[:,-1]) / norm(self.K[0])
+        # Clipping is needed to avoid NaNs caused by limited float precision
+        thetas = np.arccos(np.clip(k_norm, 0., 1.))
         return np.cos(thetas)/np.cos(theta_rad)
     
     def get_reflection(self, theta_rad):
