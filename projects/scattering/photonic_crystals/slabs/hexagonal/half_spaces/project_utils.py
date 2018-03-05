@@ -165,11 +165,11 @@ def processing_default(pps, keys):
             
     # Set hole diameter `d` based on `d_by_p_ratio` if provided
     if 'd_by_p_ratio' in keys:
-        if 'd' is keys:
+        if 'd' in keys:
             warn("key 'd_by_p_ratio' overwrites settings for 'd'")
         keys['d'] = keys['d_by_p_ratio'] * keys['p']
     else:
-        if not 'd' is keys:
+        if not 'd' in keys:
             raise ValueError("layout.jcm: one key of ('d', 'd_by_p_ratio') " +
                              "must be provided.")
     
