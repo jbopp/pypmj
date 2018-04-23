@@ -2585,9 +2585,10 @@ class SimulationSet(object):
                     # Calculate and inform on the approx. remaining time based
                     # on the mean of the `t_per_sim_list`
                     t_remaining = n_sims_todo * np.mean(t_per_sim_list)
-                    if not t_remaining == 0.:
-                        self.logger.info('Approx. remaining time: {}'.format(
-                            utils.tForm(t_remaining)))
+                    if not self._progress_view.show:
+                        if not t_remaining == 0.:
+                            self.logger.info('Approx. remaining time: {}'.
+                                format(utils.tForm(t_remaining)))
                     self._progress_view.update_remaining_time(t_remaining)
 
                     # Reset the round counter and timer

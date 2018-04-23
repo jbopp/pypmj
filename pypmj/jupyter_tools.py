@@ -68,9 +68,12 @@ class PerpetualTimer(object):
 class TerminalProgressDisplay(object):
     """Class that displays status information for a `SimulationSet.run`-method
     call. It displays the remaining runtime (if it can be calculated) and the
-    progress of simulation solving in percent and using a progress bar.
-    
+    progress of simulation solving in percent and using a progress bar. If
+    thtqdm` module is installed it will be used automatically. Otherwise it will
+    fall back to a plain python implementation.
+
     """
+
     def __init__(self, num_sims, prefix='Progress:', suffix='Finished',
                  decimals=1, bar_length=50):
         self.num_sims = num_sims
@@ -81,19 +84,29 @@ class TerminalProgressDisplay(object):
         self.i = 0
         self.t_remaining = None
         self._finished = False
-        
-    def print_progress(self):
+        self._check_tqdm()
+        self._initialized = False
+
+    def _check_tqdm(self):
+        try:
+            from tqdm import tqdm
+            self._use_tqdm = True
+            self._tqdm = tqdm(total=self.num_sims,
+                              desc='\tInitializing progress bar',
+                              ncols=self.bar_length+30)
+        except ImportError:
+            self._use_tqdm = False
+
+    def _print_progress_plain_python(self):
         """Prints the current progress to stdout.
-        
+
         Based on: https://gist.github.com/vladignatyev/06860ec2040cb497f0f3
-        
+
         """
-        if self._finished:
-            return
         formatStr = "{0:." + str(self.decimals) + "f}"
         percents = formatStr.format(100 * (self.i / float(self.num_sims)))
         filledLength = int(round(
-                               self.bar_length * self.i / float(self.num_sims)))
+            self.bar_length * self.i / float(self.num_sims)))
         bar = '█' * filledLength + '-' * (self.bar_length - filledLength)
         if self.t_remaining is None:
             tstr = ''
@@ -101,24 +114,49 @@ class TerminalProgressDisplay(object):
             if self.i == self.num_sims:
                 self.t_remaining = 0.
             tstr = ', approx. remaining time: {}'.format(
-                                        utils.tForm(np.round(self.t_remaining)))
+                utils.tForm(np.round(self.t_remaining)))
         sys.stdout.write('\r{} |{}| {}% {}{}'.
                          format(self.prefix, bar, percents, self.suffix, tstr))
         if self.i == self.num_sims:
             sys.stdout.write('\n')
             self._finished = True
         sys.stdout.flush()
-    
+
+    def _print_progress_tqdm(self, add_to_value):
+        self._tqdm.update(add_to_value)
+        self._tqdm.refresh()
+
+        if self.i == self.num_sims:
+            self._finished = True
+            self._tqdm.close()
+            del self._tqdm
+
+    def print_progress(self, add_to_value=None):
+        """Prints the current progress."""
+        if self._finished:
+            return
+        if self._use_tqdm:
+            if not self._initialized:
+                self._tqdm.desc = '\tCurrent progress'
+            self._print_progress_tqdm(add_to_value)
+        else:
+            self._print_progress_plain_python()
+
     def set_pbar_state(self, add_to_value):
-        """Adds `add_to_value` to the current state and updates the display."""
+        """Adds `add_to_value` to the current state and updates the
+        display.
+        """
         self.i += add_to_value
-        self.print_progress()
-    
+        self.print_progress(add_to_value)
+
     def update_remaining_time(self, seconds):
         """Sets the current remaining time to `seconds` and updates the
         display."""
+        if self._use_tqdm:
+            return
         self.t_remaining = seconds
         self.print_progress()
+
 
 # =============================================================================
 class JupyterProgressDisplay(object):
@@ -149,10 +187,15 @@ class JupyterProgressDisplay(object):
         
         # This is only for the TerminalProgressDisplay, i.e. if not in
         # jupyter notebook
-        self.logger.info('Disabling logging for this run to display '+
-                         'the terminal progress bar...')
-        logging.disable(logging.ERROR)
         self._terminal_display = TerminalProgressDisplay(num_sims)
+        if self._terminal_display._use_tqdm:
+            return
+        self.logger.info('Disabling logging for this run to display '+
+                         'the terminal progress bar. Install `tqdm` to have '+
+                         'a terminal progress bar that allows simultaneous '+
+                         'logging.')
+        logging.disable(logging.ERROR)
+
     
     def _set_up(self):
         """Makes the necessary imports and initializes the jupyter notebook
@@ -261,6 +304,8 @@ class JupyterProgressDisplay(object):
         if self._jupyter_mode:
             self._display_remaining_time()
         else:
+            if self._terminal_display._use_tqdm:
+                return
             logging.disable(logging.NOTSET)
             self.logger.info('...Logging is enabled again. ')
 
