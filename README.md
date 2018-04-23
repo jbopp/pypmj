@@ -31,7 +31,7 @@ The following packages are required:
   - pandas >= 0.17.0
   - PyTables (i.e. tables) >= 3.2
 
-Many example notebook need matplotlib and largely profit from seaborn.
+Many example notebooks need matplotlib and largely profit from seaborn.
 
 ## Installation
 

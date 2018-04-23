@@ -1665,13 +1665,48 @@ class SimulationSet(object):
         """Closes and opens the store without logger messages."""
         self.store.close()
         self.store.open()
-
+    
+    def _get_dbase_tab_name(self):
+        """Returns the configured data tabular name used in the HDF5 store."""
+        if not hasattr(self, '_dbase_tab'):
+            self._dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        return self._dbase_tab
+    
+    def _check_store_table_structure_match(self, df):
+        """Checks whether the columns of a dataframe `df` match the table
+        struture in the data tabular of the current HDF5 store. Returns
+        a tuple of type `(bool, set)`, where the boolean indicates whether
+        there is a match, and the set holds the symmetric difference
+        (empty set ifere is a match).
+        
+        """
+        if self.is_store_empty():
+            return True, set([])
+        if not hasattr(self, '_h5_data_table_structure'):
+            dbase_tab = self._get_dbase_tab_name()
+            self._h5_data_table_structure = set(self.store[dbase_tab].columns)
+        diff = self._h5_data_table_structure.symmetric_difference(set(df.columns))
+        return len(diff) == 0, diff
+    
     def append_store(self, data):
         """Appends a new row or multiple rows to the HDF5 store."""
         if not isinstance(data, pd.DataFrame):
             raise ValueError('Can only append pandas DataFrames to the store.')
             return
-        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        
+        # Check column match between data that should be stored, and
+        # data in the HDF5 store
+        _match, _diff = self._check_store_table_structure_match(data)
+        if not _match:
+            raise ValueError('The columns of the dataframe that should be' +
+                             ' appended to the HDF5 store has different ' +
+                             'columns than the HDF5 table structure. Cannot ' +
+                             'append! The symmetric difference between them ' +
+                             'is: {}.'.format(_diff))
+            return
+        
+        # Read data tabular name from the configuration
+        dbase_tab = self._get_dbase_tab_name()
         
         # If logs are recorded, the columns contain the key 'Out'.
         # In this case, we need to make sure that the HDF5-column
