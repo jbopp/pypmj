@@ -45,8 +45,8 @@ SIM_DIR_FMT = 'simulation{0:06d}'
 STANDARD_DATE_FORMAT = '%y%m%d'
 _H5_STORABLE_TYPES = (string_types, Number)
 NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
-if not NEW_DAEMON_DETECTED:
-    logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
+# if not NEW_DAEMON_DETECTED:
+#     logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
 
 # Set warning filters
 warnings.filterwarnings(action='ignore',
