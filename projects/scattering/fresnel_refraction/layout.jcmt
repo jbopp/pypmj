@@ -1,0 +1,78 @@
+# Based on the LineGrating example from the JCMsuite EMTutorial..
+
+<?
+# ----------------------------------- Python -----------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+
+from warnings import warn
+if 'slc_wvl_ratio' in keys:
+    slc_wvl_r = keys['slc_wvl_ratio']
+    for _k in ['slc_d1', 'slc_d2']:
+        if _k in keys:
+            warn("key 'slc_wvl_ratio' overrides settings for '"+_k+"'")
+    wvl = keys['lambda'] * 1.e6
+    slc_air = slc_wvl_r*wvl
+    keys['slc_d1'] = slc_air/keys['n_d1']
+    keys['slc_d2'] = slc_air/keys['n_d2']
+else:
+    if not 'slc_d1' in keys or not 'slc_d2' in keys:
+        raise Exception("You need to provide `slc_wvl_ratio` " +
+                        "or `slc_d1` and `slc_d2`")
+
+# ------------------------------------------------------------------------------
+# ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+# ------------------------------------------------------------------------------
+?>
+
+Layout { 
+  Name = "Interface of two dielectrics"
+  UnitOfLength = 1e-06
+
+  MeshOptions {
+    MinimumMeshAngle = 15.0
+  } 
+
+  Parallelogram { 
+    Name = "ComputationalDomain/Dielectric2" 
+    DomainId = 1
+    Priority = -1 
+    InnerAngle = 90
+    Width = 3.0
+    Height = 4.0
+    Port = South
+    MeshOptions {
+      MaximumSidelength = %(slc_d2)4f
+    }
+    
+    # set periodic/transparent boundary conditions
+    BoundarySegment {
+      Number = 1 
+      BoundaryClass = Transparent
+    } 
+    BoundarySegment { 
+      Number = 2 
+      BoundaryClass = Periodic 
+    } 
+    BoundarySegment { 
+      Number = 3 
+      BoundaryClass = Transparent
+    } 
+    BoundarySegment { 
+      Number = 4 
+      BoundaryClass = Periodic 
+    } 
+  } 
+
+  Parallelogram {  
+    Name = "Dielectric1"
+    DomainId = 2 
+    InnerAngle = 90
+    Width = 3.0
+    Height = 2.0
+    Port = South
+    MeshOptions {
+      MaximumSidelength = %(slc_d1)4f
+    }
+  }
+}

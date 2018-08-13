@@ -61,21 +61,23 @@ def main():
         fout.close()
         return
     
-    fout.write(fmt('pypmj version', jpy.__version__))
-    fout.write(fmt('JCMsuite version', jpy.__jcm_version__))
-    fout.write(SEP)
-    fout.write(' The config file')
-    fout.write(SEP+'\n')
-    from pypmj.internals import _CONFIG_FILE
-    with open(_CONFIG_FILE, 'r') as f:
-        fout.write(f.read())
-    fout.write(SEP)
-    fout.write(' jcm_license_info')
-    fout.write(SEP)
-    fout.write('\n{}\n'.format(jpy.jcm_license_info(False,True)))
-    fout.write(SEP)
-    
-    fout.close()
+    try:
+        with open(jpy._config.config_file, 'r') as f:
+            conf_content = f.read()
+        fout.write(fmt('pypmj version', jpy.__version__))
+        fout.write(fmt('JCMsuite version', jpy.__jcm_version__))
+        fout.write(SEP)
+        fout.write(' The config file')
+        fout.write(SEP+'\n')
+        fout.write(conf_content)
+        fout.write(SEP)
+        fout.write(' jcm_license_info')
+        fout.write(SEP)
+        fout.write('\n{}\n'.format(jpy.jcm_license_info(False,True)))
+        fout.write(SEP)
+        fout.close()
+    except:
+        fout.close()
     
     # Clean up
     if LOG_FOLDER_EXISTS:

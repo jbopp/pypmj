@@ -1,0 +1,19 @@
+<?
+if not 'k_sphere' in keys:
+    keys['k_sphere'] = 0.
+keys['permittivity_sphere'] = complex(keys['n_sphere'], keys['k_sphere'])**2
+?>
+
+# Material properties for the surroundings (air)
+Material {
+  DomainId = 1
+  RelPermittivity = 1.0
+  RelPermeability = 1.0
+}
+
+# Material properties the glass sphere
+Material {
+  DomainId = 2
+  RelPermittivity = %(permittivity_sphere)e 
+  RelPermeability = 1.0
+}

@@ -12,7 +12,7 @@ Credit: Partly based on MATLAB-versions written by Sven Burger and Martin
 import numpy as np
 from numpy.linalg import norm
 from scipy import constants
-# from warnings import warn
+from warnings import warn
 
 Z0 = np.sqrt( constants.mu_0 / constants.epsilon_0 )
 
@@ -78,7 +78,9 @@ class PP_FourierTransform(JCM_Post_Process):
         return self.title+'(i_src={})'.format(self.i_src)
     
     def _cos_factor(self, theta_rad):
-        thetas = np.arccos( np.abs(self.K[:,-1]) / norm(self.K[0]) )
+        k_norm = np.abs(self.K[:,-1]) / norm(self.K[0])
+        # Clipping is needed to avoid NaNs caused by limited float precision
+        thetas = np.arccos(np.clip(k_norm, 0., 1.))
         return np.cos(thetas)/np.cos(theta_rad)
     
     def get_reflection(self, theta_rad):
@@ -142,7 +144,7 @@ def processing_default(pps, keys):
     results = {}
     
     # Check if the correct number of post processes was passed
-    if not len(pps) == 3:
+    if len(pps) < 3:
         raise ValueError('This processing function is designed for a list of 3'+
                          ' post processes, but these are {}'.format(len(pps)))
         return
@@ -160,6 +162,16 @@ def processing_default(pps, keys):
     for dkey in default_keys:
         if not dkey in keys:
             keys[dkey] = default_keys[dkey]
+            
+    # Set hole diameter `d` based on `d_by_p_ratio` if provided
+    if 'd_by_p_ratio' in keys:
+        if 'd' in keys:
+            warn("key 'd_by_p_ratio' overwrites settings for 'd'")
+        keys['d'] = keys['d_by_p_ratio'] * keys['p']
+    else:
+        if not 'd' in keys:
+            raise ValueError("layout.jcm: one key of ('d', 'd_by_p_ratio') " +
+                             "must be provided.")
     
     # Create the appropriate JCM_Post_Process subclass instances,
     # which will also check the results for validity.
@@ -187,12 +199,17 @@ def processing_default(pps, keys):
     n_phc = keys['mat_phc'].getNKdata(wvl)
     n_sup = keys['mat_superspace'].getNKdata(wvl)
     
+    k_sup = np.imag(n_sup)
+    n_sup = np.real(n_sup)
+    if k_sup != 0.:
+        warn('This project may not work using absorptive superspaces!')
+    
     # Calculate simple derived quantities
     # TODO: check if this is really true if we use a hexagon here
 #     area_cd = p**2 # area of the computational domain
     # Fix for hexagon area (lengthy number = 3*sqrt(3)/8)
     area_cd = p**2*0.64951905283832898507 # area of the computational domain
-    p_in = np.cos(theta_in)*(1./np.sqrt(2.))**2 *n_sup*area_cd / Z0
+    p_in = 0.5*np.cos(theta_in) * n_sup * area_cd / Z0
     
     # Save the refactive index data, real and imag parts marked
     # with '_n' and '_k'

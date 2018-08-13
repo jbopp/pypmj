@@ -1,0 +1,31 @@
+# S-polarized source
+SourceBag {
+  Source {
+    ElectricFieldStrength {
+      PlaneWave {
+        Lambda0 = %(lambda)e
+        ThetaPhi = [%(theta)e 0.0]
+        Incidence = FromBelow
+        SP = [1 0]
+        PowerFluxScaling=UnitNormal
+        3DTo2D  = yes
+      }
+    }
+  }
+}
+
+# P-polarized source
+SourceBag {
+  Source {
+    ElectricFieldStrength {
+      PlaneWave {
+        Lambda0 = %(lambda)e
+        ThetaPhi = [%(theta)e 0.0]
+        Incidence = FromBelow
+        SP = [0 1]
+        PowerFluxScaling=UnitNormal
+        3DTo2D  = yes
+      }
+    }
+  }
+}

@@ -10,12 +10,13 @@ Authors : Carlo Barth
 # =============================================================================
 import logging
 from pypmj import (jcm, daemon, resources, __version__, __jcm_version__,
-                       _config, ConfigurationError)
+                   _config, ConfigurationError)
 from pypmj.parallelization import ResourceDict
 from pypmj.jupyter_tools import JupyterProgressDisplay
 from copy import deepcopy
 from datetime import date
 from glob import glob
+import fnmatch
 import inspect
 from itertools import product
 from numbers import Number
@@ -23,11 +24,13 @@ import numpy as np
 from shutil import copytree, rmtree, move
 import os
 import pandas as pd
+import pickle
 from six import string_types
 import sys
 import tempfile
 import time
 import traceback
+import warnings
 from . import utils
 
 # Get special logger instances for output which is captured from JCMgeo and
@@ -42,8 +45,23 @@ SIM_DIR_FMT = 'simulation{0:06d}'
 STANDARD_DATE_FORMAT = '%y%m%d'
 _H5_STORABLE_TYPES = (string_types, Number)
 NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
-if not NEW_DAEMON_DETECTED:
-    logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
+# if not NEW_DAEMON_DETECTED:
+#     logger.warning('Detected old, perhaps buggy daemon interface in JCMsuite.')
+
+# Set warning filters
+warnings.filterwarnings(action='ignore',
+                        message= '.*The\\ Leaf.*is\\ exceeding\\ the\\' + \
+                                 ' maximum\\ recommended\\ rowsize.*\\Z(?ms)')
+warnings.filterwarnings(action='ignore',
+                        message= '.*your\\ performance\\ may\\ suffer\\ ' + \
+                        'as\\ PyTables\\ will\\ pickle\\ object\\ types\\' + \
+                        ' that\\ it\\ cannot.*\\Z(?ms)')
+
+# Set text template for strings replacing class attributes deleted for
+# memory efficiency (occurs if `minimize_memory_usage=True`
+# in `SimulationSet`-instances)
+_DA_REASON_TMPL = 'Attribute {} was deleted because `minimize_memory_usage`' + \
+                  ' was set to True.'
 
 
 def _default_sim_wdir(storage_dir, sim_number):
@@ -348,17 +366,31 @@ class Simulation(object):
     rerun_JCMgeo : bool, default False
         Controls if JCMgeo needs to be called before execution in a series of
         simulations.
+    store_logs : bool, default True
+        If True, the 'Error' and 'Out' data of the logs returned by JCMsuite
+        will be added to the results `dict` returned by `process_results`, and
+        consequently stored in the HDF5 store by the parent `SimulationSet`
+        instance.
+    resultbag : jcmwave.Resultbag or None, default None
+        
+        *Experimental!*
+        
+        Assign a resultbag (see jcmwave.resultbag for details).
 
     """
 
     def __init__(self, keys, project=None, number=0, stored_keys=None, 
-                 storage_dir=None, rerun_JCMgeo=False, **kwargs):
+                 storage_dir=None, rerun_JCMgeo=False, store_logs=True,
+                 resultbag=None, **kwargs):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
         self.keys = keys
         self.project = project
         self.number = number
         self.rerun_JCMgeo = rerun_JCMgeo
+        self.store_logs = store_logs
+        self.pass_computational_costs = False
         self.status = 'Pending'
+        self._resultbag = resultbag
         
         # If no list of stored_keys is provided, use all keys for which values
         # are of types that could be stored to H5
@@ -379,7 +411,7 @@ class Simulation(object):
         if 'project_file_name' in kwargs:
             self._deprecated_pfilename = kwargs['project_file_name']
             self.logger.warn('Passing only the project file name is ' +
-                             'deprecated. Please path the complete ' +
+                             'deprecated. Please pass the complete ' +
                              'JCMProject-instance.')
         else:
             if self.project is None:
@@ -398,6 +430,49 @@ class Simulation(object):
 
         """
         return _default_sim_wdir(self.storage_dir, self.number)
+    
+    def find_file(self, pattern):
+        """Finds a file in the working directory (see method `working_dir()`)
+        matching the given (`fnmatch.filer`-) `pattern`. The working directory
+        is scanned recursively.
+
+        Returns `None` if no match is found, the file path if a single file is
+        found, or raises a `RuntimeError` if multiple files are found.
+        
+        """
+        return self.find_files(pattern, only_one=True)
+    
+    def find_files(self, pattern, only_one = False):
+        """ Finds files in the working directory (see method `working_dir()`)
+        matching the given (`fnmatch.filer`-) `pattern`. The working directory
+        is scanned recursively.
+
+        If `only_one` is False (default), returns a list with matching file
+        paths. Else, returns `None` if no match is found, the file path if a
+        single file is found, or raises a `RuntimeError` if multiple files are
+        found.
+
+        """
+        matches = []
+        for root, dirnames, filenames in os.walk(self.working_dir()):
+            for filename in fnmatch.filter(filenames, pattern):
+                matches.append(os.path.join(root, filename))
+
+        if not only_one:
+            return matches
+
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) == 0:
+            return None
+        else:
+            raise RuntimeError('Multiple results found:\n\t{}'.format(matches))
+    
+    def set_pass_computational_costs(self, val):
+        """Sets the value of `pass_computational_costs`.""" 
+        if not isinstance(val, bool):
+            raise ValueError('val must be of type `bool`.')
+        self.pass_computational_costs = val
 
     def solve(self, pp_file=None, additional_keys=None, **jcm_kwargs):
         """Starts the simulation (i.e. runs jcm.solve) and returns the job ID.
@@ -426,6 +501,10 @@ class Simulation(object):
                                  ' argument for jcm.solve. It is already set' +
                                  ' by the Simulation instance.')
                 del jcm_kwargs[key]
+        
+        # Handle old versions without the resultbag feature
+        if not hasattr(jcm, 'Resultbag') and 'resultbag' in jcm_kwargs:
+            del jcm_kwargs['resultbag']
 
         # Make directories if necessary
         wdir = self.working_dir()
@@ -619,6 +698,13 @@ class Simulation(object):
         # Process the computational costs
         self._results_dict = utils.computational_costs_to_flat_dict(
             self.jcm_results[0]['computational_costs'])
+        
+        # Add the logs if desired
+        if self.store_logs:
+            try:
+                self._results_dict.update(self.logs)
+            except:
+                self.logger.warn('Unable to add logs to `_results_dict`.')
         self.status = 'Finished and processed'
 
         # Stop here if processing_func is None
@@ -639,19 +725,26 @@ class Simulation(object):
                              'input Please consult the docs of ' +
                              '`process_results`.')
             return
-
+        
+        # Set the post processes which should be passed to the processing
+        # function
+        if self.pass_computational_costs:
+            jcm_results_to_pass = self.jcm_results
+        else:
+            jcm_results_to_pass = self.jcm_results[1:]
+        
         # We try to call the processing_func now. If it fails or its results
         # are not of type dict, it is ignored and the user will be warned
         signature = inspect.getargspec(processing_func)
         if len(signature.args) == 1:
-            procargs = [self.jcm_results[1:]]
+            procargs = [jcm_results_to_pass]
         elif len(signature.args) == 2:
             if not signature.args[1] == 'keys':
                 self.logger.warn('Call of `processing_func` failed. If your ' +
                                  'function uses two input arguments, the ' +
                                  'second one must be named `keys`.')
                 return
-            procargs = [self.jcm_results[1:], self.keys]
+            procargs = [jcm_results_to_pass, self.keys]
         try:
             # anything might happen
             eres = processing_func(*procargs)
@@ -818,6 +911,7 @@ class Simulation(object):
             automatically (ignored if provided).
 
         """
+        
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
         
@@ -841,7 +935,11 @@ class Simulation(object):
         # This is the new daemon style version
         if NEW_DAEMON_DETECTED:
             self.solve(**jcm_solve_kwargs)
-            results = daemon.wait(return_style='new')
+            if hasattr(jcm, 'Resultbag'):
+                results = daemon.wait(return_style='new',
+                                      resultbag=self._resultbag)
+            else:
+                results = daemon.wait(return_style='new')
             result = results.values()[0]
             self._set_jcm_results_and_logs(result)
             ret1, ret2 = (result['results'], result['logs'])
@@ -850,7 +948,10 @@ class Simulation(object):
         else:
             with utils.Capturing() as output:
                 self.solve(**jcm_solve_kwargs)
-                results, logs = daemon.wait()
+                if hasattr(jcm, 'Resultbag'):
+                    results, logs = daemon.wait(resultbag=self._resultbag)
+                else:
+                    results, logs = daemon.wait()
             for line in output:
                 logger_JCMsolve.debug(line)
     
@@ -879,7 +980,11 @@ class Simulation(object):
                     self.solve(pp_file=f,
                                additional_keys=additional_keys_for_pps,
                                **jcm_solve_kwargs)
-                    pp_results = daemon.wait(return_style='new')
+                    if hasattr(jcm, 'Resultbag'):
+                        pp_results = daemon.wait(return_style='new',
+                                                 resultbag=self._resultbag)
+                    else:
+                        pp_results = daemon.wait(return_style='new')
                     pp_result = pp_results.values()[0]
                     # Add the post process results
                     self._add_post_process_results(pp_result)
@@ -889,7 +994,11 @@ class Simulation(object):
                         self.solve(pp_file=f,
                                    additional_keys=additional_keys_for_pps,
                                    **jcm_solve_kwargs)
-                        pp_results, pp_logs = daemon.wait()
+                        if hasattr(jcm, 'Resultbag'):
+                            pp_results, pp_logs = daemon.wait(
+                                        resultbag=self._resultbag)
+                        else:
+                            pp_results, pp_logs = daemon.wait()
                     for line in output:
                         logger_JCMsolve.debug(line)
                     # Add the post process results
@@ -903,6 +1012,15 @@ class Simulation(object):
             if wdir_mode == 'delete':
                 self.remove_working_directory()
         return ret1, ret2
+    
+    def _forget_attr(self, attr_name):
+        if not hasattr(self, attr_name):
+            return
+        setattr(self, attr_name, _DA_REASON_TMPL.format(attr_name))
+    
+    def forget_jcm_results_and_logs(self):
+        for attr_name in ['jcm_results', 'logs']:
+            self._forget_attr(attr_name)
 
 
 # =============================================================================
@@ -1077,6 +1195,22 @@ class SimulationSet(object):
     storage_base : str, default 'from_config'
         Directory to use as the base storage folder. If 'from_config', the
         folder set by the configuration option Storage->base is used.
+    use_resultbag : bool, str (file path) or jcmwave.Resultbag, default False
+        
+        *Experimental!*
+        
+        Whether to use a resultbag (see jcmwave.resultbag for details). If a
+        `str` is given, it is considered as the path to the resultbag-file.
+        If a `False`, the standard saving process using directories and data
+        files is used. If `True`, the standard resultbag file `'resultbag.db'`
+        in the storage directory is used. You can also pass a
+        `jcmwave.Resultbag`-instance.
+        Use the `get_resultbag_path()`-method to get the path of the current
+        resultbag. `resultbag()` returns the `jcmwave.Resultbag`-instance.
+        Use the methods `rb_get_log_for_sim` and `rb_get_result_for_sim`
+        to get logs and results from the resultbag for a particular
+        simulation.
+        Note: using a resultbag will ignore settings for `store_logs`.
     transitional_storage_base: str, default None
         Use this directory as the "real" storage_base during the execution,
         and move all files to the path configured using `storage_base` and
@@ -1099,11 +1233,19 @@ class SimulationSet(object):
         to the versions that were used when the HDF5 store was created. This
         has no effect if no HDF5 store is present, i.e. if you are starting
         with an empty working directory.
-    resource_manager: ResourceManager or NoneType, default None
+    resource_manager : ResourceManager or NoneType, default None
         You can pass your own `ResourceManager`-instance here, e.g. to
         configure the resources to use before the `SimulationSet` is
         initialized. If `None`, a `ResourceManager`-instance will be created
         automatically.
+    store_logs : bool, default False
+        Whether to store the JCMsuite logs to the HDF5 file (these may be
+        cropped in some cases).
+    minimize_memory_usage : bool, default False
+        Huge parameter scans can cause python to need massive memory because
+        the results and logs are kept for each simulation. Set this parameter
+        to true to minimize the memory usage. Caution: you will loose all the
+        `jcm_results` and `logs` in the `Simulation`-instances.
 
     """
 
@@ -1113,14 +1255,17 @@ class SimulationSet(object):
 
     def __init__(self, project, keys, duplicate_path_levels=0,
                  storage_folder='from_date', storage_base='from_config',
-                 transitional_storage_base=None,
+                 use_resultbag=False, transitional_storage_base=None,
                  combination_mode='product', check_version_match=True,
-                 resource_manager=None):
+                 resource_manager=None, store_logs=False, 
+                 minimize_memory_usage=False):
         self.logger = logging.getLogger('core.' + self.__class__.__name__)
 
         # Save initialization arguments into namespace
         self.combination_mode = combination_mode
-
+        self.store_logs = store_logs
+        self.minimize_memory_usage = minimize_memory_usage
+        
         # Analyze the provided keys
         self._check_keys(keys)
         self.keys = keys
@@ -1136,6 +1281,16 @@ class SimulationSet(object):
                                             storage_folder,
                                             transitional_storage_base)
         self.transitional_storage_base = transitional_storage_base
+        
+        # Check resultbag setting
+        if not hasattr(jcm, 'Resultbag'):
+            self.logger.warn('Cannot use a resultbag as it is not ' +
+                             'implemented in the current JCMsuite version. ' +
+                             'Try using a newer one. Falling back to ' +
+                             '`use_resultbag=False`.')
+            use_resultbag = False
+        self.use_resultbag = use_resultbag
+        self._initialize_resultbag()
 
         # Initialize the HDF5 store
         self._initialize_store(check_version_match)
@@ -1319,7 +1474,83 @@ class SimulationSet(object):
         self._copying_needed = True
         self._final_storage_dir = fsd
         self.storage_dir = tsd
-
+    
+    def _initialize_resultbag(self):
+        """Initializes the resultbag if `use_resultbag` is not False. If as
+        `jcmwave.Resultbag` is provided for `use_resultbag`, a reference is
+        stored in the attribute `_resultbag`. Else, a resultbag is
+        initialized using the specified path or the standard path and
+        filename.
+        
+        """
+        if self.use_resultbag is False:
+            self._resultbag = None
+            return
+        
+        # Set `store_logs` to False and warn user if it was True
+        if self.use_resultbag:
+            if self.store_logs:
+                self.logger.warn('Using a resultbag sets `store_logs` to' +
+                                 ' `False`.')
+                self.store_logs = False
+        
+        # Use the resultbag if a proper class instance was provided
+        if isinstance(self.use_resultbag, jcm.Resultbag):
+            self._resultbag = self.use_resultbag
+            return
+        
+        # Else, set the standard path or use the provided path to initialize
+        # the `jcm.Resultbag`. Note: keys in constants are not stored as they
+        # do not contain lists and may contain unpicklable objects which are
+        # incompatible with the current implementation of jcmwave.Resultbag.
+        elif self.use_resultbag is True or self.use_resultbag == 1:
+            rbfpath = os.path.join(self.storage_dir, 'resultbag.db')
+        else:
+            rbfpath = self.use_resultbag
+        self._resultbag = jcm.Resultbag(rbfpath, 
+                                 self.parameters.keys()+self.geometry.keys())
+    
+    def resultbag(self):
+        """Returns the resultbag (`jcmwave.Resultbag`-instance) if configured
+        using the class attribute `use_resultbag`. Else, raises RuntimeError.
+        
+        """
+        if not self._resultbag is None:
+            return self._resultbag
+        raise RuntimeError('No resultbag in use. Initialize the class with a'+
+                           ' valid setting for `use_resultbag` to use a '+
+                           'resultbag instead.')
+        
+    def _get_sim_flexible(self, sim):
+        """Tries to return a Simulation-instance based on type og `sim`.
+        
+        """
+        if isinstance(sim, int):
+            sim = self.simulations[sim]
+        if not hasattr(sim, 'keys'):
+            raise ValueError('`sim` must be int (i.e. a sim_number) or a ' +
+                             '`Simulation`-instance')
+        return sim
+    
+    def rb_get_log_for_sim(self, sim):
+        """Returns the logs for the simulation `sim` from the resultbag.
+        `sim` must be simulation number or a `Simulation`-instance of the
+        current `simulations`-list.
+        
+        """
+        return self.resultbag().get_log(self._get_sim_flexible(sim).keys)
+    
+    def rb_get_result_for_sim(self, sim):
+        """Returns the logs for the simulation `sim` from the resultbag.
+        `sim` must be simulation number or a `Simulation`-instance of the
+        current `simulations`-list.
+        
+        """
+        return self.resultbag().get_result(self._get_sim_flexible(sim).keys)
+    
+    def get_resultbag_path(self):
+        return self._resultbag._filepath
+    
     def _initialize_store(self, check_version_match=False):
         """Initializes the HDF5 store and sets the `store` attribute. If
         `check_version_match` is True, the current versions of JCMsuite and
@@ -1337,7 +1568,13 @@ class SimulationSet(object):
         if not os.path.splitext(dbase_name)[1] == '.h5':
             self.logger.warn('The HDF5 store file has an unknown extension. ' +
                              'It should be `.h5`.')
-        self.store = pd.HDFStore(self._database_file)
+        if hasattr(self, '_start_withclean_H5_store'):
+            if (self._start_withclean_H5_store and 
+                    os.path.isfile(self._database_file)):
+                self.logger.warn('Deleting existing H5 store.')
+                os.remove(self._database_file)
+        self.store = pd.HDFStore(self._database_file, complevel=9,
+                                 complib='blosc')
 
         # Version comparison
         if not self.is_store_empty() and check_version_match:
@@ -1423,19 +1660,178 @@ class SimulationSet(object):
         self.logger.debug('Opening the HDF5 store: {}'.format(
             self._database_file))
         self.store.open()
-
+        
+    def _reboot_store(self):
+        """Closes and opens the store without logger messages."""
+        self.store.close()
+        self.store.open()
+    
+    def _get_dbase_tab_name(self):
+        """Returns the configured data tabular name used in the HDF5 store."""
+        if not hasattr(self, '_dbase_tab'):
+            self._dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        return self._dbase_tab
+    
+    def _check_store_table_structure_match(self, df):
+        """Checks whether the columns of a dataframe `df` match the table
+        struture in the data tabular of the current HDF5 store. Returns
+        a tuple of type `(bool, set)`, where the boolean indicates whether
+        there is a match, and the set holds the symmetric difference
+        (empty set ifere is a match).
+        
+        """
+        if self.is_store_empty():
+            return True, set([])
+        if not hasattr(self, '_h5_data_table_structure'):
+            dbase_tab = self._get_dbase_tab_name()
+            self._h5_data_table_structure = set(self.store[dbase_tab].columns)
+        diff = self._h5_data_table_structure.symmetric_difference(set(df.columns))
+        return len(diff) == 0, diff
+    
     def append_store(self, data):
         """Appends a new row or multiple rows to the HDF5 store."""
         if not isinstance(data, pd.DataFrame):
             raise ValueError('Can only append pandas DataFrames to the store.')
             return
-        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
-        self.store.append(dbase_tab, data)
+        
+        # Check column match between data that should be stored, and
+        # data in the HDF5 store
+        _match, _diff = self._check_store_table_structure_match(data)
+        if not _match:
+            raise ValueError('The columns of the dataframe that should be' +
+                             ' appended to the HDF5 store has different ' +
+                             'columns than the HDF5 table structure. Cannot ' +
+                             'append! The symmetric difference between them ' +
+                             'is: {}.'.format(_diff))
+            return
+        
+        # Read data tabular name from the configuration
+        dbase_tab = self._get_dbase_tab_name()
+        
+        # If logs are recorded, the columns contain the key 'Out'.
+        # In this case, we need to make sure that the HDF5-column
+        # provides enough space to store long strings.
+        if 'Out' in data.columns:
+            # We take a sample of the log length
+            if not hasattr(self, '_log_itemsize_sample'):
+                self._log_itemsize_sample = len(data['Out'].iloc[0])
+                
+                # If the logs are longer than the default min size
+                # of 10000, we increase this number
+                if self._log_itemsize_sample > 10000:
+                    self._log_itemsize_sample *= 2
+                else:
+                    self._log_itemsize_sample = 10000
+                self.logger.debug('Using `min_itemsize` of {}'.format(
+                                    self._log_itemsize_sample) +\
+                                  ' to store the log output in HDF5.')
+            # If the new logs that need to be stored exceed the maximum
+            # size, we need to crop it
+            icol = data.columns.tolist().index('Out')
+            _log_samp = data.iat[0,icol]
+            if len(_log_samp) > self._log_itemsize_sample:
+                data.iat[0,icol] = _log_samp[:self._log_itemsize_sample-20] +\
+                                                    '\n[...] LOGS CROPPED!'
+            
+            # We can now store, ignoring some unwanted warnings
+            self.store.append(dbase_tab, data, 
+                              min_itemsize={'Out': self._log_itemsize_sample})
+        else:
+            self.store.append(dbase_tab, data)
 
-    def make_simulation_schedule(self):
+    def _get_duplicate_H5_rows(self, check_index_only=False):
+        """Find duplicate rows in the HDF5 store based on stored keys if
+        `check_index_only=False`, else only the index (i.e. sim_number) is
+        considered.
+
+        """
+        data = self.get_store_data()
+        if check_index_only:
+            sim_nums  = pd.Series(data.index.tolist())
+            dupl_index = pd.Int64Index(sim_nums[sim_nums.duplicated()].values,
+                                       name=u'number')
+        else:
+            dupl_index = data[data.duplicated(self.stored_keys)].index
+        return dupl_index
+
+    def fix_h5_store(self, try_restructure=True, brute_force=False):
+        """Tries to remove duplicate rows in the HDF5 store based on the
+        stored keys. If `try_restructure` is True, the HDF5 store is also
+        restructured using `ptrepack` to possibly free disc space and optimize
+        the compression. If problems persist, set `brute_force=True` which will
+        remove all rows with duplicate indices (warning: data gets lost!).
+
+        """
+        dupl_index = self._get_duplicate_H5_rows(brute_force)
+
+        if len(dupl_index) == 0:
+            self.logger.info('No duplicated rows found. Leaving HDF5 store ' +
+                             'untouched.')
+            return
+
+        # Remove duplicated rows by rewriting the complete store (due to bugs
+        # in the single row removal)
+        self.logger.debug('Trying to remove duplicated rows from HDF5 store.')
+        dbase_tab = _config.get('DEFAULTS', 'database_tab_name')
+        data = self.get_store_data()
+        if brute_force:
+            data = data.drop(dupl_index)
+        else:
+            data = data[~data.index.duplicated(keep='first')]
+        del self.store[dbase_tab]
+        self._reboot_store()
+        self.append_store(data)
+        self._reboot_store()
+
+        # Check success
+        dupl_index = self._get_duplicate_H5_rows(brute_force)
+        if not len(dupl_index) == 0:
+            raise AssertionError('Although duplicated-rows removal on HDF5 ' +
+                                 'was successful, there still are duplicated' +
+                                 ' entries:\n\n{}\n\nTry fixing manually.'.\
+                                 format(dupl_index))
+            return
+        self.logger.info('Success on duplicated-rows removal from HDF5.')
+        if not try_restructure:
+            return
+        
+        # Try to restructure the data
+        from subprocess import call
+        self.close_store()
+        h5f = self._database_file
+        _bas, _ext = os.path.splitext(h5f)
+        h5texmp = _bas + '_ptrepack_tmp' + _ext
+        command = ['ptrepack', '-o', '--chunkshape=auto', '--propindexes',
+                   '--complevel=9', '--complib=blosc', h5f, h5texmp]
+        retcode = call(command)
+        if retcode != 0:
+            self.logger.warn('Unknown error on HDF5 store restructuring.' +
+                             'Return code: {}'.format(retcode))
+            return
+
+        # Replace old HDF5 store with fixed one
+        try:
+            os.remove(h5f)
+            os.rename(h5texmp, h5f)
+        except Exception as e:
+            self.logger.warn('Error on moving fixed HDF5 file {} to old one {}.'.\
+                             format(h5texmp, h5f) + '\nException was:\n{}'.\
+                             format(e))
+            return
+
+        self.open_store()
+        self.logger.info('Successfully restructured HDF5 store.')
+            
+    def make_simulation_schedule(self, fix_h5_duplicated_rows=False):
         """Makes a schedule by getting a list of simulations that must be
         performed, reorders them to avoid unnecessary calls of JCMgeo, and
-        checks the HDF5 store for simulation data which is already known."""
+        checks the HDF5 store for simulation data which is already known.
+        If duplicated rows are found, a `RuntimeError` is raised. In this
+        case, you can rerun `make_simulation_schedule` with 
+        `fix_h5_duplicated_rows=True` to try to automatically fix it.
+        Alternatively, you could call the `fix_h5_store`-method yourself.
+        
+        """
         self._get_simulation_list()
         self._sort_simulations()
         
@@ -1463,7 +1859,19 @@ class SimulationSet(object):
                              'HDF5 store. Number of stored simulations: {}'.
                              format(len(self.finished_sim_numbers)))
         elif precheck == 'Match':
-            self.finished_sim_numbers = list(self.get_store_data().index)
+            stored_sim_numbers = list(self.get_store_data().index)
+            if len(stored_sim_numbers) > self.num_sims:
+                if fix_h5_duplicated_rows:
+                    self.fix_h5_store()
+                    self.logger.info('Rerunning `make_simulation_schedule`.')
+                    self.make_simulation_schedule()
+                    return
+                else:
+                    raise RuntimeError('Found duplicated rows in the HDF5' +
+                                       ' store! Try again with ' +
+                                       '`fix_h5_duplicated_rows=True`.')
+                    return
+            self.finished_sim_numbers = stored_sim_numbers
             self.logger.info('Found a match in the pre-check of the HDF5 ' +
                              'store. Number of stored simulations: {}'.format(
                                  len(self.finished_sim_numbers)))
@@ -1548,6 +1956,12 @@ class SimulationSet(object):
                              'parameter(s): {}'.format(self._loop_props))
             self.logger.info('Total number of simulations: {}'.format(
                 self.num_sims))
+        
+        # Warn if log-storing is enabled for many simulations
+        if self.store_logs and self.num_sims > 5000:
+            self.logger.warn('Setting `store_logs` to `True` for a large ' +
+                             'number of simulations causes massive memory ' +
+                             'usage and a huge database!')
 
         # Finally, a list with an individual Simulation-instance for each
         # simulation is saved, over which a simple loop can be performed
@@ -1561,7 +1975,9 @@ class SimulationSet(object):
             self.simulations.append(Simulation(number=i, keys=keys,
                                                stored_keys=self.stored_keys,
                                                storage_dir=self.storage_dir,
-                                               project=self.project))
+                                               project=self.project,
+                                               store_logs=self.store_logs,
+                                               resultbag=self._resultbag))
 
         # We generate a pandas DataFrame that holds all the parameter and
         # geometry properties for each simulation, with the simulation number
@@ -1985,6 +2401,7 @@ class SimulationSet(object):
             This calls jcmwave.solve with mode `post_process` internally. The
             results are appended to the `jcm_results`-list of the `Simulation`
             instance.
+            Note: this feature is yet incompatible with `use_resultbag`!
         additional_keys_for_pps : dict or NoneType, default None
             dict which will be merged to the `keys`-dict of the `Simulation`
             instance before passing them to the jcmwave.solve-method in the
@@ -2005,6 +2422,14 @@ class SimulationSet(object):
             jcm_geo_kwargs = {}
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
+        if not 'resultbag' in jcm_solve_kwargs:
+            jcm_solve_kwargs['resultbag'] = self._resultbag
+            
+        if not self._resultbag is None:
+            if not run_post_process_files is None:
+                raise ValueError('`run_post_process_files` is yet ' +
+                                 'incompatible with `use_resultbag`')
+                return
 
         if isinstance(simulation, int):
             simulation = self.simulations[simulation]
@@ -2079,6 +2504,8 @@ class SimulationSet(object):
             jcm_geo_kwargs = {}
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
+        if not 'resultbag' in jcm_solve_kwargs:
+            jcm_solve_kwargs['resultbag'] = self._resultbag
 
         # We only want to compute the geometry if necessary, which is
         # controlled using the `rerun_JCMgeo`-attribute of the Simulation-
@@ -2103,7 +2530,7 @@ class SimulationSet(object):
             i = sim.number
 
             # Start the simulation if it is not already finished
-            if sim.number not in self.finished_sim_numbers:
+            if not sim.number in self.finished_sim_numbers:
                 # Compute the geometry if necessary
                 if sim.rerun_JCMgeo or force_geo_run:
                     self.compute_geometry(sim, **jcm_geo_kwargs)
@@ -2158,9 +2585,10 @@ class SimulationSet(object):
                     # Calculate and inform on the approx. remaining time based
                     # on the mean of the `t_per_sim_list`
                     t_remaining = n_sims_todo * np.mean(t_per_sim_list)
-                    if not t_remaining == 0.:
-                        self.logger.info('Approx. remaining time: {}'.format(
-                            utils.tForm(t_remaining)))
+                    if not self._progress_view.show:
+                        if not t_remaining == 0.:
+                            self.logger.info('Approx. remaining time: {}'.
+                                format(utils.tForm(t_remaining)))
                     self._progress_view.update_remaining_time(t_remaining)
 
                     # Reset the round counter and timer
@@ -2204,8 +2632,13 @@ class SimulationSet(object):
         self.logger.debug('Waiting for job_ids: {}'.format(ids_to_wait_for))
         while nFinished < nTotal:
             # wait until any of the simulations is finished
-            results = daemon.wait(ids_to_wait_for, break_condition='any',
-                                  return_style='new')
+            if hasattr(jcm, 'Resultbag'):
+                results = daemon.wait(ids_to_wait_for, break_condition='any',
+                                      return_style='new',
+                                      resultbag=self._resultbag)
+            else:
+                results = daemon.wait(ids_to_wait_for, break_condition='any',
+                                      return_style='new')
 
             # Get lists for the IDs of the finished jobs and the corresponding
             # simulation numbers
@@ -2228,8 +2661,11 @@ class SimulationSet(object):
                     # and append them to the HDF5 store
                     try:
                         self.append_store(sim._get_DataFrame())
+                        if self.minimize_memory_usage:
+                            # Delete jcm_results and logs attributes on sim
+                            sim.forget_jcm_results_and_logs()
                         self._progress_view.set_pbar_state(add_to_value=1)
-                    except ValueError as e:
+                    except ValueError:
                         self.logger.exception('A critical problem occured ' +
                                 'when trying to append the data to the HDF5 ' +
                                 'store. The data that should have been '+
@@ -2270,9 +2706,15 @@ class SimulationSet(object):
             # deepcopy is needed to protect ids_to_wait_for from being modified
             # by the old daemon.wait implementation
             with utils.Capturing() as output:
-                indices, thisResults, logs = daemon.wait(
+                if not hasattr(jcm, 'Resultbag'):
+                    indices, thisResults, logs = daemon.wait(
                                                     deepcopy(ids_to_wait_for),
                                                     break_condition='any')
+                else:
+                    indices, thisResults, logs = daemon.wait(
+                                                    deepcopy(ids_to_wait_for),
+                                                    break_condition='any',
+                                                    resultbag=self._resultbag)
             for line in output:
                 logger_JCMsolve.debug(line)
 
@@ -2297,6 +2739,9 @@ class SimulationSet(object):
                     sim.process_results(self.processing_func)
                     # and append them to the HDF5 store
                     self.append_store(sim._get_DataFrame())
+                    if self.minimize_memory_usage:
+                        # Delete jcm_results and logs attributes on sim
+                        sim.forget_jcm_results_and_logs()
                     self._progress_view.set_pbar_state(add_to_value=1)
 
             # Remove/zip all working directories of the finished simulations if
@@ -2322,8 +2767,8 @@ class SimulationSet(object):
         return hasattr(self, 'simulations')
 
     def num_sims_to_do(self):
-        """Returns the number of simulations still needs to be solved, i.e.
-        which are not already in the store."""
+        """Returns the number of simulations that still needs to be solved,
+        i.e. which are not already in the store."""
         if not hasattr(self, 'num_sims'):
             # TODO: check if '_is_scheduled' can be used instead
             self.logger.info('Cannot count simulations before ' +
@@ -2347,7 +2792,8 @@ class SimulationSet(object):
     def run(self, processing_func=None, N='all', auto_rerun_failed=1,
             run_post_process_files=None, additional_keys=None,
             wdir_mode='keep', zip_file_path=None, show_progress_bar=False,
-            jcm_geo_kwargs=None, jcm_solve_kwargs=None):
+            jcm_geo_kwargs=None, jcm_solve_kwargs=None, 
+            pass_ccosts_to_processing_func=False):
         """Convenient function to add the resources, run all necessary
         simulations and save the results to the HDF5 store.
 
@@ -2396,6 +2842,9 @@ class SimulationSet(object):
         jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
             Keyword arguments which are directly passed to jcm.geo and
             jcm.solve, respectively.
+        pass_ccosts_to_processing_func : bool, default False
+            Whether to pass the computational costs as the 0th list element
+            to the processing_func.
 
         """
         if self.all_done():
@@ -2424,6 +2873,11 @@ class SimulationSet(object):
             jcm_geo_kwargs = {}
         if jcm_solve_kwargs is None:
             jcm_solve_kwargs = {}
+            
+        # Set-up changed result-passing to the processing function
+        if pass_ccosts_to_processing_func:
+            for sim in self.simulations:
+                sim.set_pass_computational_costs(True)
         
         # Add class attributes for `_wait_for_simulations`
         self._wdir_mode = wdir_mode
@@ -2496,41 +2950,6 @@ class SimulationSet(object):
         
         self.logger.info('Total time for all simulations: {}'.format(
             utils.tForm(time.time() - t0)))
-    
-#     def _set_up_progress_bar(self):
-#         """Initializes a jupyter notebook progress bar for the current run."""
-#         self._pbar_ready = False
-#         try:
-#             from ipywidgets import FloatProgress
-#             from IPython.display import display
-#             self._progress_bar = FloatProgress(min=0, 
-#                                                max=self.num_sims_to_do(),
-#                                                description='Status:')
-#             display(self._progress_bar)
-#             self._pbar_ready = True
-#         except:
-#             self.logger.warn('Unable to set up the progress bar.')
-#     
-#     def _set_pbar_state(self, add_to_value=None, description=None,
-#                         bar_style=None):
-#         """Updates the progress bar with the given options."""
-#         if not self._pbar_ready:
-#             return
-#         if add_to_value is not None:
-#             try:
-#                 self._progress_bar.value += add_to_value
-#             except:
-#                 pass
-#         if description is not None:
-#             try:
-#                 self._progress_bar.description = description
-#             except:
-#                 pass
-#         if bar_style is not None:
-#             try:
-#                 self._progress_bar.bar_style = bar_style
-#             except:
-#                 pass
     
     def _copy_from_transitional_dir(self):
         """Moves the transitional storage directory to the taget storage
@@ -2889,11 +3308,13 @@ class ConvergenceTest(object):
                                                                 values,
                                                                 ref[dcol])
         if len(dev_columns) > 1:
+            df_['deviation_min'] = df_.min(axis=1)
+            df_['deviation_max'] = df_.max(axis=1)
             df_['deviation_mean'] = df_.mean(axis=1)
         self.deviation_columns = list(df_.columns)
         return df_
 
-    def analyze_convergence_results(self, dev_columns, sort_by=None):
+    def analyze_convergence_results(self, dev_columns, sort_by=None, data_ref=None):
         """Calculates the relative deviations to the reference data for the
         columns in the `dev_columns`. A new DataFrame containing the test
         simulation data and the relative deviations is created (as class
@@ -2926,7 +3347,8 @@ class ConvergenceTest(object):
 
         # Load the data
         data_test = self.sset_test.get_store_data()
-        data_ref = self.sset_ref.get_store_data()
+        if data_ref is None:
+            data_ref = self.sset_ref.get_store_data()
 
         # Calculate the deviations
         self.logger.debug('Calculating relative deviations for: {}'.format(
@@ -2970,6 +3392,146 @@ class ConvergenceTest(object):
             writer = pd.ExcelWriter(file_path)
             self.analyzed_data.to_excel(writer, 'data', **kwargs)
             writer.save()
+
+
+# =============================================================================
+
+
+class QuantityMinimizer(SimulationSet):
+    """
+
+    """
+    
+    def __init__(self, project, fixed_keys, duplicate_path_levels=0, 
+                 storage_folder='from_date', storage_base='from_config', 
+                 combination_mode='product', resource_manager=None):
+        self._start_withclean_H5_store = True
+        SimulationSet.__init__(self, project, fixed_keys, 
+                           duplicate_path_levels=duplicate_path_levels,
+                           storage_folder=storage_folder,
+                           storage_base=storage_base,
+                           combination_mode=combination_mode,
+                           resource_manager=resource_manager)
+        self.check_validity_of_input_args()
+        self.current_sim_index = 0
+    
+    def check_validity_of_input_args(self):
+        """Checks if the provided `fixed_keys` describe a single simulation."""
+        with utils.DisableLogger():
+            self._get_simulation_list()
+        if self.num_sims > 1:
+            raise ValueError('The `fixed_keys` must describe a single ' +
+                             'simulation, i.e. must not contain iterables for' +
+                             'any parameter (except in `constants`).')
+            return
+        self.simulations = []
+        del self._loop_props
+        self.num_sims = 0
+        self._flat_keys = self.constants
+        self._flat_keys.update(self.geometry)
+        self._flat_keys.update(self.parameters)
+    
+    def minimize_quantity(self, x, quantity_to_minimize, maximize_instead=False,
+                          processing_func=None, wdir_mode='keep',
+                          jcm_geo_kwargs=None, jcm_solve_kwargs=None,
+                          **scipy_minimize_kwargs):
+        """TODO
+
+        Parameters
+        ----------
+        x : string type
+            Name of the input parameter which is the input argument to the
+            function that will be minimized.
+        quantity_to_minimize : string type
+            The result quantity for which the minimium should be found. This
+            must be calculated by the `processing_func`.
+        maximize_instead : bool, default False
+            Whether to search for the maximum instead of the minimum.
+        processing_func : callable or NoneType, default None
+            Function for result processing. If None, only a standard processing
+            will be executed. See the docs of the
+            Simulation.process_results-method for more info on how to use this
+            parameter.
+        wdir_mode : {'keep', 'delete'}, default 'keep'
+            The way in which the working directories of the simulations are
+            treated. If 'keep', they are left on disk. If 'delete', they are
+            deleted.
+        jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
+            Keyword arguments which are directly passed to jcm.geo and
+            jcm.solve, respectively.
+        
+        `scipy_minimize_kwargs` will be passed to the `scipy.optimize.minimize`
+        function.
+
+        """
+        from scipy.optimize import minimize
+        self.logger.info('Starting minimization for {} as a function of {}'.
+                         format(quantity_to_minimize, x))
+        
+        self.finished_sim_numbers = []
+        self.failed_simulations = []
+        self._run_args = dict(processing_func=processing_func, 
+                              wdir_mode=wdir_mode,
+                              jcm_geo_kwargs=jcm_geo_kwargs,
+                              jcm_solve_kwargs=jcm_solve_kwargs)
+        self._maximize_instead = maximize_instead
+        
+        self._current_x = x
+        self._current_y = quantity_to_minimize
+        
+        x0 = self._flat_keys[x]
+        
+        if not 'method' in scipy_minimize_kwargs:
+            scipy_minimize_kwargs['method'] = 'nelder-mead'
+        if not 'options' in scipy_minimize_kwargs:
+            scipy_minimize_kwargs['options'] = {'disp': True}
+
+        self.minimization_result = minimize(self._solve_new_simulation, x0,
+                                            **scipy_minimize_kwargs)
+    
+    def pickle_optimization_results(self, file_name='optimization_results.pkl'):
+        file_ = os.path.join(self.storage_dir, file_name)
+        f = open(file_, 'w')
+        pickle.dump(self.minimization_result, f)
+        f.close()
+    
+    def make_simulation_schedule(self):
+        self.logger.info('This function is ignored in `QuantityMinimizer`.')
+    
+    def _append_simulation(self, parameter, value):
+        """Appends a new simulation to the simulation list with the updated 
+        `value` for `parameter`.
+        
+        """
+        self._flat_keys[parameter] = value
+        self.simulations.append(Simulation(number=self.current_sim_index,
+                                           keys=self._flat_keys,
+                                           stored_keys=self.stored_keys,
+                                           storage_dir=self.storage_dir,
+                                           project=self.project,
+                                           rerun_JCMgeo=True,
+                                           store_logs=self.store_logs))
+        self.current_sim_index += 1
+        self.num_sims += 1
+    
+    def _get_single_result_from_simulation(self, quantity, sim_index=-1):
+        """Return the result for the given quantity of the simulation with
+        index `sim_index`."""
+        return self.simulations[sim_index]._results_dict[quantity]
+    
+    def _solve_new_simulation(self, x):
+        """Solves a new simulation with the value of `x` for the `_current_x`
+        parameter and returns the result for the `_current_y` quantity.
+        """
+        self.logger.info('Solving for {} = {}'.format(self._current_x, x[0]))
+        self._append_simulation(self._current_x, x)
+        with utils.DisableLogger():
+            self.run(**self._run_args)
+        y = self._get_single_result_from_simulation(self._current_y)
+        self.logger.info('... result {} = {}'.format(self._current_y, y))
+        if self._maximize_instead:
+            y *= -1
+        return y
 
 
 if __name__ == "__main__":
