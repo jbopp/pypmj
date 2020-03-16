@@ -94,7 +94,7 @@ class JCMPLogging(object):
             os.makedirs(directory)
         
         # Generate a filename from date if no filename was given
-        if filename is 'from_date':
+        if filename == 'from_date':
             filename = date.today().strftime("%y%m%d") + '.log'
         self.logging_file = os.path.join(directory, filename)
         
