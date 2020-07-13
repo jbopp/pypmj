@@ -144,16 +144,27 @@ class MaterialData(object):
             'preferredDbase': 'RefractiveIndex.info'
         },
         'gold': {
-            'shelf': 'main',
+            'shelf': 'custom',
             'book': 'Au',
-            'sets': ['Rakic.yml'],
-            'fimetricsFile': 'Au.txt',
+            'sets': ['Au_McPeak.yml'],
             'preferredDbase': 'RefractiveIndex.info'
         },
         'PMMA': {
             'shelf': 'organic',
             'book': '(C5O2H8)n - poly(methyl methacrylate)',
             'sets': ['Szczurowski.yml'],
+            'preferredDbase': 'RefractiveIndex.info'
+        },
+        'ITO': {
+            'shelf': 'other',
+            'book': 'mixed crystals/In2O3-SnO2',
+            'sets': ['Konig.yml'],
+            'preferredDbase': 'RefractiveIndex.info'
+        },
+        'platinum' : {
+            'shelf': 'main',
+            'book': 'Pt',
+            'sets':['Rakic.yml'],
             'preferredDbase': 'RefractiveIndex.info'
         },
         'silicon_alpha': {
@@ -191,10 +202,9 @@ class MaterialData(object):
             'preferredDbase': 'RefractiveIndex.info'
         },
         'silver': {
-            'shelf': 'main',
+            'shelf': 'custom',
             'book': 'Ag',
-            'sets': ['Rakic.yml'],
-            'fimetricsFile': 'Ag.txt',
+            'sets': ['Ag_McPeak.yml'],
             'preferredDbase': 'RefractiveIndex.info'
         },
         'diamond': {
@@ -211,6 +221,13 @@ class MaterialData(object):
             'shelf': 'main',
             'book': 'H2O',
             'sets': ['Kedenburg.yml'],
+            'fimetricsFile': '',
+            'preferredDbase': 'RefractiveIndex.info'
+        },
+        'titaniumdioxide': {
+            'shelf': 'main',
+            'book': 'TiO2',
+            'sets': ['Siefke.yml'],
             'fimetricsFile': '',
             'preferredDbase': 'RefractiveIndex.info'
         }
@@ -419,7 +436,7 @@ class MaterialData(object):
             op_lines.append(u'No reference data available for filmetrics' +
                             u' files yet.')
             op_lines.append(u'Please see' +
-                            ur'http://www.filmetrics.de/'+
+                            u'http://www.filmetrics.de/'+
                             u'refractive-index-database')
             op_lines.append(u'***')
             return

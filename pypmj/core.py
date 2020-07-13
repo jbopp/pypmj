@@ -1,9 +1,7 @@
 """Defines the centerpiece class `SimulationSet` of pypmj and the
 abstraction layers for projects, single simulations. Also, more specialized
 simulation sets such as the `ConvergenceTest`-class are defined here.
-
 Authors : Carlo Barth
-
 """
 
 # Imports
@@ -76,7 +74,6 @@ class JCMProject(object):
     relative to the `projects` path specified in the configuration), checks its
     validity and provides functions to copy its content to a working directory,
     remove it afterwards, etc.
-
     Parameters
     ----------
     specifier : str or list
@@ -96,7 +93,6 @@ class JCMProject(object):
     job_name : str or None, default None
         Name to use for queuing system such as slurm. If None, a name is
         composed using the specifier.
-
     """
 
     def __init__(self, specifier, working_dir=None, project_file_name=None,
@@ -194,10 +190,8 @@ class JCMProject(object):
 
     def _check_working_dir(self, working_dir):
         """Checks if the given working directory exists and creates it if not.
-
         If no `working_dir` is None, a default directory called
         `current_run` is created in the current working directory.
-
         """
         if working_dir is None:
             working_dir = os.path.abspath('current_run')
@@ -213,9 +207,7 @@ class JCMProject(object):
     def copy_to(self, path=None, overwrite=True, sys_append=True):
         """Copies all files inside the project directory to path, overwriting
         it if  overwrite=True, raising an Error otherwise if it already exists.
-
         Note: Appends the path to sys.path if sys_append=True.
-
         """
         if path is None:
             path = self.working_dir
@@ -340,7 +332,6 @@ class Simulation(object):
     JCMsolve on the project and to process the returned results using a custom
     function. It then also holds all the results, logs, etc. and can return
     them as a pandas DataFrame.
-
     Parameters
     ----------
     keys : dict
@@ -376,7 +367,6 @@ class Simulation(object):
         *Experimental!*
         
         Assign a resultbag (see jcmwave.resultbag for details).
-
     """
 
     def __init__(self, keys, project=None, number=0, stored_keys=None, 
@@ -425,9 +415,7 @@ class Simulation(object):
     def working_dir(self):
         """Returns the name of the working directory, specified by the
         storage_dir and the simulation number.
-
         It is constructed using the global SIM_DIR_FMT formatter.
-
         """
         return _default_sim_wdir(self.storage_dir, self.number)
     
@@ -435,7 +423,6 @@ class Simulation(object):
         """Finds a file in the working directory (see method `working_dir()`)
         matching the given (`fnmatch.filer`-) `pattern`. The working directory
         is scanned recursively.
-
         Returns `None` if no match is found, the file path if a single file is
         found, or raises a `RuntimeError` if multiple files are found.
         
@@ -446,12 +433,10 @@ class Simulation(object):
         """ Finds files in the working directory (see method `working_dir()`)
         matching the given (`fnmatch.filer`-) `pattern`. The working directory
         is scanned recursively.
-
         If `only_one` is False (default), returns a list with matching file
         paths. Else, returns `None` if no match is found, the file path if a
         single file is found, or raises a `RuntimeError` if multiple files are
         found.
-
         """
         matches = []
         for root, dirnames, filenames in os.walk(self.working_dir()):
@@ -492,7 +477,6 @@ class Simulation(object):
         The jcm_kwargs are directly passed to jcm.solve, except for
         `project_dir`, `keys` and `working_dir`, which are set
         automatically (ignored if provided).
-
         """
         forbidden_keys = ['project_file', 'keys', 'working_dir', 'mode']
         for key in jcm_kwargs:
@@ -538,9 +522,7 @@ class Simulation(object):
     def _set_jcm_results_and_logs(self, results, logs=None):
         """Set the logs, error message, exit code and results as returned by
         JCMsolve.
-
         This also sets the status to `Failed` or `Finished`.
-
         """
         if NEW_DAEMON_DETECTED:
             if logs is not None:
@@ -659,11 +641,9 @@ class Simulation(object):
         `processing_func` of one input argument. The input argument, which is
         the list of results as it was set in `_set_jcm_results_and_logs`, is
         automatically passed to this function.
-
         If `processing_func` is None, the JCM results are not processed and
         nothing will be saved to the HDF5 store, except for the computational
         costs.
-
         The `processing_func` must be a function of one or two input arguments.
         A list of all results returned by post processes in JCMsolve are passed
         as the first argument to this function. If a second input  argument is
@@ -673,7 +653,6 @@ class Simulation(object):
         dict with key-value pairs that should be saved to the HDF5 store.
         Consequently, the values must be of types that can be stored to HDF5,
         otherwise Exceptions will occur in the saving steps.
-
         """
 
         if self.status in ['Pending', 'Failed', 'Skipped']:
@@ -773,9 +752,7 @@ class Simulation(object):
     def _get_DataFrame(self):
         """Returns a DataFrame containing all input parameters and all results
         with the simulation number as the index.
-
         It can readily be appended to the HDF5 store.
-
         """
         dfdict = {skey: self.keys[skey] for skey in self.stored_keys}
         if self.status == 'Finished and processed':
@@ -790,9 +767,7 @@ class Simulation(object):
     def _get_parameter_DataFrame(self):
         """Returns a DataFrame containing only the input parameters with the
         simulation number as the index.
-
         This is mainly used for HDF5 store comparison.
-
         """
         dfdict = {skey: self.keys[skey] for skey in self.stored_keys}
         df = pd.DataFrame(dfdict, index=[self.number])
@@ -831,11 +806,9 @@ class Simulation(object):
     
     def compute_geometry(self, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for this simulation.
-
         The jcm_kwargs are directly passed to jcm.geo, except for
         `project_dir`, `keys` and `working_dir`, which are set automatically
         (ignored if provided).
-
         """
         self.logger.debug('Computing geometry.')
         # Copy project to its working directory
@@ -876,7 +849,6 @@ class Simulation(object):
                          run_post_process_files=None, resource_manager=None,
                          additional_keys_for_pps=None, jcm_solve_kwargs=None):
         """Solves this simulation and returns the results and logs.
-
         Parameters
         ----------
         processing_func : callable or NoneType, default None
@@ -909,7 +881,6 @@ class Simulation(object):
             These keyword arguments are directly passed to jcm.solve, except
             for `project_dir`, `keys` and `working_dir`, which are set
             automatically (ignored if provided).
-
         """
         
         if jcm_solve_kwargs is None:
@@ -1066,10 +1037,8 @@ class ResourceManager(object):
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
         resources have not already been added.
-
         Names that are unknown are ignored. If no valid name is present,
         the default configuration will remain untouched.
-
         """
         if isinstance(names, string_types):
             names = [names]
@@ -1155,7 +1124,6 @@ class ResourceManager(object):
 class SimulationSet(object):
     """Class for initializing, planning, running and processing multiple
     simulations.
-
     Parameters
     ----------
     project : JCMProject, str or tuple/list of the form (specifier,working_dir)
@@ -1246,7 +1214,6 @@ class SimulationSet(object):
         the results and logs are kept for each simulation. Set this parameter
         to true to minimize the memory usage. Caution: you will loose all the
         `jcm_results` and `logs` in the `Simulation`-instances.
-
     """
 
     # Names of the groups in the HDF5 store which are used to store metadata
@@ -1313,10 +1280,8 @@ class SimulationSet(object):
     def _check_keys(self, keys):
         """Checks if the provided keys are valid and if they contain values for
         loops.
-
         See the description of the parameter `keys` in the SimulationSet
         documentation for further reference.
-
         """
 
         # Check proper type
@@ -1382,10 +1347,8 @@ class SimulationSet(object):
     def __get_storage_folder(self, storage_folder):
         """Returns the standard storage folder name, depending on the input
         `storage_folder`.
-
         If `storage_folder` is 'from_date', returns the standard date
         string, otherwise it returns the input.
-
         """
         if storage_folder == 'from_date':
             # Generate a directory name from date
@@ -1396,10 +1359,8 @@ class SimulationSet(object):
                         storage_base):
         """Reads storage specific parameters from the configuration and
         prepares the folder used for storage as desired.
-
         See the description of the parameters `` and `` in the
         SimulationSet documentation for further reference.
-
         """
         # Read storage base from configuration
         if storage_base == 'from_config':
@@ -1555,11 +1516,9 @@ class SimulationSet(object):
         """Initializes the HDF5 store and sets the `store` attribute. If
         `check_version_match` is True, the current versions of JCMsuite and
         pypmj are compared to the stored versions.
-
         The file name and the name of the data section inside the file
         are configured in the DEFAULTS section of the configuration
         file.
-
         """
         self.logger.debug('Initializing the HDF5 store')
         
@@ -1629,11 +1588,9 @@ class SimulationSet(object):
     def write_store_data_to_file(self, file_path=None, mode='CSV', **kwargs):
         """Writes the data that is currently in the store to a CSV or an Excel
         file.
-
         `mode` must be either 'CSV' or 'Excel'. If `file_path` is None,
         the default name results.csv/xls in the storage folder is used.
         `kwargs` are passed to the corresponding pandas functions.
-
         """
         if mode not in ['CSV', 'Excel']:
             raise ValueError(
@@ -1743,7 +1700,6 @@ class SimulationSet(object):
         """Find duplicate rows in the HDF5 store based on stored keys if
         `check_index_only=False`, else only the index (i.e. sim_number) is
         considered.
-
         """
         data = self.get_store_data()
         if check_index_only:
@@ -1760,7 +1716,6 @@ class SimulationSet(object):
         restructured using `ptrepack` to possibly free disc space and optimize
         the compression. If problems persist, set `brute_force=True` which will
         remove all rows with duplicate indices (warning: data gets lost!).
-
         """
         dupl_index = self._get_duplicate_H5_rows(brute_force)
 
@@ -1880,10 +1835,8 @@ class SimulationSet(object):
         """Check the `parameters`- and `geometry`-dictionaries for sequences
         and generate a list which has a keys-dictionary for each distinct
         simulation by using the `combination_mode` as specified.
-
         The simulations that must be performed are stored in the
         `self.simulations`-list.
-
         """
         self.logger.debug('Analyzing loop properties.')
         self.simulations = []
@@ -1999,10 +1952,8 @@ class SimulationSet(object):
     def _sort_simulations(self):
         """Sorts the list of simulations in a way that all simulations with
         identical geometry are performed consecutively.
-
         That way, jcmwave.geo() only needs to be called if the geometry
         changes.
-
         """
         self.logger.debug('Sorting the simulations.')
         # Get a list of dictionaries, where each dictionary contains the keys
@@ -2071,10 +2022,8 @@ class SimulationSet(object):
     def __get_meta_dframe(self, which):
         """Creates a pandas DataFrame from the parameters or the geometry-dict
         which can be stored in the HDF5 store.
-
         Using the __restore_from_meta_dframe-method, the dict can later
         be restored.
-
         """
 
         # Check if which is valid
@@ -2094,9 +2043,7 @@ class SimulationSet(object):
         """Restores a dict from data which was stored in the HDF5 store using
         `__get_meta_dframe` to compare the keys that were used for the
         SimulationSet in which the store was created to the current one.
-
         `which` can be 'parameters' or 'geometry'.
-
         """
         # Check if which is valid
         if which not in self.STORE_META_GROUPS:
@@ -2123,14 +2070,11 @@ class SimulationSet(object):
 
     def _store_metadata(self):
         """Stores metadata of the current simulation set in the HDF5 store.
-
         A SimulationSet is described by its `parameters` and `geometry`
         attributes. These are stored to the HDF5 store for comparison of the
         SimulationSet properties in a future run.
-
         The `constants` attribute is not stored in the metadata, as these keys
         are also not stored in the data store.
-
         """
         for group in self.STORE_META_GROUPS:
             self.store[group] = self.__get_meta_dframe(group)
@@ -2139,9 +2083,7 @@ class SimulationSet(object):
     def _precheck_store(self):
         """Compares the metadata of the current SimulationSet to the metadata
         in the HDF5 store.
-
         Returns 'Empty', 'Match', 'Extended Check' or 'Mismatch'.
-
         """
         if self.is_store_empty():
             return 'Empty'
@@ -2237,16 +2179,13 @@ class SimulationSet(object):
         """Looks for simulations that are already inside the HDF5 store by
         comparing the values of the columns given by all keys of the current
         simulations to the values of rows in the store.
-
         Returns a tuple of two lists: (matched_rows, unmatched_rows). Each can
         be None. `matched_rows` is a list of tuples of the form
         (search_row, store_row) identifying rows in the search DataFrame with
         rows in the stored DataFrame. 'unmatched_rows' is a list of row indices
         in the store that don't have a match in the search DataFrame.
-
         `t_info_interval` is the time interval in seconds at which remaining
         time info is printed in case of long comparisons.
-
         """
         ckeys = self.stored_keys
         if len(ckeys) > 255:
@@ -2336,10 +2275,8 @@ class SimulationSet(object):
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
         resources have not already been added.
-
         Names that are unknown are ignored. If no valid name is present,
         the default configuration will remain untouched.
-
         """
         self.resource_manager.use_only_resources(names)
 
@@ -2355,18 +2292,15 @@ class SimulationSet(object):
     def compute_geometry(self, simulation, **jcm_kwargs):
         """Computes the geometry (i.e. runs jcm.geo) for a specific simulation
         of the simulation set.
-
         Parameters
         ----------
         simulation : Simulation or int
             The `Simulation`-instance for which the geometry should be
             computed. If the type is `int`, it is treated as the index of the
             simulation in the simulation list.
-
         The jcm_kwargs are directly passed to jcm.geo, except for
         `project_dir`, `keys` and `working_dir`, which are set automatically
         (ignored if provided).
-
         """
         if isinstance(simulation, int):
             simulation = self.simulations[simulation]
@@ -2386,7 +2320,6 @@ class SimulationSet(object):
         """Solves a specific simulation and returns the results and logs
         without any further processing and without saving of data to the HDF5
         store. Recomputes the geometry before if compute_geometry is True.
-
         Parameters
         ----------
         simulation : Simulation or int
@@ -2416,7 +2349,6 @@ class SimulationSet(object):
             These keyword arguments are directly passed to jcm.solve, except
             for `project_dir`, `keys` and `working_dir`, which are set
             automatically (ignored if provided).
-
         """
         if jcm_geo_kwargs is None:
             jcm_geo_kwargs = {}
@@ -2487,7 +2419,6 @@ class SimulationSet(object):
         jcm_geo_kwargs, jcm_solve_kwargs : dict or NoneType, default None 
             Keyword arguments which are directly passed to jcm.geo and
             jcm.solve, respectively.
-
         """
         self.logger.info('Starting to solve.')
 
@@ -2599,7 +2530,6 @@ class SimulationSet(object):
         daemon.wait by passing to `_wait_for_simulations_new` or 
         `_wait_for_simulations_old`, depending on whether the new or the old
         daemon interface was detected on the system.
-
         Failed simulations are appended to the list
         `self.failed_simulations`, while successful simulations are
         processed and stored.
@@ -2692,7 +2622,6 @@ class SimulationSet(object):
     def _wait_for_simulations_old(self, ids_to_wait_for, ids_to_sim_number):
         """Waits for the job IDS in the list `ids_to_wait_for` to finish using
         daemon.wait and the *old* daemon interface.
-
         See the `_wait_for_simulations`-method for details.
         """
         # Wait for all simulations using daemon.wait with
@@ -2796,7 +2725,6 @@ class SimulationSet(object):
             pass_ccosts_to_processing_func=False):
         """Convenient function to add the resources, run all necessary
         simulations and save the results to the HDF5 store.
-
         Parameters
         ----------
         processing_func : callable or NoneType, default None
@@ -2845,7 +2773,6 @@ class SimulationSet(object):
         pass_ccosts_to_processing_func : bool, default False
             Whether to pass the computational costs as the 0th list element
             to the processing_func.
-
         """
         if self.all_done():
             # Set the status for all simulations to 'Skipped'
@@ -2993,10 +2920,8 @@ class ConvergenceTest(object):
     projects. A convergence test consists of a reference simulation and (a)
     test simulation(s). The reference simulation should be of much higher
     accuracy than any of the test simulations.
-
     This class initializes two SimulationSet instances. All init arguments are
     the same as for SimulationSet, except that there are two sets of keys.
-
     Parameters
     ----------
     project : JCMProject, str or tuple/list of the form (specifier,
@@ -3069,7 +2994,6 @@ class ConvergenceTest(object):
         initialized. The `resource_manager` will be used for both of the
         simulation sets. If `None`, a `ResourceManager`-instance will be
         created automatically.
-
     """
 
     def __init__(self, project, keys_test, keys_ref, duplicate_path_levels=0,
@@ -3120,11 +3044,9 @@ class ConvergenceTest(object):
     def __get_storage_folder(self, storage_folder, sub_folder):
         """Returns the standard storage folder name, depending on the input
         `storage_folder`.
-
         If `storage_folder` is 'from_date', uses the standard date
         string plus '_convergence_test', otherwise the input for
         `storage_folder`, and returns this result plus the `sub_folder`.
-
         """
         if storage_folder == 'from_date':
             # Generate a directory name from date
@@ -3139,9 +3061,7 @@ class ConvergenceTest(object):
 
     def make_simulation_schedule(self):
         """Same as for SimulationSet.
-
         Calls the `make_simulation_schedule` method for both sets.
-
         """
         self.__log_paragraph('Scheduling simulation for the reference set.')
         self.sset_ref.make_simulation_schedule()
@@ -3166,10 +3086,8 @@ class ConvergenceTest(object):
     def use_only_resources(self, names):
         """Restrict the daemon resources to `names`. Only makes sense if the
         resources have not already been added.
-
         Names that are unknown are ignored. If no valid name is present,
         the default configuration will remain untouched.
-
         """
         self.resource_manager.use_only_resources(names)
 
@@ -3258,7 +3176,6 @@ class ConvergenceTest(object):
         """Runs the reference and the test simulation sets using the
         simuset_kwargs, which are passed to the run-method of each
         SimulationSet-instance.
-
         Parameters
         ----------
         run_ref_with_max_cores : str (DaemonResource nickname) or False,
@@ -3273,7 +3190,6 @@ class ConvergenceTest(object):
         save_run : bool, default False
             If True, the utility function `run_simusets_in_save_mode` is used
             for the run.
-
         """
         self.run_reference_simulation(run_on_resource=run_ref_with_max_cores,
                                       save_run=save_run, **simuset_kwargs)
@@ -3284,7 +3200,6 @@ class ConvergenceTest(object):
         from the values in `data` to the values in `ref` for each column in
         dev_columns. The new data frame contains columns with the same names as
         given by dev_columns, but with the prefix 'deviation_'.
-
         Parameters
         ----------
         data : pandas-DataFrame
@@ -3294,7 +3209,6 @@ class ConvergenceTest(object):
         dev_columns : list
             List of column names for which to calculate the relative deviation.
             All elements must be present in the columns of both data frames.
-
         """
         df_ = pd.DataFrame(index=data.index)
         for dcol in dev_columns:
@@ -3322,11 +3236,9 @@ class ConvergenceTest(object):
         order by the first dev_column or by the one specified by `sort_by`. A
         list of all deviation column names is stored in the `deviation_columns`
         attribute.
-
         If more than 1 `dev_columns` is given, the mean deviation is
         also calculated and stored in the DataFrame column 'deviation_mean'. It
         is used to sort the data if `sort_by` is None.
-
         """
         self.__log_paragraph('Analyzing...')
 
@@ -3369,11 +3281,9 @@ class ConvergenceTest(object):
             self, file_path=None, mode='CSV', **kwargs):
         """Writes the data calculated by `analyze_convergence_results` to a CSV
         or an Excel file.
-
         `mode` must be either 'CSV' or 'Excel'. If `file_path` is None,
         the default name results.csv/xls in the storage folder is used.
         `kwargs` are passed to the corresponding pandas functions.
-
         """
         if not hasattr(self, 'analyzed_data'):
             self.logger.warn('No analyzed data present. Did you run and ' +
@@ -3399,7 +3309,6 @@ class ConvergenceTest(object):
 
 class QuantityMinimizer(SimulationSet):
     """
-
     """
     
     def __init__(self, project, fixed_keys, duplicate_path_levels=0, 
@@ -3436,7 +3345,6 @@ class QuantityMinimizer(SimulationSet):
                           jcm_geo_kwargs=None, jcm_solve_kwargs=None,
                           **scipy_minimize_kwargs):
         """TODO
-
         Parameters
         ----------
         x : string type
@@ -3462,7 +3370,6 @@ class QuantityMinimizer(SimulationSet):
         
         `scipy_minimize_kwargs` will be passed to the `scipy.optimize.minimize`
         function.
-
         """
         from scipy.optimize import minimize
         self.logger.info('Starting minimization for {} as a function of {}'.
