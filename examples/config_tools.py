@@ -3,7 +3,14 @@
 Authors : Carlo Barth
 """
 
-import ConfigParser
+import sys
+
+_IS_PYTHON3 = sys.version_info >= (3, 0)
+
+if _IS_PYTHON3:
+    import configparser as ConfigParser
+else:
+    import ConfigParser as ConfigParser
 
 DEFAULT_SECTIONS = ['User', 'Preferences', 'Storage', 'Data', 'JCMsuite',
                     'Logging', 'DEFAULTS']
@@ -80,7 +87,7 @@ def add_server(config, hostname, login='', JCM_root=None,
 
 def write_config_file(config, file_path):
     """Writes the configuration to the file_path."""
-    with open(file_path, 'wb') as configfile:
+    with open(file_path, 'w') as configfile:
         config.write(configfile)
 
 
