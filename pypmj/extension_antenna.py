@@ -350,8 +350,8 @@ class FarFieldEvaluation(object):
         Ts = np.zeros([len(cartesian_points)])
         Tp = np.zeros([len(cartesian_points)])
         s_pol_fraction = np.zeros([len(cartesian_points)])
-        p_pol_fraction = np.zeros([len(cartesian_points)])
-        
+        p_pol_fraction = np.zeros([len(cartesian_points)])      
+
         for i in range(len(cartesian_points)):
             x = cartesian_points[i, 0]
             y = cartesian_points[i, 1]
