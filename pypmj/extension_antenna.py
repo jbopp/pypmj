@@ -485,7 +485,7 @@ class FarFieldEvaluation(object):
             # Initialize the dict for the directivity results
             self.directivity = {}
             self.total_power = self.power['up'][-1] + self.power['down'][0]
-            for direc, dval in directivity_unn.iteritems():
+            for direc, dval in list(directivity_unn.items()):
                 self.directivity[direc] = dval/self.total_power
     
     def _calc_dtt(self,refractive_index, E_field_strength, 
