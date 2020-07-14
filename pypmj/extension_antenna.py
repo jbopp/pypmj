@@ -299,6 +299,99 @@ class FarFieldEvaluation(object):
                                     **simulation_solve_kwargs)
         self._process_far_field_data()
     
+    def surface_transmission(self, nt, direction='down'):
+        """Computes the transmittance (.transmittance['up/down']), the
+        transmitted angles (.transmitted_theta['up/down']) and the
+        transmitted power (.transmitted_power['up/down']) of the far fields
+        through a surface with a refractive index changing from ni (given
+        by the simulation) to nt (input parameter) - depending on the
+        'direction' (input parameter).
+        """
+        results = read_jcm_far_field_tables(self.far_field_result_files)
+        
+        trans = {}
+        self.transmittance = {'up': np.array([]), 'down': np.array([])}
+        self.transmitted_theta = {'up': np.array([]), 'down': np.array([])}
+        self.transmitted_power = {'up': np.array([]), 'down': np.array([])}
+        phi = np.linspace(0., 2.*np.pi, self.resolution)
+        if direction == 'up':
+            ni = results['n_0']
+            E_field = results['E_field_strength_0']
+            cartesian_points = results['points_0']
+            
+            self.transmitted_theta['up'] , self.transmittance['up'] = self._calc_surface_transmission(ni, nt, E_field, cartesian_points / 1.0e6)
+            
+            theta = np.linspace(0, np.pi/2., self.resolution)
+            self.transmitted_power['up'], _, _ = self._calc_dtt(ni, E_field, cartesian_points, theta, phi, self.transmittance['up'])
+            
+        elif direction == 'down':
+            ni = results['n_1']
+            E_field = results['E_field_strength_1']
+            cartesian_points = results['points_1']
+            
+            self.transmitted_theta['down'] , self.transmittance['down'] = self._calc_surface_transmission(ni, nt, E_field, cartesian_points / 1.0e6)
+            
+            theta = np.linspace(np.pi/2., np.pi, self.resolution)
+            self.transmitted_power['down'], _, _ = self._calc_dtt(ni, E_field, cartesian_points, theta, phi, self.transmittance['down'])
+    
+    
+    def _calc_surface_transmission(self, ni, nt, E_field, cartesian_points):
+        """Computes the relative transmission of the far fields through a
+        surface with a refractive index changing from ni to nt. Therefore,
+        the far field (E_field) is decomposed into S- and P-polarization.
+        The relative transmittance for each polarization is computed via
+        Fresnel equations and combined with the decomposed fields. In a
+        last step the overall relative transmission is calculated. The
+        transmitted angle (Snell's law) and relative transmissions are
+        returned.
+        """
+
+        beta = np.zeros([len(cartesian_points)])
+        Ts = np.zeros([len(cartesian_points)])
+        Tp = np.zeros([len(cartesian_points)])
+        s_pol_fraction = np.zeros([len(cartesian_points)])
+        p_pol_fraction = np.zeros([len(cartesian_points)])      
+
+        for i in range(len(cartesian_points)):
+            x = cartesian_points[i, 0]
+            y = cartesian_points[i, 1]
+            z = cartesian_points[i, 2]
+            
+            alpha = np.arccos(z)
+            if alpha > np.pi / 2.0:
+                alpha = np.pi - alpha
+            beta[i] = np.arcsin(ni / nt * np.sin(alpha))
+            
+            Spol = np.array([y, -x, 0])
+            Ppol = np.array([x * z, y * z, -x**2 - y**2])
+            
+            if alpha == 0:
+                Spol = np.array([0,1,0])
+                Ppol = np.array([1,0,0])
+            
+            Spol = Spol / np.linalg.norm(Spol)
+            Ppol = Ppol / np.linalg.norm(Ppol)
+            
+            E_field_S = np.dot(E_field[i], Spol)
+            E_field_P = np.dot(E_field[i], Ppol)
+            
+            if beta[i].imag > 0.0:
+                ts = 0.0 + 0.0j
+                tp = 0.0 + 0.0j
+            else:
+                ts = 2 * ni * np.cos(alpha) / (ni * np.cos(alpha) + nt * np.cos(beta[i]))
+                tp = 2 * ni * np.cos(alpha) / (nt * np.cos(alpha) + ni * np.cos(beta[i]))
+                Ts[i] = nt * np.cos(beta[i]) / (ni * np.cos(alpha)) * ts**2
+                Tp[i] = nt * np.cos(beta[i]) / (ni * np.cos(alpha)) * tp**2
+            
+            normP = abs(E_field_P)**2 + abs(E_field_S)**2
+            s_pol_fraction[i] = (abs(E_field_P)**2) / normP
+            p_pol_fraction[i] = (abs(E_field_S)**2) / normP
+
+        return beta.reshape([self.resolution, self.resolution]), \
+               (Ts * s_pol_fraction +
+                Tp * p_pol_fraction).reshape([self.resolution, self.resolution])
+    
     def _process_far_field_data(self):
         """Computes the directivity into any angle with the current resolution.
         Since most problems have different exterior domains above and below
@@ -333,10 +426,10 @@ class FarFieldEvaluation(object):
         # Calculate the power, numerical aperture and unnormalized directivity
         self.power = {}
         self.NA = {}
+        #self.surface_transmission = {}
         directivity_unn = {}
         
         phi = np.linspace(0., 2.*np.pi, self.resolution)
-        
         # Complete case
         if self.direction is None:
             # Up
@@ -360,6 +453,7 @@ class FarFieldEvaluation(object):
             self.power['down'] = power
             self.NA['down'] = NA
             directivity_unn['down'] = d_val_unn
+            
         else:
             # Up-case
             if 'up' in self.direction:
@@ -395,7 +489,8 @@ class FarFieldEvaluation(object):
                 self.directivity[direc] = dval/self.total_power
     
     def _calc_dtt(self,refractive_index, E_field_strength, 
-                  cartesian_points, theta_i, phi_i):
+                  cartesian_points, theta_i, phi_i,
+                  transmittance = None):
         """
         Computes the directivity into any angle with a given resolution.
         Furthermore, the far field power (up / down) is returned with
@@ -425,11 +520,12 @@ class FarFieldEvaluation(object):
 
         """
         # Calculate the Poynting vectors
-        (r, theta, _, poynting_S, poynting_Abs_xpol, poynting_Abs_ypol, 
-         poynting_Abs_zpol) = self._calc_poynting(refractive_index, 
-                                                  E_field_strength, 
+        (r, theta, _, poynting_S, poynting_Abs_xdir, poynting_Abs_ydir, 
+         poynting_Abs_zdir) = self._calc_poynting(refractive_index, 
+                                                  E_field_strength,
                                                   cartesian_points)
-        
+        if transmittance is not None:
+            poynting_S = poynting_S*transmittance
         # Initialize numpy arrays for the far field power and numerical
         # aperture (NA)
         N = self.resolution # short hand
@@ -452,12 +548,11 @@ class FarFieldEvaluation(object):
                                     x=phi_i[0:i+1])
                 power[i] = integral * r.real**2
                 NA[i]  = refractive_index.real * np.sin(theta[i][0])
-        
         # We calculate the unnormalized directivity
         scale = 4. * np.pi * r**2
-        d_val_unn = np.array([scale*poynting_Abs_xpol,
-                              scale*poynting_Abs_ypol,
-                              scale*poynting_Abs_zpol])
+        d_val_unn = np.array([scale*poynting_Abs_xdir,
+                              scale*poynting_Abs_ydir,
+                              scale*poynting_Abs_zdir])
         return power, NA, d_val_unn
     
     def _calc_poynting(self, refractive_index, E_field_strength, 
@@ -480,7 +575,7 @@ class FarFieldEvaluation(object):
         tuple
             r, theta, phi : spherical coordinates 
             poynting_S : Poynting vectors in spherical coordinates
-            poynting_Abs_xpol, poynting_Abs_ypol, poynting_Abs_zpol : Poynting
+            poynting_Abs_xdir, poynting_Abs_ydir, poynting_Abs_zdir : Poynting
                 vectors in cartesian coordinates
 
         """
@@ -497,17 +592,17 @@ class FarFieldEvaluation(object):
         poynting_zdir = poynting_spherical * np.cos(theta)
         
         # Summing over all Poynting vector polarizations gives the absolute
-        # Poynting vector for each polarization
-        poynting_Abs_xpol = np.sum(poynting_xdir, axis=0)
-        poynting_Abs_ypol = np.sum(poynting_ydir, axis=0)
-        poynting_Abs_zpol = np.sum(poynting_zdir, axis=0)
+        # Poynting vector for each direction
+        poynting_Abs_xdir = np.sum(poynting_xdir, axis=0)
+        poynting_Abs_ydir = np.sum(poynting_ydir, axis=0)
+        poynting_Abs_zdir = np.sum(poynting_zdir, axis=0)
         
         # Poynting vector lengths in spherical coordinates
         poynting_S = np.sum(poynting_spherical, axis=0)
         
         return (r[0], theta, phi, 
                 poynting_S, 
-                poynting_Abs_xpol, poynting_Abs_ypol, poynting_Abs_zpol)
+                poynting_Abs_xdir, poynting_Abs_ydir, poynting_Abs_zdir)
     
     def _convert_points(self, points):
         """Converts (x, y, z) points, as returned by JCMsuite, into 
@@ -524,7 +619,8 @@ class FarFieldEvaluation(object):
         """Saves the far field data to the file at `file_path` using the
         numpy.savez (or numpy.savez_compressed method if `compressed` is True).
         """
-        direc_dependent = ['directivity', 'power', 'NA']
+        direc_dependent = ['directivity', 'power', 'NA', 'transmittance',
+                           'transmitted_theta', 'transmitted_power']
         direc_independent = ['total_power']
         directions = ['up', 'down']
         
