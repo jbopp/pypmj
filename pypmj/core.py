@@ -2570,10 +2570,6 @@ class SimulationSet(object):
             # Get lists for the IDs of the finished jobs and the corresponding
             # simulation numbers
             finished_ids = list(results.keys())
-            #finished_ids = list()
-            #for i in range(0, len(result_logs)):
-            #    if result_logs[i] is not None:
-            #        finished_ids.append(ids_to_wait_for[i])
             
             for id_ in finished_ids:
                 sim_number = ids_to_sim_number[id_]
@@ -2649,11 +2645,6 @@ class SimulationSet(object):
             for line in output:
                 logger_JCMsolve.debug(line)
                 
-            #indices = list()
-            #for i in range(0, len(logs)):
-            #    if logs[i] is not None:
-            #        indices.append(i)
-
             # Get lists for the IDs of the finished jobs and the corresponding
             # simulation numbers
             finishedIDs = []
