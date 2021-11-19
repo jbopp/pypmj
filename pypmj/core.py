@@ -2004,7 +2004,7 @@ class SimulationSet(object):
                 self.simulations[i].rerun_JCMgeo = True
 
         # We also update the index of the simulation property DataFrame
-        self.simulation_properties = self.simulation_properties.ix[sortIndices]
+        self.simulation_properties = self.simulation_properties.iloc[sortIndices]
         self.simulation_properties.index = pd.Index(
             list(range(self.num_sims)), name='number')
 
@@ -2208,7 +2208,7 @@ class SimulationSet(object):
                 return
 
         # Reduce the DataFrame size to the columns that need to be compared
-        df_ = data.ix[:, ckeys]
+        df_ = data.loc[:, ckeys]
         n_in_store = len(df_)  # number of rows in the stored data
         if n_in_store == 0:
             return None, None
