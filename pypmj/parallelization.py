@@ -284,7 +284,8 @@ class DaemonResource(object):
             try:
                 self.add()
                 return
-            except:
+            except Exception as e:
+                logger.warn(e)
                 logger.warn('Failed to add {}: '.format(self) +
                             'waiting for {} seconds ...'.format(wait_seconds))
                 time.sleep(wait_seconds)
