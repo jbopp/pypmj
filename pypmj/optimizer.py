@@ -116,7 +116,7 @@ class Optimizer(object):
                 sid = simuset.simulation_properties['suggestion_id'][i]
                 
                 # The simulations has failed. Skip it.
-                if simuset.simulations[i].exit_code != 0:
+                if not hasattr(simuset.simulations[i], "exit_code") or simuset.simulations[i].exit_code != 0:
                     self.study.clear_suggestion(sid, 'Simulation failed.')
                     self.logger.warn('Simulation with suggestion_id {} failed. Ignoring and continuing...'.format(sid))
                     continue
