@@ -126,12 +126,12 @@ class Optimizer(object):
                 
                 # The simulation(s) has/have failed. Skip this suggestion.
                 if not is_sweep:
-                    if not hasattr(simuset.simulations[i], "exit_code") or simuset.simulations[i].exit_code != 0:
+                    if not hasattr(simuset.simulations[i], "status") or simuset.simulations[i].status == 'Failed':
                         self.study.clear_suggestion(sid, 'Simulation failed.')
                         self.logger.warn('Simulation with suggestion_id {} failed. Ignoring and continuing...'.format(sid))
                         continue
                 else:
-                    if all([not hasattr(x, "exit_code") or x.exit_code != 0 for x in simuset.simulations]):
+                    if all([not hasattr(x, "status") or x.status == 'Failed' for x in simuset.simulations]):
                         self.study.clear_suggestion(sid, 'Simulation set failed.')
                         self.logger.warn('All simulations within set with suggestion_id {} failed. Ignoring and continuing...'.format(sid))
                         continue
