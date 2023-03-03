@@ -50,7 +50,7 @@ class Optimizer(object):
         self.study = jcm.optimizer.create_study(domain=self.domain, constraints=self.constraints, **jcm_create_study_kwargs)
         self.study.set_parameters(max_iter=self.max_iter, num_parallel=self.__num_parallel)
         
-    def run(self, objective_func, duplicate_path_levels=0, storage_folder='from_date', storage_base='from_config', use_resultbag=False, transitional_storage_base=None, resource_manager=None, minimize_memory_usage=False, processing_func=None, auto_rerun_failed=1, run_post_process_files=None, additional_keys=None, jcm_solve_kwargs=None, pass_ccosts_to_processing_func=False):
+    def run(self, objective_func, duplicate_path_levels=0, storage_folder='from_date', storage_base='from_config', use_resultbag=False, transitional_storage_base=None, resource_manager=None, minimize_memory_usage=False, processing_func=None, auto_rerun_failed=1, run_post_process_files=None, additional_keys=None, wdir_mode='delete', jcm_solve_kwargs=None, pass_ccosts_to_processing_func=False):
         """Runs the entire optimization study.
         Parameters
         ----------
@@ -78,6 +78,8 @@ class Optimizer(object):
             Refer to function pypmj.core.SimulationSet.run().
         additional_keys : dict, default None
             Refer to function pypmj.core.SimulationSet.run().
+        wdir_mode : {'keep', 'zip', 'delete'}, default 'delete'
+            Refer to function pypmj.core.SimulationSet.run(). If 'zip', the working directories are stored as 'simulations_[suggestion_id].zip' in `storage_folder`.
         jcm_solve_kwargs : dict, default None
             Refer to function pypmj.core.SimulationSet.run().
         pass_ccosts_to_processing_func : bool, default False
@@ -116,7 +118,8 @@ class Optimizer(object):
             # Initialize a SimulationSet and run the simulations.
             simuset = SimulationSet(self.__project, template_keys, combination_mode='list', duplicate_path_levels=duplicate_path_levels, storage_folder=storage_folder, storage_base=storage_base, use_resultbag=use_resultbag, transitional_storage_base=transitional_storage_base, resource_manager=resource_manager, minimize_memory_usage=minimize_memory_usage)
             simuset.make_simulation_schedule()
-            simuset.run(processing_func=processing_func, auto_rerun_failed=auto_rerun_failed, run_post_process_files=run_post_process_files, additional_keys=additional_keys, wdir_mode='delete', jcm_solve_kwargs=jcm_solve_kwargs, pass_ccosts_to_processing_func=pass_ccosts_to_processing_func)
+            zip_file_path = os.path.join(simuset.storage_dir, "simulations_{}.zip".format(suggestion_ids[0]))
+            simuset.run(processing_func=processing_func, auto_rerun_failed=auto_rerun_failed, run_post_process_files=run_post_process_files, additional_keys=additional_keys, wdir_mode=wdir_mode, zip_file_path=zip_file_path, jcm_solve_kwargs=jcm_solve_kwargs, pass_ccosts_to_processing_func=pass_ccosts_to_processing_func)
             simuset.close_store()
             self.__clear_storage_dir(simuset)
             
