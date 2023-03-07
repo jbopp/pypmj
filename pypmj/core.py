@@ -1794,7 +1794,7 @@ class SimulationSet(object):
         self.open_store()
         self.logger.info('Successfully restructured HDF5 store.')
             
-    def make_simulation_schedule(self, fix_h5_duplicated_rows=False):
+    def make_simulation_schedule(self, fix_h5_duplicated_rows=False, constraint_func=None):
         """Makes a schedule by getting a list of simulations that must be
         performed, reorders them to avoid unnecessary calls of JCMgeo, and
         checks the HDF5 store for simulation data which is already known.
@@ -1802,9 +1802,12 @@ class SimulationSet(object):
         case, you can rerun `make_simulation_schedule` with 
         `fix_h5_duplicated_rows=True` to try to automatically fix it.
         Alternatively, you could call the `fix_h5_store`-method yourself.
-        
+        `constraint_func` is a function taking a set of parameter and
+        geometry keys as a dictionary. It should return True if a
+        simulation is to be performed for the respective set. False, if
+        the set is to be skipped.
         """
-        self._get_simulation_list()
+        self._get_simulation_list(constraint_func)
         self._sort_simulations()
         
         # Init the failed simulation list
@@ -1861,7 +1864,7 @@ class SimulationSet(object):
                              'store. Number of stored simulations: {}'.format(
                                  len(self.finished_sim_numbers)))
 
-    def _get_simulation_list(self):
+    def _get_simulation_list(self, constraint_func):
         """Check the `parameters`- and `geometry`-dictionaries for sequences
         and generate a list which has a keys-dictionary for each distinct
         simulation by using the `combination_mode` as specified.
@@ -1930,6 +1933,14 @@ class SimulationSet(object):
             propertyCombinations = []
             for iSim in range(Nsims):
                 propertyCombinations.append(tuple([l[iSim] for l in loopList]))
+        
+        # Remove combinations based on constraint_func.
+        if constraint_func is not None:
+            propertyCombinationsFiltered = [x for x in propertyCombinations if \
+                constraint_func(dict((k, v) for k, v in x))]
+            self.logger.info("Removed {} combinations based on the given constraint function.".format( \
+                len(propertyCombinations) - len(propertyCombinationsFiltered)))
+            propertyCombinations = propertyCombinationsFiltered
 
         self.num_sims = len(propertyCombinations)  # total num of simulations
         if self.num_sims == 1:
