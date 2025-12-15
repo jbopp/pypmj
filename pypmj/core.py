@@ -48,12 +48,12 @@ NEW_DAEMON_DETECTED = hasattr(daemon, 'active_daemon')
 
 # Set warning filters
 warnings.filterwarnings(action='ignore',
-                        message= '.*The\\ Leaf.*is\\ exceeding\\ the\\' + \
-                                 ' maximum\\ recommended\\ rowsize.*\\Z(?ms)')
+                        message= '(?ms).*The\\ Leaf.*is\\ exceeding\\ the\\' + \
+                                 ' maximum\\ recommended\\ rowsize.*\\Z')
 warnings.filterwarnings(action='ignore',
-                        message= '.*your\\ performance\\ may\\ suffer\\ ' + \
+                        message= '(?ms).*your\\ performance\\ may\\ suffer\\ ' + \
                         'as\\ PyTables\\ will\\ pickle\\ object\\ types\\' + \
-                        ' that\\ it\\ cannot.*\\Z(?ms)')
+                        ' that\\ it\\ cannot.*\\Z')
 
 # Set text template for strings replacing class attributes deleted for
 # memory efficiency (occurs if `minimize_memory_usage=True`
@@ -2106,7 +2106,7 @@ class SimulationSet(object):
             if len(vals) == 1:
                 dict_[col] = vals.iat[0]
             else:
-                dict_[col] = pd.to_numeric(vals, errors='ignore').values
+                dict_[col] = pd.to_numeric(vals).values
         return dict_
 
     def _store_metadata(self):

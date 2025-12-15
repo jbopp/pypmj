@@ -230,7 +230,7 @@ def obj_to_fixed_length_Series(obj, length):
         return
     obj = np.array(obj, dtype=dtype)
     series = pd.Series(index=list(range(length)), dtype=dtype)
-    series[:] = np.NaN # Fixes bool-case
+    series[:] = np.nan # Fixes bool-case
     series.loc[:len(obj) - 1] = obj
     return series
 
