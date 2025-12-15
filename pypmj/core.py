@@ -715,7 +715,7 @@ class Simulation(object):
         
         # We try to call the processing_func now. If it fails or its results
         # are not of type dict, it is ignored and the user will be warned
-        signature = inspect.getargspec(processing_func)
+        signature = inspect.getfullargspec(processing_func)
         if len(signature.args) == 1:
             procargs = [jcm_results_to_pass]
         elif len(signature.args) == 2:

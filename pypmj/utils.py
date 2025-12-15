@@ -45,7 +45,7 @@ def is_callable(obj):
 
     """
     if _IS_PYTHON3:
-        return isinstance(obj, collections.Callable)
+        return isinstance(obj, collections.abc.Callable)
     return callable(obj)
 
 def file_content(file_path):
@@ -145,7 +145,7 @@ def assign_kwargs_to_functions(functions, kwargs, ignore_unmatched=True):
 
     # Try to inspect the input arguments of the functions
     try:
-        input_args = [inspect.getargspec(func)[0] for func in functions]
+        input_args = [inspect.getfullargspec(func)[0] for func in functions]
     except Exception as e:
         raise RuntimeError('Unable to inspect the input arguments of' +
                            ' the provided functions. Esception: {}'.format(e))
