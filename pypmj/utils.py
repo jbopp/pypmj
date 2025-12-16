@@ -241,11 +241,12 @@ def computational_costs_to_flat_dict(ccosts, _sub=False):
 
     This is useful to store the computational costs in a pandas
     DataFrame. Keys which have sequence values with a length other than
-    1 are converted to single values, while appending an underscore plus
-    index to the key.
-
+    1 are converted to single values, while only keeping the last value within
+    the sequence. Keeping all sequence values and appending a continuous index
+    to the key does not work if refinement loops of unequal lengths occur for
+    simulations within a simulation set.
+    
     """
-
     # Check validity if this is not a sub dict
     if not _sub:
         verrormsg = 'ccosts must be a dict as returned by JCMsolve.'
@@ -264,20 +265,10 @@ def computational_costs_to_flat_dict(ccosts, _sub=False):
     for key in ccosts:
         if not key == 'title':
             val = ccosts[key]
+            # Sequences longer than 1 occur if a refinement loop was used
             if is_sequence(val):
-                if len(val) == 1:
-                    if isinstance(val[0], (string_types, Number)):
-                        converted[key] = val[0]
-                else:
-                    # Sequences longer than 1 occur if a refinement loop was
-                    # used
-                    for i,v in enumerate(val):
-                        digits = int(np.log10(len(val)))+1
-                        strfmt = '_{0:0'+str(digits)+'d}'
-                        # We do not allow nested sequences
-                        if not is_sequence(v):
-                            if isinstance(v, (string_types, Number)):
-                                converted[key+strfmt.format(i)] = v
+                if isinstance(val[-1], (string_types, Number)):
+                    converted[key] = val[-1]
             else:
                 if isinstance(val, (string_types, Number)):
                     converted[key] = val
